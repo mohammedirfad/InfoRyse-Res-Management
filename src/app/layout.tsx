@@ -1,5 +1,5 @@
 import "./globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 
 const inter = Inter({
@@ -8,10 +8,15 @@ const inter = Inter({
   display: "swap",
 });
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+};
+
 export const metadata: Metadata = {
   title:       "InfoRyse — QR Ordering",
   description: "Digital Menu & QR Ordering SaaS",
-  viewport:    "width=device-width, initial-scale=1, maximum-scale=1",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
