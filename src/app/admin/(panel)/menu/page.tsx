@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { LayoutGrid, List, Plus, Search, X, Pencil, Trash2, Star, Flame, ChefHat, Sparkles } from "lucide-react";
 import { formatRupees } from "@/lib/utils";
+import ImageUpload from "@/components/ImageUpload";
 
 type Category = { id: string; name: string };
 type MenuItem = {
@@ -13,12 +14,14 @@ type MenuItem = {
 
 type EditForm = {
   name: string; price: string; categoryId: string; isVeg: boolean; description: string;
-  isAvailable: boolean; isBestseller: boolean; isPopular: boolean; isChefsPick: boolean; isTodaySpecial: boolean;
+  isAvailable: boolean; isBestseller: boolean; isPopular: boolean; isChefsPick: boolean;
+  isTodaySpecial: boolean; imageUrl: string;
 };
 
 const BLANK_FORM: EditForm = {
   name: "", price: "", categoryId: "", isVeg: true, description: "",
-  isAvailable: true, isBestseller: false, isPopular: false, isChefsPick: false, isTodaySpecial: false,
+  isAvailable: true, isBestseller: false, isPopular: false, isChefsPick: false,
+  isTodaySpecial: false, imageUrl: "",
 };
 
 const FOOD_EMOJIS_BY_CAT: Record<string, string> = {
@@ -40,7 +43,10 @@ export default function MenuManagementPage() {
   const [viewMode, setViewMode]     = useState<"grid" | "list">("grid");
   const [editItem, setEditItem]     = useState<MenuItem | null>(null);
   const [showAdd, setShowAdd]       = useState(false);
-  const [form, setForm]             = useState<EditForm>(BLANK_FORM);
+  const [form, setForm]             = useState<EditForm>({
+    ...BLANK_FORM,
+    imageUrl: "",
+  });
   const [newCatName, setNewCatName] = useState("");
 
   async function load() {
@@ -62,6 +68,7 @@ export default function MenuManagementPage() {
       isAvailable: item.isAvailable, isBestseller: item.isBestseller ?? false,
       isPopular: item.isPopular ?? false, isChefsPick: item.isChefsPick ?? false,
       isTodaySpecial: item.isTodaySpecial ?? false,
+      imageUrl: item.imageUrl ?? "",
     });
     setShowAdd(false);
   }
@@ -76,7 +83,7 @@ export default function MenuManagementPage() {
     const body = {
       name: form.name, priceCents: Math.round(Number(form.price) * 100),
       categoryId: form.categoryId, isVeg: form.isVeg, description: form.description,
-      isAvailable: form.isAvailable,
+      isAvailable: form.isAvailable, imageUrl: form.imageUrl || null,
     };
     if (editItem) {
       await fetch(`/api/admin/menu-items/${editItem.id}`, {
@@ -275,12 +282,15 @@ export default function MenuManagementPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-5 space-y-4">
-            {/* Image placeholder */}
-            <div className="h-32 rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 cursor-pointer hover:border-[#132A1E]/30 transition-colors">
-              <span className="text-3xl">{catEmoji(categories.find((c) => c.id === form.categoryId)?.name ?? "")}</span>
-              <p className="text-xs text-gray-400">Click to upload image</p>
-              <p className="text-[10px] text-gray-300">Recommended: 800 × 600 px</p>
-            </div>
+            {/* Image upload */}
+            <ImageUpload
+              value={form.imageUrl}
+              onChange={url => setForm(f => ({ ...f, imageUrl: url }))}
+              folder="menu-items"
+              label="Upload dish photo"
+              hint="Recommended: 800×800px · JPEG/PNG/WebP · Max 5MB"
+              aspectRatio="square"
+            />
 
             <div className="space-y-3">
               <div>

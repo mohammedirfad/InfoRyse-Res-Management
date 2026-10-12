@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, Upload, MapPin, Phone, Mail, Globe, Instagram, Facebook, Youtube, Eye } from "lucide-react";
+import { Save, MapPin, Phone, Mail, Globe, Instagram, Facebook, Youtube, Eye } from "lucide-react";
+import ImageUpload from "@/components/ImageUpload";
 
 const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
@@ -10,6 +11,8 @@ type Hours = { open: string; close: string; enabled: boolean };
 export default function RestaurantProfilePage() {
   const [tab, setTab] = useState("basic");
   const [saved, setSaved] = useState(false);
+  const [logoUrl, setLogoUrl]       = useState("");
+  const [coverUrl, setCoverUrl]     = useState("");
   const [name, setName]     = useState("Riverside Café");
   const [tagline, setTagline] = useState("Good Food, Brighter Moments");
   const [cuisine, setCuisine] = useState("Multi Cuisine");
@@ -157,24 +160,38 @@ export default function RestaurantProfilePage() {
             <>
               <div className="card p-5 space-y-4">
                 <h2 className="font-semibold text-gray-900">Restaurant Logo</h2>
-                <div className="h-32 rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-[#132A1E]/40 hover:bg-gray-50 transition-colors">
-                  <Upload className="h-6 w-6 text-gray-300" />
-                  <p className="text-sm text-gray-400">Upload Logo</p>
-                  <p className="text-xs text-gray-300">Recommended: 512 × 512 px (Max 5MB)</p>
-                </div>
-                <div className="h-32 rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-[#132A1E]/40 hover:bg-gray-50 transition-colors">
-                  <Upload className="h-6 w-6 text-gray-300" />
-                  <p className="text-sm text-gray-400">Upload Cover Image</p>
-                  <p className="text-xs text-gray-300">Recommended: 1200 × 400 px (Max 5MB)</p>
-                </div>
+                <ImageUpload
+                  value={logoUrl}
+                  onChange={setLogoUrl}
+                  folder="restaurant-logos"
+                  label="Upload Restaurant Logo"
+                  hint="Recommended: 512×512px · PNG/WebP · Max 5MB"
+                  aspectRatio="square"
+                  className="max-w-[160px]"
+                />
+                <h2 className="font-semibold text-gray-900 pt-2">Cover Image</h2>
+                <ImageUpload
+                  value={coverUrl}
+                  onChange={setCoverUrl}
+                  folder="covers"
+                  label="Upload Cover Image"
+                  hint="Recommended: 1200×400px · JPEG/WebP · Max 5MB"
+                  aspectRatio="landscape"
+                />
                 {/* Restaurant images */}
                 <div>
                   <p className="text-xs font-medium text-gray-600 mb-2">Restaurant Images</p>
                   <div className="grid grid-cols-3 gap-2">
-                    {["Cover Image", "Interior Image", "Food Image"].map((label) => (
-                      <div key={label} className="h-24 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 flex flex-col items-center justify-center gap-1 cursor-pointer border-2 border-dashed border-gray-200 hover:border-[#132A1E]/30 transition-colors">
-                        <Upload className="h-4 w-4 text-gray-300" />
-                        <p className="text-[10px] text-gray-400 text-center">{label}</p>
+                    {(["Cover Image", "Interior Image", "Food Image"] as const).map((label) => (
+                      <div key={label}>
+                        <p className="text-[10px] text-gray-400 mb-1 text-center">{label}</p>
+                        <ImageUpload
+                          folder="covers"
+                          label=""
+                          hint=""
+                          aspectRatio="square"
+                          onChange={() => {}}
+                        />
                       </div>
                     ))}
                   </div>
