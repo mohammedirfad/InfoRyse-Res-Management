@@ -1,0 +1,177 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  OWNER
+  STAFF
+}
+
+enum TableStatus {
+  AVAILABLE
+  OCCUPIED
+  RESERVED
+  OUT_OF_SERVICE
+}
+
+enum OrderStatus {
+  NEW
+  ACCEPTED
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+model Restaurant {
+  id         String   @id @default(uuid())
+  slug       String   @unique
+  name       String
+  isActive   Boolean  @default(true)
+  openNow    Boolean  @default(true)
+  latitude   Float?
+  longitude  Float?
+  taxName    String?  @default("GST")
+  taxPercent Float?   @default(5.0)
+  logoUrl    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  users      User[]
+  categories Category[]
+  menuItems  MenuItem[]
+  tables     Table[]
+  orders     Order[]
+
+  @@index([slug])
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  role         Role
+  restaurantId String? // null for SUPER_ADMIN
+  restaurant   Restaurant? @relation(fields: [restaurantId], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@index([restaurantId])
+}
+
+model OtpCode {
+  id        String   @id @default(uuid())
+  userId    String
+  codeHash  String
+  purpose   String // "LOGIN_2FA"
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Category {
+  id           String   @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  name         String
+  position     Int      @default(0)
+  isActive     Boolean  @default(true)
+  deletedAt    DateTime?
+
+  menuItems MenuItem[]
+
+  @@index([restaurantId])
+}
+
+model MenuItem {
+  id           String   @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  categoryId   String
+  category     Category @relation(fields: [categoryId], references: [id])
+  name         String
+  description  String?
+  priceCents   Int      // store money as integer (paise)
+  imageUrl     String?
+  isVeg        Boolean  @default(true)
+  isAvailable  Boolean  @default(true)
+  deletedAt    DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([restaurantId])
+}
+
+model Table {
+  id           String      @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id])
+  label        String      // e.g. "T1", "Table 5"
+  section      String?     // e.g. "Indoor", "Outdoor"
+  capacity     Int?
+  status       TableStatus @default(AVAILABLE)
+  qrToken      String      @unique // immutable, random — regenerable without touching label
+  deletedAt    DateTime?
+  createdAt    DateTime    @default(now())
+
+  orders Order[]
+
+  @@index([restaurantId])
+}
+
+model Order {
+  id             String      @id @default(uuid())
+  restaurantId   String
+  restaurant     Restaurant  @relation(fields: [restaurantId], references: [id])
+  tableId        String?
+  table          Table?      @relation(fields: [tableId], references: [id])
+  orderNumber    Int         // per-restaurant sequential, assigned at insert
+  customerName   String?
+  customerPhone  String?
+  status         OrderStatus @default(NEW)
+  subtotalCents  Int
+  totalCents     Int
+  idempotencyKey String      @unique
+  notes          String?
+  orderType      String?
+  paymentMethod  String?
+  customerEmail  String?
+  createdByStaff String?     // userId if staff created it manually
+  createdAt      DateTime    @default(now())
+
+  items          OrderItem[]
+  statusHistory  OrderStatusHistory[]
+
+  @@index([restaurantId, status, createdAt])
+  @@unique([restaurantId, orderNumber])
+}
+
+model OrderItem {
+  id         String  @id @default(uuid())
+  orderId    String
+  order      Order   @relation(fields: [orderId], references: [id])
+  menuItemId String?
+  nameSnapshot  String // frozen at order time — never follows later menu edits
+  priceCentsSnapshot Int
+  quantity   Int
+
+  @@index([orderId])
+}
+
+model OrderStatusHistory {
+  id        String      @id @default(uuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id])
+  status    OrderStatus
+  changedBy String?     // userId, null if system
+  createdAt DateTime    @default(now())
+
+  @@index([orderId])
+}

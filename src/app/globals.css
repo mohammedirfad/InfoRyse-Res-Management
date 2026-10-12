@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Shared components ─────────────────────────────────────────────────────── */
+.card {
+  @apply bg-white rounded-2xl shadow-sm border border-black/5;
+}
+.card-hover {
+  @apply bg-white rounded-2xl shadow-sm border border-black/5 hover:shadow-md hover:border-black/10 transition-all duration-200;
+}
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-medium
+    transition-all duration-150 active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none cursor-pointer;
+}
+.btn-ghost {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm
+    hover:bg-black/5 transition-colors duration-150 cursor-pointer;
+}
+.input {
+  @apply w-full rounded-xl border border-black/10 px-3.5 py-2.5 text-sm bg-white
+    focus:outline-none focus:ring-2 focus:ring-offset-0 focus:border-transparent transition-shadow;
+}
+.badge {
+  @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+}
+.divider {
+  @apply border-t border-black/5;
+}
+
+/* ─── Forest / Admin theme ──────────────────────────────────────────────────── */
+.admin-sidebar {
+  @apply bg-[#132A1E] text-white;
+}
+.admin-nav-item {
+  @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-white/70
+    hover:bg-white/10 hover:text-white transition-colors duration-150 cursor-pointer;
+}
+.admin-nav-item-active {
+  @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm bg-white/15 text-white font-medium;
+}
+
+/* ─── Navy / Super Admin theme ──────────────────────────────────────────────── */
+.super-sidebar {
+  @apply bg-[#0B1736] text-white;
+}
+.super-nav-item {
+  @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-white/60
+    hover:bg-white/10 hover:text-white transition-colors duration-150 cursor-pointer;
+}
+.super-nav-item-active {
+  @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm bg-white/15 text-white font-medium;
+}
+
+/* ─── Stat card ─────────────────────────────────────────────────────────────── */
+.stat-card {
+  @apply card p-5 flex flex-col gap-1;
+}
+
+/* ─── Table styles ──────────────────────────────────────────────────────────── */
+.data-table th {
+  @apply text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3 text-left bg-gray-50;
+}
+.data-table td {
+  @apply px-4 py-3 text-sm border-t border-black/5;
+}
+.data-table tr:hover td {
+  @apply bg-gray-50/60;
+}
+
+/* ─── Animations ────────────────────────────────────────────────────────────── */
+@keyframes slide-up {
+  from { transform: translateY(16px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes pop {
+  from { transform: scale(0.85); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse-ring {
+  0%   { transform: scale(0.9); opacity: 0.7; }
+  50%  { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.7; }
+}
+
+.animate-slide-up       { animation: slide-up       0.25s ease-out; }
+.animate-slide-in-right { animation: slide-in-right 0.3s  ease-out; }
+.animate-pop            { animation: pop            0.25s ease-out; }
+.animate-fade-in        { animation: fade-in        0.3s  ease-out; }
+.animate-pulse-ring     { animation: pulse-ring     2s    ease-in-out infinite; }
+
+/* ─── Scrollbar ─────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #0001; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #0003; }
