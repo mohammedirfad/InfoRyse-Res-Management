@@ -121,7 +121,7 @@ export async function POST(req: Request) {
     // 8) Find or create a TableSession for this table (groups all orders for one sitting).
     // A new session starts when the table is marked OCCUPIED.
     // All orders from this QR scan attach to the same open session.
-    const session = await db.$transaction(async (tx) => {
+    const session = await db.$transaction(async (tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]) => {
       // Find an open session for this table
       let tableSession = await tx.tableSession.findFirst({
         where: {

@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     const body = BodySchema.parse(await req.json());
     const slug = await uniqueSlug(body.name);
 
-    const restaurant = await db.$transaction(async (tx) => {
+    const restaurant = await db.$transaction(async (tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]) => {
       const r = await tx.restaurant.create({ data: { name: body.name, slug } });
       const passwordHash = await hashPassword(body.ownerTempPassword);
       await tx.user.create({

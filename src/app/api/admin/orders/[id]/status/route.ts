@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import type { Prisma } from "@prisma/client";
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   NEW: ["ACCEPTED", "CANCELLED"],
@@ -33,13 +34,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       );
     }
 
-    const updated = await db.$transaction(async (tx) => {
-      const u = await tx.order.update({ where: { id: order.id }, data: { status: nextStatus } });
-      await tx.orderStatusHistory.create({
+    await db.$transaction([
+      db.order.update({ where: { id: order.id }, data: { status: nextStatus } }),
+      db.orderStatusHistory.create({
         data: { orderId: order.id, status: nextStatus, changedBy: userId },
-      });
-      return u;
-    });
+      }),
+    ]);
+    const updated = await db.order.findUnique({ where: { id: order.id } });
 
     return Response.json({ order: updated });
   } catch (err) {
