@@ -118,31 +118,55 @@ export async function POST(req: Request) {
     });
     const nextOrderNumber = (lastOrder?.orderNumber ?? 0) + 1;
 
-    // 8) Single transaction — order + its items are created together or not at all.
-    const order = await db.$transaction(async (tx) => {
+    // 8) Find or create a TableSession for this table (groups all orders for one sitting).
+    // A new session starts when the table is marked OCCUPIED.
+    // All orders from this QR scan attach to the same open session.
+    const session = await db.$transaction(async (tx) => {
+      // Find an open session for this table
+      let tableSession = await tx.tableSession.findFirst({
+        where: {
+          tableId:     table.id,
+          restaurantId: restaurant.id,
+          status:      "OPEN",
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      // No open session → create one
+      if (!tableSession) {
+        tableSession = await tx.tableSession.create({
+          data: {
+            restaurantId: restaurant.id,
+            tableId:      table.id,
+            status:       "OPEN",
+          },
+        });
+      }
+
       const created = await tx.order.create({
         data: {
-          restaurantId: restaurant.id,
-          tableId: table.id,
-          orderNumber: nextOrderNumber,
+          restaurantId:  restaurant.id,
+          tableId:       table.id,
+          tableSessionId: tableSession.id,
+          orderNumber:   nextOrderNumber,
           customerName:  body.customerName,
           customerPhone: body.customerPhone,
           customerEmail: (body as any).customerEmail,
-          notes: body.notes,
-          orderType: body.orderType ?? "DINE_IN",
+          notes:         body.notes,
+          orderType:     body.orderType ?? "DINE_IN",
           paymentMethod: body.paymentMethod ?? "PAY_AT_RESTAURANT",
-          status: "NEW",
+          status:        "NEW",
           subtotalCents,
-          totalCents: subtotalCents, // extend here once taxes/charges are modeled
+          totalCents:    subtotalCents,
           idempotencyKey: body.idempotencyKey,
           items: {
             create: body.items.map((line) => {
               const dbItem = dbItemById.get(line.menuItemId)!;
               return {
-                menuItemId: dbItem.id,
-                nameSnapshot: dbItem.name,
+                menuItemId:         dbItem.id,
+                nameSnapshot:       dbItem.name,
                 priceCentsSnapshot: dbItem.priceCents,
-                quantity: line.quantity,
+                quantity:           line.quantity,
               };
             }),
           },
@@ -150,10 +174,10 @@ export async function POST(req: Request) {
         },
         include: { items: true },
       });
-      return created;
+      return { order: created, tableSessionId: tableSession.id };
     });
 
-    return Response.json({ order }, { status: 201 });
+    return Response.json({ order: session.order, tableSessionId: session.tableSessionId }, { status: 201 });
   } catch (err) {
     console.error("[order:create]", err);
     const msg = String(err);

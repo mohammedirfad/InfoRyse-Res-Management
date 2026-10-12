@@ -44,11 +44,12 @@ model Restaurant {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  users      User[]
-  categories Category[]
-  menuItems  MenuItem[]
-  tables     Table[]
-  orders     Order[]
+  users         User[]
+  categories    Category[]
+  menuItems     MenuItem[]
+  tables        Table[]
+  orders        Order[]
+  tableSessions TableSession[]
 
   @@index([slug])
 }
@@ -113,17 +114,37 @@ model Table {
   id           String      @id @default(uuid())
   restaurantId String
   restaurant   Restaurant  @relation(fields: [restaurantId], references: [id])
-  label        String      // e.g. "T1", "Table 5"
-  section      String?     // e.g. "Indoor", "Outdoor"
+  label        String
+  section      String?
   capacity     Int?
   status       TableStatus @default(AVAILABLE)
-  qrToken      String      @unique // immutable, random — regenerable without touching label
+  qrToken      String      @unique
   deletedAt    DateTime?
   createdAt    DateTime    @default(now())
 
-  orders Order[]
+  orders       Order[]
+  sessions     TableSession[]
 
   @@index([restaurantId])
+}
+
+/// Tracks a group of orders placed at one table in one sitting.
+/// All orders from the same QR scan session attach to the same TableSession.
+/// Finalized = staff has generated the final bill; Paid = payment collected.
+model TableSession {
+  id             String    @id @default(uuid())
+  restaurantId   String
+  restaurant     Restaurant @relation(fields: [restaurantId], references: [id])
+  tableId        String
+  table          Table     @relation(fields: [tableId], references: [id])
+  status         String    @default("OPEN")
+  finalizedAt    DateTime?
+  paidAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  orders         Order[]
+
+  @@index([restaurantId, tableId, status])
 }
 
 model Order {
@@ -132,7 +153,9 @@ model Order {
   restaurant     Restaurant  @relation(fields: [restaurantId], references: [id])
   tableId        String?
   table          Table?      @relation(fields: [tableId], references: [id])
-  orderNumber    Int         // per-restaurant sequential, assigned at insert
+  tableSessionId String?
+  tableSession   TableSession? @relation(fields: [tableSessionId], references: [id])
+  orderNumber    Int
   customerName   String?
   customerPhone  String?
   status         OrderStatus @default(NEW)
@@ -143,13 +166,14 @@ model Order {
   orderType      String?
   paymentMethod  String?
   customerEmail  String?
-  createdByStaff String?     // userId if staff created it manually
+  createdByStaff String?
   createdAt      DateTime    @default(now())
 
   items          OrderItem[]
   statusHistory  OrderStatusHistory[]
 
   @@index([restaurantId, status, createdAt])
+  @@index([tableSessionId])
   @@unique([restaurantId, orderNumber])
 }
 
