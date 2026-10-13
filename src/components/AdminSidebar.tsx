@@ -76,10 +76,16 @@ export default function AdminSidebar({ restaurant }: Props) {
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== "/admin/dashboard" && pathname.startsWith(href));
           return (
-            <Link key={href} href={href}
-              className={active ? "admin-nav-item-active" : "admin-nav-item"}>
+            <Link
+              key={href}
+              href={href}
+              prefetch={true}
+              className={`${
+                active ? "admin-nav-item-active" : "admin-nav-item"
+              } active:scale-[0.98] transition-all`}
+            >
               <Icon className="h-4 w-4 flex-shrink-0" />
-              <span className="truncate text-sm">{label}</span>
+              <span className="truncate text-sm font-medium">{label}</span>
             </Link>
           );
         })}

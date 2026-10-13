@@ -9,7 +9,18 @@ export async function GET(
   try {
     const restaurant = await db.restaurant.findUnique({
       where: { slug: params.slug },
-      select: { id: true, name: true, isActive: true, openNow: true, taxName: true, taxPercent: true, logoUrl: true },
+      select: {
+        id: true,
+        name: true,
+        isActive: true,
+        openNow: true,
+        taxName: true,
+        taxPercent: true,
+        logoUrl: true,
+        discountActive: true,
+        discountPercent: true,
+        discountName: true,
+      },
     });
 
     if (!restaurant || !restaurant.isActive) {
@@ -61,11 +72,14 @@ export async function GET(
     return new Response(
       JSON.stringify({
         restaurant: {
-          name:       restaurant.name,
-          openNow:    restaurant.openNow,
-          logoUrl:    restaurant.logoUrl ?? null,
-          taxName:    restaurant.taxName    ?? "GST",
-          taxPercent: restaurant.taxPercent ?? 5,
+          name:            restaurant.name,
+          openNow:         restaurant.openNow,
+          logoUrl:         restaurant.logoUrl ?? null,
+          taxName:         restaurant.taxName    ?? "GST",
+          taxPercent:      restaurant.taxPercent ?? 5,
+          discountActive:  restaurant.discountActive ?? false,
+          discountPercent: restaurant.discountPercent ?? 0,
+          discountName:    restaurant.discountName ?? "Special Offer",
         },
         table: {
           id:              table.id,

@@ -40,8 +40,11 @@ model Restaurant {
   longitude  Float?
   taxName    String?  @default("GST")
   taxPercent Float?   @default(5.0)
-  logoUrl    String?
-  createdAt  DateTime @default(now())
+  logoUrl          String?
+  discountActive   Boolean  @default(false)
+  discountPercent  Float?   @default(0.0)
+  discountName     String?  @default("Special Offer")
+  createdAt        DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   users         User[]

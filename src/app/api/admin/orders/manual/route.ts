@@ -55,10 +55,26 @@ export async function POST(req: Request) {
     const nextNum = (lastOrder?.orderNumber ?? 0) + 1;
 
     const order = await db.$transaction(async tx => {
+      let tableSessionId: string | null = null;
+      if (body.tableId) {
+        let session = await tx.tableSession.findFirst({
+          where: { tableId: body.tableId, restaurantId, status: "OPEN" },
+        });
+        if (!session) {
+          session = await tx.tableSession.create({
+            data: { tableId: body.tableId, restaurantId, status: "OPEN" },
+          });
+        }
+        tableSessionId = session.id;
+        // ensure table is marked OCCUPIED
+        await tx.table.update({ where: { id: body.tableId }, data: { status: "OCCUPIED" } });
+      }
+
       return tx.order.create({
         data: {
           restaurantId,
           tableId:       body.tableId,
+          tableSessionId,
           orderNumber:   nextNum,
           customerName:  body.customerName,
           customerPhone: body.customerPhone,

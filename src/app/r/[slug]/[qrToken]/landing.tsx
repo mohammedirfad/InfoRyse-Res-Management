@@ -37,9 +37,19 @@ interface LandingProps {
   cartTotalCents?: number;
   slug:            string;
   qrToken:         string;
+  discountActive?: boolean;
+  discountPercent?: number;
+  discountName?:   string;
   onEnterMenu:     () => void;
   onOpenAssist?:   () => void;
 }
+
+const HERO_BG_IMAGES = [
+  "https://images.unsplash.com/photo-1544025162-d76694265947?w=1200&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=1200&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1668236543090-82eba5ee5976?w=1200&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1604382355076-af4b0eb60143?w=1200&auto=format&fit=crop&q=80",
+];
 
 const FOOD_EMOJIS = ["🍕", "🍔", "🍜", "🍛", "🥗", "🍱", "🥞", "🍰", "🥤", "🍸", "🫕", "🥩", "🥘", "🍲", "🧆"];
 
@@ -60,13 +70,25 @@ export function LandingPage({
   cartTotalCents = 0,
   slug,
   qrToken,
+  discountActive,
+  discountPercent,
+  discountName,
   onEnterMenu,
   onOpenAssist,
 }: LandingProps) {
   const [activeSlide, setActiveSlide] = useState(0);
-  const [isPaused, setIsPaused] = useState(false);
-  const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [isPaused, setIsPaused]       = useState(false);
+  const [bgIndex, setBgIndex]         = useState(0);
+  const [imgErrors, setImgErrors]     = useState<Record<string, boolean>>({});
+  const containerRef                  = useRef<HTMLDivElement>(null);
+
+  // Background food photography cinematic slideshow
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setBgIndex((prev) => (prev + 1) % HERO_BG_IMAGES.length);
+    }, 4600);
+    return () => clearInterval(timer);
+  }, []);
 
   // Auto-advance featured dishes showcase
   const displayItems = featuredItems.length > 0 ? featuredItems.slice(0, 5) : [];
@@ -88,13 +110,28 @@ export function LandingPage({
       style={{ scrollBehavior: "smooth" }}
     >
       {/* ── SECTION 1: Full-Screen Luxury Hero ────────────────────────────────── */}
-      <section
-        className="snap-start relative min-h-screen flex flex-col justify-between overflow-hidden px-5 py-6"
-        style={{
-          background:
-            "radial-gradient(ellipse at 50% 15%, #183d29 0%, #0d2417 40%, #081710 75%, #050d09 100%)",
-        }}
-      >
+      <section className="snap-start relative min-h-screen flex flex-col justify-between overflow-hidden px-5 py-6">
+        {/* Animated Background Food Images with Cinematic Ken Burns Transitions */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+          <AnimatePresence initial={false}>
+            <motion.div
+              key={bgIndex}
+              initial={{ opacity: 0, scale: 1.12 }}
+              animate={{ opacity: 0.38, scale: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 1.8, ease: "easeInOut" }}
+              className="absolute inset-0 bg-cover bg-center"
+              style={{ backgroundImage: `url(${HERO_BG_IMAGES[bgIndex]})` }}
+            />
+          </AnimatePresence>
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(ellipse at 50% 20%, rgba(19, 42, 30, 0.72) 0%, rgba(13, 36, 23, 0.9) 55%, rgba(5, 13, 9, 0.98) 100%)",
+            }}
+          />
+        </div>
         {/* Dynamic ambient glow & light streaks */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
           <motion.div
@@ -367,18 +404,32 @@ export function LandingPage({
             </div>
           </motion.div>
 
-          {/* Cashback / Perk Banner */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.6, delay: 0.4 }}
-            className="w-full rounded-2xl px-3.5 py-2 bg-gradient-to-r from-amber-400/15 via-amber-300/10 to-amber-500/15 border border-amber-400/25 flex items-center justify-center gap-2"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin" />
-            <span className="text-amber-200 text-xs font-semibold">
-              Instant 10% dining perk applied at bill
-            </span>
-          </motion.div>
+          {/* Dynamic Campaign Discount or Clean Dining Badge */}
+          {discountActive && (discountPercent ?? 0) > 0 ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.6, delay: 0.4 }}
+              className="w-full rounded-2xl px-3.5 py-2.5 bg-gradient-to-r from-emerald-500/25 via-teal-400/20 to-emerald-500/25 border border-emerald-400/35 flex items-center justify-center gap-2"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-300 animate-pulse" />
+              <span className="text-emerald-200 text-xs font-bold">
+                {discountName || "Special Festive Offer"}: Flat {discountPercent}% OFF applied!
+              </span>
+            </motion.div>
+          ) : (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.6, delay: 0.4 }}
+              className="w-full rounded-2xl px-3.5 py-2 bg-white/[0.05] border border-white/10 flex items-center justify-center gap-2"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span className="text-white/70 text-xs font-semibold">
+                Dine In · Contactless QR Menu & Ordering
+              </span>
+            </motion.div>
+          )}
         </div>
 
         {/* ── NOT OCCUPIED NOTICE ────────────────────────────────────────────── */}

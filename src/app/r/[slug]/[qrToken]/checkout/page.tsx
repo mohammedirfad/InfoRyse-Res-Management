@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ChevronRight, Shield } from "lucide-react";
 import { useCart, formatRupees, getStoredOrders, saveStoredOrders } from "@/components/CartContext";
@@ -36,10 +36,33 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
   const [fieldErrors, setFieldErrors] = useState<{ name?: string; contact?: string }>({});
   const [idempotencyKey]        = useState(() => crypto.randomUUID());
 
+  const [restaurantDiscount, setRestaurantDiscount] = useState<{
+    active: boolean;
+    percent: number;
+    name: string;
+  }>({ active: false, percent: 0, name: "" });
+
+  useEffect(() => {
+    fetch(`/api/public/menu/${params.slug}/${params.qrToken}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.restaurant?.discountActive && (data.restaurant?.discountPercent ?? 0) > 0) {
+          setRestaurantDiscount({
+            active: true,
+            percent: data.restaurant.discountPercent,
+            name: data.restaurant.discountName || "Special Offer",
+          });
+        }
+      })
+      .catch(() => {});
+  }, [params.slug, params.qrToken]);
+
   const subtotal   = totalCents;
   const tax        = Math.round(subtotal * TAX_RATE);
-  const discount   = promoFromCart === "WELCOME10" ? Math.round(subtotal * 0.1) : 0;
-  const grandTotal = subtotal + tax + PACKING - discount;
+  const discount   = restaurantDiscount.active
+    ? Math.round(subtotal * (restaurantDiscount.percent / 100))
+    : 0;
+  const grandTotal = Math.max(0, subtotal + tax + PACKING - discount);
 
   function validate() {
     const errs: { name?: string; contact?: string } = {};
@@ -248,8 +271,9 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
             <div className="flex justify-between text-gray-500"><span>Taxes (5%)</span><span>{formatRupees(tax)}</span></div>
             <div className="flex justify-between text-gray-500"><span>Packing</span><span>{formatRupees(PACKING)}</span></div>
             {discount > 0 && (
-              <div className="flex justify-between text-green-600 font-medium">
-                <span>Promo (WELCOME10)</span><span>−{formatRupees(discount)}</span>
+              <div className="flex justify-between text-emerald-700 font-semibold">
+                <span>{restaurantDiscount.name} ({restaurantDiscount.percent}% OFF)</span>
+                <span>−{formatRupees(discount)}</span>
               </div>
             )}
             <div className="flex justify-between font-bold text-gray-900 text-base pt-2 border-t border-black/5">

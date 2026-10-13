@@ -165,7 +165,9 @@ export default function BillPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h1 className="text-lg font-bold">Table {selectedTable.label} — Running Bill</h1>
-                  <p className="text-white/50 text-sm">{session ? `${session.orderCount} order${session.orderCount > 1 ? "s" : ""} in this session` : "Loading…"}</p>
+                  <p className="text-white/50 text-sm">
+                    {loading ? "Loading…" : session ? `${session.orderCount} order${session.orderCount > 1 ? "s" : ""} in this session` : "No active orders yet"}
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => loadBill(selectedTable)}

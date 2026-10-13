@@ -5,10 +5,13 @@ import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 export const dynamic = "force-dynamic";
 
 const PatchSchema = z.object({
-  name:       z.string().min(1).max(100).optional(),
-  openNow:    z.boolean().optional(),
-  taxName:    z.string().max(30).optional(),
-  taxPercent: z.number().min(0).max(30).optional(),
+  name:            z.string().min(1).max(100).optional(),
+  openNow:         z.boolean().optional(),
+  taxName:         z.string().max(30).optional(),
+  taxPercent:      z.number().min(0).max(30).optional(),
+  discountActive:  z.boolean().optional(),
+  discountPercent: z.number().min(0).max(100).optional(),
+  discountName:    z.string().max(100).optional(),
 });
 
 export async function GET() {

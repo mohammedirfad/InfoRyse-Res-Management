@@ -22,7 +22,7 @@ export async function GET(
     if (!table) return Response.json({ error: "Table not found" }, { status: 404 });
 
     // Get the currently open session
-    const session = await db.tableSession.findFirst({
+    let session = await db.tableSession.findFirst({
       where:   { tableId: params.tableId, restaurantId, status: "OPEN" },
       orderBy: { createdAt: "desc" },
       include: {
@@ -33,6 +33,35 @@ export async function GET(
         },
       },
     });
+
+    // If no open session exists yet, check if there are recent orders placed for this table
+    if (!session) {
+      const recentOrders = await db.order.findMany({
+        where: {
+          tableId: params.tableId,
+          restaurantId,
+          tableSessionId: null,
+          status: { notIn: ["CANCELLED"] },
+          createdAt: { gte: new Date(Date.now() - 12 * 60 * 60 * 1000) },
+        },
+        include: { items: true },
+        orderBy: { createdAt: "asc" },
+      });
+
+      if (recentOrders.length > 0) {
+        const createdSession = await db.tableSession.create({
+          data: { tableId: params.tableId, restaurantId, status: "OPEN" },
+        });
+        await db.order.updateMany({
+          where: { id: { in: recentOrders.map(o => o.id) } },
+          data:  { tableSessionId: createdSession.id },
+        });
+        session = {
+          ...createdSession,
+          orders: recentOrders,
+        } as any;
+      }
+    }
 
     if (!session) {
       return Response.json({ session: null, table });

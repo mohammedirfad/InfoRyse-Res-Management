@@ -36,29 +36,55 @@ function catEmoji(name: string) {
 }
 
 export default function MenuManagementPage() {
-  const [items, setItems]           = useState<MenuItem[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [items, setItems]               = useState<MenuItem[]>([]);
+  const [categories, setCategories]     = useState<Category[]>([]);
+  const [loading, setLoading]           = useState(true);
   const [activeFilter, setActiveFilter] = useState<string>("all");
-  const [search, setSearch]         = useState("");
-  const [viewMode, setViewMode]     = useState<"grid" | "list">("grid");
-  const [editItem, setEditItem]     = useState<MenuItem | null>(null);
-  const [showAdd, setShowAdd]       = useState(false);
-  const [form, setForm]             = useState<EditForm>({
+  const [search, setSearch]             = useState("");
+  const [viewMode, setViewMode]         = useState<"grid" | "list">("grid");
+  const [editItem, setEditItem]         = useState<MenuItem | null>(null);
+  const [showAdd, setShowAdd]           = useState(false);
+  const [form, setForm]                 = useState<EditForm>({
     ...BLANK_FORM,
     imageUrl: "",
   });
-  const [newCatName, setNewCatName] = useState("");
+  const [newCatName, setNewCatName]     = useState("");
 
   async function load() {
-    const [ir, cr] = await Promise.all([fetch("/api/admin/menu-items"), fetch("/api/admin/categories")]);
-    const itemsData = (await ir.json()).items ?? [];
-    const catsData  = (await cr.json()).categories ?? [];
-    setItems(itemsData);
-    setCategories(catsData);
-    if (!form.categoryId && catsData[0]) setForm((f) => ({ ...f, categoryId: catsData[0].id }));
+    try {
+      const [ir, cr] = await Promise.all([
+        fetch("/api/admin/menu-items", { cache: "no-store" }),
+        fetch("/api/admin/categories", { cache: "no-store" }),
+      ]);
+      const itemsData = (await ir.json()).items ?? [];
+      const catsData  = (await cr.json()).categories ?? [];
+      setItems(itemsData);
+      setCategories(catsData);
+      try {
+        sessionStorage.setItem("inforyse_admin_items", JSON.stringify(itemsData));
+        sessionStorage.setItem("inforyse_admin_cats", JSON.stringify(catsData));
+      } catch { /* ignore */ }
+      if (!form.categoryId && catsData[0]) setForm((f) => ({ ...f, categoryId: catsData[0].id }));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    // Instant cache-first load
+    try {
+      const cachedItems = sessionStorage.getItem("inforyse_admin_items");
+      const cachedCats = sessionStorage.getItem("inforyse_admin_cats");
+      if (cachedItems && cachedCats) {
+        setItems(JSON.parse(cachedItems));
+        setCategories(JSON.parse(cachedCats));
+        setLoading(false);
+      }
+    } catch { /* ignore */ }
+    load();
+  }, []);
 
   function openEdit(item: MenuItem) {
     setEditItem(item);
@@ -187,7 +213,20 @@ export default function MenuManagementPage() {
 
           {/* Items */}
           <div className="flex-1 overflow-y-auto">
-            {viewMode === "grid" ? (
+            {loading && items.length === 0 ? (
+              <div className="grid grid-cols-2 xl:grid-cols-3 gap-3 pb-4 animate-pulse">
+                {[1, 2, 3, 4, 5, 6].map((n) => (
+                  <div key={n} className="card p-0 overflow-hidden border border-gray-100">
+                    <div className="h-36 bg-gray-200/70" />
+                    <div className="p-3 space-y-2">
+                      <div className="h-4 bg-gray-200/80 rounded w-3/4" />
+                      <div className="h-3 bg-gray-100 rounded w-1/2" />
+                      <div className="h-4 bg-gray-200/60 rounded w-1/3 pt-2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : viewMode === "grid" ? (
               <div className="grid grid-cols-2 xl:grid-cols-3 gap-3 pb-4">
                 {filtered.map((item) => (
                   <div key={item.id} className={`card hover:shadow-md transition-all cursor-pointer ${!item.isAvailable ? "opacity-60" : ""}`} onClick={() => openEdit(item)}>

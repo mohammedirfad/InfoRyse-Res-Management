@@ -160,7 +160,9 @@ export async function POST(req: Request) {
               paymentMethod:  body.paymentMethod ?? "PAY_AT_RESTAURANT",
               status:         "NEW",
               subtotalCents,
-              totalCents:     subtotalCents,
+              totalCents: restaurant.discountActive && (restaurant.discountPercent ?? 0) > 0
+                ? Math.max(0, subtotalCents - Math.round(subtotalCents * ((restaurant.discountPercent ?? 0) / 100)))
+                : subtotalCents,
               idempotencyKey: body.idempotencyKey,
               items: {
                 create: body.items.map((line) => {

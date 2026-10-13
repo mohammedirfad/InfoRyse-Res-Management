@@ -5,11 +5,22 @@ import Link from "next/link";
 import { Search, X, ShoppingCart, Wifi, ChevronUp, ArrowLeft } from "lucide-react";
 import { LandingPage } from "./landing";
 import { useCart, formatRupees, type MenuItem } from "@/components/CartContext";
+import { getDishImageUrl } from "@/lib/dishImages";
 
 /* ── types ──────────────────────────────────────────────────────────────────── */
 type Category  = { id: string; name: string; menuItems: MenuItem[] };
 type MenuData  = {
-  restaurant: { name: string; openNow: boolean; address?: string; logoUrl?: string | null; taxName?: string; taxPercent?: number };
+  restaurant: {
+    name:             string;
+    openNow:          boolean;
+    address?:         string;
+    logoUrl?:         string | null;
+    taxName?:         string;
+    taxPercent?:      number;
+    discountActive?:  boolean;
+    discountPercent?: number;
+    discountName?:    string;
+  };
   table:       { id?: string; label: string; status: string; activeSessionId?: string | null };
   categories:  Category[];
 };
@@ -188,40 +199,145 @@ function AssistanceSheet({
   );
 }
 
-/* ── Item card (horizontal grid) ─────────────────────────────────────────────── */
-function ItemCard({ item, idx, justAdded, onAdd, onView }:{
-  item:MenuItem; idx:number; justAdded:string|null;
-  onAdd:(i:MenuItem,e:React.MouseEvent)=>void;
-  onView:(i:MenuItem)=>void;
+/* ── Item card with Quantity Controls directly on image ───────────────────────── */
+function ItemCard({
+  item,
+  idx,
+  categoryName,
+  quantity,
+  discountActive,
+  discountPercent,
+  onAdd,
+  onIncrease,
+  onDecrease,
+  onView,
+}: {
+  item: MenuItem;
+  idx: number;
+  categoryName?: string;
+  quantity: number;
+  discountActive?: boolean;
+  discountPercent?: number;
+  onAdd: (i: MenuItem, e: React.MouseEvent) => void;
+  onIncrease: (i: MenuItem, e: React.MouseEvent) => void;
+  onDecrease: (i: MenuItem, e: React.MouseEvent) => void;
+  onView: (i: MenuItem) => void;
 }) {
+  const [imgErr, setImgErr] = useState(false);
+  const imageUrl = getDishImageUrl(item.name, categoryName, item.imageUrl);
+
+  const hasDiscount = Boolean(discountActive && (discountPercent ?? 0) > 0);
+  const discountedPrice = hasDiscount
+    ? Math.round(item.priceCents * (1 - (discountPercent ?? 0) / 100))
+    : item.priceCents;
+
   return (
     <div
-      onClick={()=>onView(item)}
-      className={`flex-shrink-0 cursor-pointer ${!item.isAvailable?"opacity-50":""}`}
-      style={{ width:136 }}>
-      <div className={`relative aspect-square rounded-2xl overflow-hidden bg-gradient-to-br ${grad(idx)} shadow-sm mb-2`}>
-        {item.imageUrl
-          ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover"/>
-          : <div className="w-full h-full flex items-center justify-center text-4xl">🍽️</div>}
-        <button
-          onClick={e=>onAdd(item,e)}
-          disabled={!item.isAvailable}
-          className={`absolute bottom-2 right-2 w-7 h-7 rounded-full flex items-center justify-center font-bold text-base shadow-md transition-all active:scale-90
-            ${justAdded===item.id?"bg-green-500 text-white scale-95":"bg-white text-gray-900 hover:bg-gray-900 hover:text-white"}`}>
-          {justAdded===item.id?"✓":"+"}
-        </button>
+      onClick={() => onView(item)}
+      className={`group relative flex flex-col bg-white rounded-3xl p-3 border border-gray-100/90 shadow-xs hover:shadow-md transition-all cursor-pointer ${
+        !item.isAvailable ? "opacity-50 grayscale" : ""
+      }`}
+    >
+      {/* Food Image with Floating Quantity Controller on Image */}
+      <div className="relative aspect-4/3 w-full rounded-2xl overflow-hidden bg-gray-100 mb-2.5">
+        {!imgErr ? (
+          <img
+            src={imageUrl}
+            alt={item.name}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            onError={() => setImgErr(true)}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-amber-50 to-orange-100">
+            🍽️
+          </div>
+        )}
+
+        {/* Dietary veg tag */}
+        <div className="absolute top-2 left-2 z-10 bg-white/95 backdrop-blur-md rounded-md p-1 shadow-xs">
+          <VegDot isVeg={item.isVeg} size="sm" />
+        </div>
+
+        {/* Discount Badge on Image */}
+        {hasDiscount && (
+          <div className="absolute top-2 right-2 z-10 bg-emerald-600 text-white font-black text-[10px] px-2 py-0.5 rounded-full shadow-sm tracking-tight">
+            {discountPercent}% OFF
+          </div>
+        )}
+
+        {/* Quantity Controls Directly on the Food Image */}
+        <div className="absolute bottom-2 right-2 z-10" onClick={(e) => e.stopPropagation()}>
+          {quantity === 0 ? (
+            <button
+              onClick={(e) => onAdd(item, e)}
+              disabled={!item.isAvailable}
+              aria-label={`Add ${item.name} to cart`}
+              className="flex items-center gap-1 bg-white/95 hover:bg-white text-gray-900 border border-black/10 px-3 py-1.5 rounded-full font-extrabold text-xs shadow-md active:scale-90 transition-all hover:shadow-lg"
+            >
+              <span className="text-sm font-black text-emerald-700 leading-none">+</span>
+              <span className="text-[11px] font-black tracking-wide">ADD</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-gray-900/95 backdrop-blur-md text-white border border-white/20 rounded-full px-2 py-1 shadow-lg animate-scale-in">
+              <button
+                onClick={(e) => onDecrease(item, e)}
+                aria-label="Decrease quantity"
+                className="w-5 h-5 flex items-center justify-center font-bold text-sm text-gray-300 hover:text-white active:scale-75 transition-transform"
+              >
+                −
+              </button>
+              <span className="w-5 text-center text-xs font-black tracking-tight text-emerald-400">
+                +{quantity}
+              </span>
+              <button
+                onClick={(e) => onIncrease(item, e)}
+                aria-label="Increase quantity"
+                className="w-5 h-5 flex items-center justify-center font-bold text-sm text-gray-300 hover:text-white active:scale-75 transition-transform"
+              >
+                +
+              </button>
+            </div>
+          )}
+        </div>
+
         {!item.isAvailable && (
-          <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
-            <span className="text-xs font-bold text-red-400 bg-white/90 px-2 py-0.5 rounded-full">Unavailable</span>
+          <div className="absolute inset-0 bg-white/70 backdrop-blur-xs flex items-center justify-center z-10">
+            <span className="text-xs font-bold text-red-500 bg-white px-2.5 py-1 rounded-full shadow-xs">
+              Sold Out
+            </span>
           </div>
         )}
       </div>
-      <div className="flex items-start gap-1 mb-0.5">
-        <VegDot isVeg={item.isVeg} size="sm"/>
-        <p className="text-xs font-semibold text-gray-900 line-clamp-2 leading-snug flex-1">{item.name}</p>
+
+      {/* Dish Details */}
+      <div className="flex flex-col flex-1 justify-between">
+        <div>
+          <h3 className="font-bold text-gray-900 text-sm leading-snug line-clamp-1">{item.name}</h3>
+          {item.description && (
+            <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5 leading-relaxed">
+              {item.description}
+            </p>
+          )}
+        </div>
+
+        {/* Price & Savings */}
+        <div className="mt-2 pt-1.5 border-t border-gray-50 flex items-baseline gap-2">
+          {hasDiscount ? (
+            <div className="flex items-baseline gap-1.5 flex-wrap">
+              <span className="text-sm font-black text-emerald-700">
+                {formatRupees(discountedPrice)}
+              </span>
+              <span className="text-xs text-gray-400 line-through">
+                {formatRupees(item.priceCents)}
+              </span>
+            </div>
+          ) : (
+            <span className="text-sm font-black text-gray-900">
+              {formatRupees(item.priceCents)}
+            </span>
+          )}
+        </div>
       </div>
-      {item.description && <p className="text-[10px] text-gray-400 line-clamp-1 mt-0.5">{item.description}</p>}
-      <p className="text-sm font-bold text-gray-900 mt-1">{formatRupees(item.priceCents)}</p>
     </div>
   );
 }
@@ -241,7 +357,36 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
   const [heroFrozen, setHeroFrozen] = useState(false); // stop auto-advance on interaction
   const [phase, setPhase]       = useState<"landing"|"menu">("landing"); // landing splash first
   const searchRef = useRef<HTMLInputElement>(null);
-  const { addItem, totalCount, totalCents, syncSession } = useCart();
+  const { lines, addItem, setQuantity, removeItem, totalCount, totalCents, syncSession } = useCart();
+
+  const getItemQuantity = useCallback((id: string) => {
+    return lines.find((l) => l.item.id === id)?.quantity ?? 0;
+  }, [lines]);
+
+  function handleAdd(item: MenuItem, e?: React.MouseEvent) {
+    e?.stopPropagation();
+    if (!item.isAvailable) return;
+    addItem(item);
+    setJustAdded(item.id);
+    setTimeout(() => setJustAdded(null), 1000);
+  }
+
+  function handleIncrease(item: MenuItem, e?: React.MouseEvent) {
+    e?.stopPropagation();
+    if (!item.isAvailable) return;
+    const current = getItemQuantity(item.id);
+    setQuantity(item.id, current + 1);
+  }
+
+  function handleDecrease(item: MenuItem, e?: React.MouseEvent) {
+    e?.stopPropagation();
+    const current = getItemQuantity(item.id);
+    if (current <= 1) {
+      removeItem(item.id);
+    } else {
+      setQuantity(item.id, current - 1);
+    }
+  }
 
   /* fetch + cache in sessionStorage */
   useEffect(() => {
@@ -355,6 +500,9 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
       cartTotalCents={totalCents}
       slug={params.slug}
       qrToken={params.qrToken}
+      discountActive={d.restaurant.discountActive}
+      discountPercent={d.restaurant.discountPercent}
+      discountName={d.restaurant.discountName}
       onEnterMenu={() => setPhase("menu")}
       onOpenAssist={() => setShowAssist(true)}
     />
@@ -366,13 +514,20 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
 
       {/* ── Sticky header ─────────────────────────────────────────────────────── */}
       <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-gray-100">
-        {/* Cashback banner */}
-        <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-50 to-blue-50">
-          <div className="w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0">%</div>
-          <span className="text-xs font-semibold text-purple-700">Get 10% cashback</span>
-          <span className="text-xs text-purple-400">· After bill payment</span>
-          <button className="ml-auto text-xs font-bold text-purple-600">Login to avail</button>
-        </div>
+        {/* Dynamic Campaign Discount Banner */}
+        {d.restaurant.discountActive && (d.restaurant.discountPercent ?? 0) > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white shadow-xs">
+            <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+              %
+            </div>
+            <span className="text-xs font-bold leading-tight">
+              {d.restaurant.discountName || "Special Festive Offer"}: Flat {d.restaurant.discountPercent}% OFF on all dishes!
+            </span>
+            <span className="ml-auto bg-white/25 text-white text-[10px] font-black px-2 py-0.5 rounded-full flex-shrink-0">
+              {d.restaurant.discountPercent}% OFF
+            </span>
+          </div>
+        )}
 
         {/* Name + controls */}
         <div className="flex items-center px-4 py-2.5 gap-2 min-h-[52px]">
@@ -457,10 +612,16 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                     pointerEvents: hidden ? "none" : "auto",
                   }}
                   className="cursor-pointer">
-                  <div className={`w-full h-full rounded-2xl overflow-hidden shadow-xl bg-gradient-to-br ${grad(idx)}`}>
-                    {item.imageUrl
-                      ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover"/>
-                      : <div className="w-full h-full flex items-center justify-center text-5xl">🍽️</div>}
+                  <div className={`w-full h-full rounded-2xl overflow-hidden shadow-xl bg-gradient-to-br ${grad(idx)} relative flex items-center justify-center`}>
+                    <div className="absolute inset-0 flex items-center justify-center text-5xl">🍽️</div>
+                    {item.imageUrl && (
+                      <img
+                        src={item.imageUrl}
+                        alt={item.name}
+                        className="relative z-10 w-full h-full object-cover"
+                        onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+                      />
+                    )}
                   </div>
                 </div>
               );
@@ -583,9 +744,21 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                   <span className="text-xs text-gray-400">{items.length}</span>
                 </div>
               )}
-              <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
-                {items.map((item,idx)=>(
-                  <ItemCard key={item.id} item={item} idx={idx} justAdded={justAdded} onAdd={addToCart} onView={setSelectedItem}/>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
+                {items.map((item, idx) => (
+                  <ItemCard
+                    key={item.id}
+                    item={item}
+                    idx={idx}
+                    categoryName={d.categories.find((c) => c.id === activeCat)?.name}
+                    quantity={getItemQuantity(item.id)}
+                    discountActive={d.restaurant.discountActive}
+                    discountPercent={d.restaurant.discountPercent}
+                    onAdd={handleAdd}
+                    onIncrease={handleIncrease}
+                    onDecrease={handleDecrease}
+                    onView={setSelectedItem}
+                  />
                 ))}
               </div>
             </div>
@@ -595,37 +768,97 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
 
       {/* ── Item detail sheet ─────────────────────────────────────────────────── */}
       {selectedItem && (
-        <div className="fixed inset-0 z-50 flex items-end" onClick={()=>setSelectedItem(null)}>
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in"/>
-          <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-3xl shadow-2xl animate-slide-up overflow-hidden max-h-[90vh] flex flex-col"
-            onClick={e=>e.stopPropagation()}>
-            <div className="relative h-52 flex-shrink-0 bg-gradient-to-br from-gray-100 to-gray-200">
-              {selectedItem.imageUrl
-                ? <img src={selectedItem.imageUrl} alt={selectedItem.name} className="w-full h-full object-cover"/>
-                : <div className="w-full h-full flex items-center justify-center text-7xl">🍽️</div>}
-              <button onClick={()=>setSelectedItem(null)}
-                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center shadow">
-                <X className="h-4 w-4 text-gray-700"/>
+        <div className="fixed inset-0 z-50 flex items-end" onClick={() => setSelectedItem(null)}>
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" />
+          <div
+            className="relative w-full max-w-lg mx-auto bg-white rounded-t-3xl shadow-2xl animate-slide-up overflow-hidden max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative h-60 flex-shrink-0 bg-gray-100 flex items-center justify-center overflow-hidden">
+              <img
+                src={getDishImageUrl(selectedItem.name, undefined, selectedItem.imageUrl)}
+                alt={selectedItem.name}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  (e.currentTarget as HTMLElement).style.display = "none";
+                }}
+              />
+              <button
+                onClick={() => setSelectedItem(null)}
+                aria-label="Close"
+                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center shadow"
+              >
+                <X className="h-4 w-4 text-gray-700" />
               </button>
             </div>
             <div className="p-5 flex-1 overflow-y-auto">
               <div className="flex items-center gap-2 mb-1.5">
-                <VegDot isVeg={selectedItem.isVeg}/>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${selectedItem.isVeg?"bg-green-50 text-green-700":"bg-red-50 text-red-700"}`}>
-                  {selectedItem.isVeg?"Vegetarian":"Non-Vegetarian"}
+                <VegDot isVeg={selectedItem.isVeg} />
+                <span
+                  className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                    selectedItem.isVeg ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+                  }`}
+                >
+                  {selectedItem.isVeg ? "Vegetarian" : "Non-Vegetarian"}
                 </span>
+                {d.restaurant.discountActive && (d.restaurant.discountPercent ?? 0) > 0 && (
+                  <span className="text-[10px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full">
+                    {d.restaurant.discountPercent}% OFF
+                  </span>
+                )}
               </div>
               <h2 className="text-xl font-bold text-gray-900 leading-snug">{selectedItem.name}</h2>
               {selectedItem.description && (
                 <p className="text-sm text-gray-500 mt-2 leading-relaxed">{selectedItem.description}</p>
               )}
               <div className="flex items-center justify-between mt-5 pt-4 border-t border-gray-100">
-                <span className="text-2xl font-bold text-gray-900">{formatRupees(selectedItem.priceCents)}</span>
-                <button disabled={!selectedItem.isAvailable}
-                  onClick={()=>{ addItem(selectedItem); setSelectedItem(null); }}
-                  className="bg-gray-900 text-white px-8 py-3 rounded-2xl font-bold disabled:opacity-40 active:scale-95 transition-all">
-                  {selectedItem.isAvailable?"Add to cart":"Unavailable"}
-                </button>
+                <div>
+                  {d.restaurant.discountActive && (d.restaurant.discountPercent ?? 0) > 0 ? (
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-2xl font-bold text-emerald-700">
+                        {formatRupees(
+                          Math.round(selectedItem.priceCents * (1 - (d.restaurant.discountPercent ?? 0) / 100))
+                        )}
+                      </span>
+                      <span className="text-sm text-gray-400 line-through">
+                        {formatRupees(selectedItem.priceCents)}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-2xl font-bold text-gray-900">{formatRupees(selectedItem.priceCents)}</span>
+                  )}
+                </div>
+
+                {!selectedItem.isAvailable ? (
+                  <span className="text-sm font-bold text-red-500 bg-red-50 px-4 py-2 rounded-xl">Sold Out</span>
+                ) : getItemQuantity(selectedItem.id) === 0 ? (
+                  <button
+                    onClick={() => {
+                      addItem(selectedItem);
+                    }}
+                    className="bg-gray-900 hover:bg-black text-white px-8 py-3 rounded-2xl font-bold active:scale-95 transition-all shadow-md"
+                  >
+                    + Add to order
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-3 bg-gray-900 text-white rounded-2xl px-3 py-2 shadow-md">
+                    <button
+                      onClick={() => handleDecrease(selectedItem)}
+                      className="w-7 h-7 flex items-center justify-center font-bold text-lg text-gray-300 hover:text-white active:scale-75 transition-transform"
+                    >
+                      −
+                    </button>
+                    <span className="font-extrabold text-sm text-emerald-400 px-1">
+                      {getItemQuantity(selectedItem.id)} in cart
+                    </span>
+                    <button
+                      onClick={() => handleIncrease(selectedItem)}
+                      className="w-7 h-7 flex items-center justify-center font-bold text-lg text-gray-300 hover:text-white active:scale-75 transition-transform"
+                    >
+                      +
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

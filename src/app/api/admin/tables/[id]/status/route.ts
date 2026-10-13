@@ -12,7 +12,26 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const table = await db.table.findFirst({ where: { id: params.id, restaurantId } });
     if (!table) return Response.json({ error: "Not found" }, { status: 404 });
 
-    const updated = await db.table.update({ where: { id: table.id }, data: { status } });
+    const updated = await db.$transaction(async (tx) => {
+      const u = await tx.table.update({ where: { id: table.id }, data: { status } });
+      if (status === "OCCUPIED") {
+        const existingSession = await tx.tableSession.findFirst({
+          where: { tableId: table.id, restaurantId, status: "OPEN" },
+        });
+        if (!existingSession) {
+          await tx.tableSession.create({
+            data: { tableId: table.id, restaurantId, status: "OPEN" },
+          });
+        }
+      } else if (status === "AVAILABLE") {
+        await tx.tableSession.updateMany({
+          where: { tableId: table.id, restaurantId, status: "OPEN" },
+          data:  { status: "FINALIZED", finalizedAt: new Date() },
+        });
+      }
+      return u;
+    });
+
     return Response.json({ table: updated });
   } catch (err) {
     return tenantErrorResponse(err);
