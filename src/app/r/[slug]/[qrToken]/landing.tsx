@@ -2,9 +2,27 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ShoppingCart, ChevronDown } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  ShoppingCart,
+  ChevronDown,
+  Sparkles,
+  Clock,
+  UtensilsCrossed,
+  BellRing,
+  ShieldCheck,
+  ChevronRight,
+  Flame,
+  ArrowRight,
+} from "lucide-react";
 
-type FoodItem = { id: string; name: string; priceCents: number; imageUrl?: string | null; isVeg: boolean };
+type FoodItem = {
+  id: string;
+  name: string;
+  priceCents: number;
+  imageUrl?: string | null;
+  isVeg: boolean;
+};
 
 interface LandingProps {
   restaurantName:  string;
@@ -16,294 +34,501 @@ interface LandingProps {
   totalItems:      number;
   categories:      number;
   cartCount:       number;
+  cartTotalCents?: number;
   slug:            string;
   qrToken:         string;
   onEnterMenu:     () => void;
+  onOpenAssist?:   () => void;
 }
 
-const FOOD_EMOJIS = ["🍕","🍔","🍜","🍛","🥗","🍱","🥞","🍰","🥤","🍸","🫕","🥩","🥘","🍲","🧆"];
+const FOOD_EMOJIS = ["🍕", "🍔", "🍜", "🍛", "🥗", "🍱", "🥞", "🍰", "🥤", "🍸", "🫕", "🥩", "🥘", "🍲", "🧆"];
 
-function formatRupees(c: number) { return `₹${(c / 100).toFixed(0)}`; }
-
-// ── Parallax floating particle ────────────────────────────────────────────────
-function FloatingParticle({ emoji, style }: { emoji: string; style: React.CSSProperties }) {
-  return (
-    <div className="absolute pointer-events-none select-none" style={style}>
-      {emoji}
-    </div>
-  );
+function formatRupees(c: number) {
+  return `₹${(c / 100).toFixed(0)}`;
 }
 
 export function LandingPage({
-  restaurantName, restaurantLogo, tableLabel, isOccupied, isOpen,
-  featuredItems, totalItems, categories, cartCount, slug, qrToken, onEnterMenu,
+  restaurantName,
+  restaurantLogo,
+  tableLabel,
+  isOccupied,
+  isOpen,
+  featuredItems,
+  totalItems,
+  categories,
+  cartCount,
+  cartTotalCents = 0,
+  slug,
+  qrToken,
+  onEnterMenu,
+  onOpenAssist,
 }: LandingProps) {
-  const [visible,   setVisible]   = useState(false);
-  const [scrollY,   setScrollY]   = useState(0);
-  const [imgErrors, setImgErrors] = useState<Record<number, boolean>>({});
+  const [activeSlide, setActiveSlide] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Stagger entrance
+  // Auto-advance featured dishes showcase
+  const displayItems = featuredItems.length > 0 ? featuredItems.slice(0, 5) : [];
+
   useEffect(() => {
-    const t = setTimeout(() => setVisible(true), 80);
-    return () => clearTimeout(t);
-  }, []);
+    if (displayItems.length <= 1 || isPaused) return;
+    const interval = setInterval(() => {
+      setActiveSlide((prev) => (prev + 1) % displayItems.length);
+    }, 3800);
+    return () => clearInterval(interval);
+  }, [displayItems.length, isPaused]);
 
-  // Parallax on scroll
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const fn = () => setScrollY(el.scrollTop);
-    el.addEventListener("scroll", fn, { passive: true });
-    return () => el.removeEventListener("scroll", fn);
-  }, []);
-
-  // Generate stable particles (same across renders)
-  const particles = FOOD_EMOJIS.map((emoji, i) => ({
-    emoji,
-    style: {
-      left:      `${4 + (i * 13 % 90)}%`,
-      top:       `${5 + (i * 17 % 85)}%`,
-      fontSize:  `${1.2 + (i % 3) * 0.5}rem`,
-      opacity:   0.04 + (i % 4) * 0.015,
-      transform: `rotate(${-25 + i * 14}deg)`,
-      animation: `floatP${i % 5} ${7 + i % 5}s ease-in-out infinite`,
-      animationDelay: `${i * 0.3}s`,
-    } as React.CSSProperties,
-  }));
-
-  const fanItems = featuredItems.slice(0, 4);
+  const currentItem = displayItems[activeSlide] || null;
 
   return (
-    <div ref={containerRef}
-      className="h-screen overflow-y-auto snap-y snap-mandatory"
-      style={{ scrollBehavior: "smooth" }}>
-
-      {/* ── SECTION 1: Full-screen hero ────────────────────────────────────── */}
-      <section className="snap-start relative h-screen flex flex-col overflow-hidden"
-        style={{ background: "linear-gradient(155deg,#071510 0%,#0d1f15 30%,#132A1E 60%,#1a3d26 85%,#0d1f15 100%)" }}>
-
-        {/* ── Animated blobs ───────────────────────────────────────────────── */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          {/* Large slow-moving radial blobs */}
-          {[
-            { w:500, h:500, l:-100, t:-100, c:"rgba(212,169,76,0.08)",  dur:12 },
-            { w:400, h:400, r:-80,  b:-80,  c:"rgba(34,197,94,0.07)",   dur:15 },
-            { w:350, h:350, l:"35%",t:"25%",c:"rgba(255,255,255,0.025)",dur:20 },
-            { w:250, h:250, r:"10%",t:"40%",c:"rgba(212,169,76,0.05)",  dur:10 },
-          ].map((b, i) => (
-            <div key={i}
-              className="absolute rounded-full blur-3xl"
-              style={{
-                width:b.w, height:b.h,
-                left:b.l, right:(b as any).r, top:b.t, bottom:(b as any).b,
-                background: `radial-gradient(circle,${b.c} 0%,transparent 70%)`,
-                animation: `blobPulse ${b.dur}s ease-in-out infinite`,
-                animationDelay: `${i * 2}s`,
-              }}/>
-          ))}
-
-          {/* Moving light streak */}
-          <div className="absolute inset-0"
+    <div
+      ref={containerRef}
+      className="h-screen overflow-y-auto snap-y snap-mandatory select-none bg-[#071510]"
+      style={{ scrollBehavior: "smooth" }}
+    >
+      {/* ── SECTION 1: Full-Screen Luxury Hero ────────────────────────────────── */}
+      <section
+        className="snap-start relative min-h-screen flex flex-col justify-between overflow-hidden px-5 py-6"
+        style={{
+          background:
+            "radial-gradient(ellipse at 50% 15%, #183d29 0%, #0d2417 40%, #081710 75%, #050d09 100%)",
+        }}
+      >
+        {/* Dynamic ambient glow & light streaks */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          <motion.div
+            animate={{
+              scale: [1, 1.25, 1],
+              opacity: [0.15, 0.28, 0.15],
+            }}
+            transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute -top-24 -left-20 w-96 h-96 rounded-full bg-emerald-500/20 blur-3xl"
+          />
+          <motion.div
+            animate={{
+              scale: [1.1, 0.9, 1.1],
+              opacity: [0.12, 0.22, 0.12],
+            }}
+            transition={{ duration: 11, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute top-1/3 -right-24 w-80 h-80 rounded-full bg-amber-400/20 blur-3xl"
+          />
+          <div
+            className="absolute inset-0 opacity-20 pointer-events-none"
             style={{
-              background: "linear-gradient(105deg,transparent 40%,rgba(212,169,76,0.04) 50%,transparent 60%)",
-              animation: "lightStreak 8s ease-in-out infinite",
-            }}/>
+              backgroundImage:
+                "radial-gradient(rgba(212, 169, 76, 0.15) 1px, transparent 1px)",
+              backgroundSize: "28px 28px",
+            }}
+          />
         </div>
 
-        {/* ── Floating food emojis ─────────────────────────────────────────── */}
-        {particles.map((p, i) => (
-          <FloatingParticle key={i} emoji={p.emoji} style={p.style} />
-        ))}
+        {/* Floating particles */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          {FOOD_EMOJIS.slice(0, 8).map((emoji, i) => (
+            <motion.div
+              key={i}
+              className="absolute text-xl md:text-2xl opacity-15"
+              style={{
+                left: `${10 + (i * 12) % 80}%`,
+                top: `${8 + (i * 14) % 80}%`,
+              }}
+              animate={{
+                y: [0, -18, 0],
+                rotate: [0, (i % 2 === 0 ? 15 : -15), 0],
+              }}
+              transition={{
+                duration: 5 + (i % 4),
+                repeat: Infinity,
+                ease: "easeInOut",
+                delay: i * 0.4,
+              }}
+            >
+              {emoji}
+            </motion.div>
+          ))}
+        </div>
 
-        {/* ── Hero content (parallax) ──────────────────────────────────────── */}
-        <div className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-6 w-full"
-          style={{ transform: `translateY(${scrollY * 0.25}px)` }}>
-
-          {/* Restaurant logo — if exists */}
-          {restaurantLogo && (
-            <div className={`mb-5 transition-all duration-700 ${visible ? "opacity-100 scale-100" : "opacity-0 scale-90"}`}
-              style={{ transitionDelay: "0ms" }}>
-              <div className="h-20 w-20 rounded-2xl overflow-hidden border-2 border-white/15 shadow-2xl mx-auto bg-white/10">
-                <img src={restaurantLogo} alt={restaurantName}
-                  className="w-full h-full object-cover"
-                  onError={() => { /* hide on error */ }} />
-              </div>
-            </div>
-          )}
-
-          {/* Status badge */}
-          <div className={`inline-flex items-center gap-2 rounded-full px-4 py-2 mb-5
-            bg-white/6 backdrop-blur-sm border border-white/10
-            transition-all duration-700 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}
-            style={{ transitionDelay: "50ms" }}>
-            <div className={`h-2 w-2 rounded-full ${isOpen ? "bg-green-400 animate-pulse" : "bg-red-400"}`} />
-            <span className="text-white/60 text-xs font-medium">
-              {isOpen ? "Open Now" : "Currently Closed"}
-              <span className="text-white/30 mx-2">·</span>
-              <span className="text-[#D4A94C] font-semibold">Table {tableLabel}</span>
+        {/* ── TOP BAR: Table Pill & Live Status ──────────────────────────────── */}
+        <motion.header
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="relative z-20 flex items-center justify-between w-full pt-1"
+        >
+          {/* Table Indicator Pill */}
+          <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/15 shadow-lg">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+            <span className="text-white text-xs font-semibold tracking-wide">
+              Table <span className="text-amber-400 font-bold">{tableLabel}</span>
             </span>
           </div>
 
-          {/* Restaurant name */}
-          <h1 className={`text-white leading-none mb-3 transition-all duration-700
-            ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
-            style={{
-              fontFamily:   "Georgia,'Times New Roman',serif",
-              fontSize:     "clamp(2.5rem,9vw,4rem)",
-              textShadow:   "0 4px 40px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.05)",
-              transitionDelay: "120ms",
-              letterSpacing: "-0.01em",
-            }}>
-            {restaurantName}
-          </h1>
+          {/* Kitchen / Open status */}
+          <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-black/40 backdrop-blur-xl border border-white/10">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isOpen ? "bg-emerald-400 shadow-[0_0_8px_#34d399]" : "bg-rose-400"
+              }`}
+            />
+            <span className="text-white/80 text-xs font-medium">
+              {isOpen ? "Kitchen Active" : "Closed"}
+            </span>
+          </div>
+        </motion.header>
 
-          <p className={`text-white/35 text-sm italic mb-7 transition-all duration-700
-            ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}
-            style={{ transitionDelay: "200ms" }}>
-            Good Food · Brighter Moments
-          </p>
-
-          {/* Fanned food images */}
-          {fanItems.length > 0 && (
-            <div className={`relative h-28 w-52 mb-7 transition-all duration-700
-              ${visible ? "opacity-100 scale-100" : "opacity-0 scale-90"}`}
-              style={{ transitionDelay: "280ms" }}>
-              {fanItems.map((item, i) => {
-                const rots  = [-18, -7, 5, 16];
-                const txs   = [-36, -12, 12, 36];
-                const tys   = [8, 0, 0, 8];
-                return (
-                  <div key={item.id}
-                    className="absolute top-0 left-1/2 w-[72px] h-[72px] rounded-2xl overflow-hidden
-                      border-2 border-white/15 shadow-[0_8px_32px_rgba(0,0,0,0.5)]
-                      transition-all duration-500 hover:scale-110 hover:z-20 cursor-pointer"
-                    style={{
-                      transform: `translateX(calc(-50% + ${txs[i]}px)) translateY(${tys[i]}px) rotate(${rots[i]}deg)`,
-                      zIndex: i + 1,
-                    }}
-                    onClick={onEnterMenu}>
-                    {item.imageUrl && !imgErrors[i]
-                      ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover"
-                          onError={() => setImgErrors(p => ({ ...p, [i]: true }))} />
-                      : <div className={`w-full h-full flex items-center justify-center text-3xl
-                          ${["bg-orange-900/60","bg-emerald-900/60","bg-rose-900/60","bg-amber-900/60"][i]}`}>
-                          {FOOD_EMOJIS[i * 2]}
-                        </div>
-                    }
-                  </div>
-                );
-              })}
+        {/* ── CENTER: Brand Identity & Animated Showcase ────────────────────── */}
+        <div className="relative z-10 flex-1 flex flex-col items-center justify-center text-center my-3 max-w-sm mx-auto w-full">
+          {/* Restaurant Logo / Shield */}
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            className="relative mb-3"
+          >
+            {restaurantLogo ? (
+              <div className="relative w-20 h-20 rounded-2xl p-1 bg-gradient-to-tr from-amber-400 via-amber-200 to-emerald-400 shadow-2xl">
+                <img
+                  src={restaurantLogo}
+                  alt={restaurantName}
+                  className="w-full h-full object-cover rounded-xl bg-black"
+                />
+              </div>
+            ) : (
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400/20 to-emerald-400/20 border border-amber-400/40 backdrop-blur-xl flex items-center justify-center shadow-xl">
+                <UtensilsCrossed className="w-8 h-8 text-amber-300" />
+              </div>
+            )}
+            <div className="absolute -bottom-1 -right-1 bg-amber-400 text-black text-[10px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-widest shadow">
+              QR
             </div>
+          </motion.div>
+
+          {/* Restaurant Name */}
+          <motion.h1
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className="text-white font-extrabold tracking-tight mb-1 text-3xl md:text-4xl"
+            style={{
+              fontFamily: "'Inter', sans-serif",
+              letterSpacing: "-0.03em",
+              textShadow: "0 2px 20px rgba(0,0,0,0.6)",
+            }}
+          >
+            {restaurantName}
+          </motion.h1>
+
+          <motion.p
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.25 }}
+            className="text-white/60 text-xs font-medium tracking-wide mb-4 flex items-center gap-1.5"
+          >
+            <span>Handcrafted Flavours</span>
+            <span className="text-amber-400/70">✦</span>
+            <span>Contactless Dining</span>
+          </motion.p>
+
+          {/* ── INTERACTIVE FEATURED DISH SHOWCASE CAROUSEL ─────────────────── */}
+          {displayItems.length > 0 && currentItem && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.6, delay: 0.3 }}
+              onMouseEnter={() => setIsPaused(true)}
+              onMouseLeave={() => setIsPaused(false)}
+              onClick={onEnterMenu}
+              className="relative w-full rounded-3xl p-3 bg-white/[0.08] backdrop-blur-2xl border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.5)] cursor-pointer group hover:border-amber-400/40 transition-all mb-4"
+            >
+              <div className="flex items-center gap-3.5">
+                {/* Food Image with Veg Badge */}
+                <div className="relative w-20 h-20 rounded-2xl overflow-hidden bg-black/40 flex-shrink-0 border border-white/10">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={currentItem.id}
+                      initial={{ opacity: 0, scale: 1.1 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.4 }}
+                      className="w-full h-full"
+                    >
+                      {currentItem.imageUrl && !imgErrors[currentItem.id] ? (
+                        <img
+                          src={currentItem.imageUrl}
+                          alt={currentItem.name}
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                          onError={() =>
+                            setImgErrors((prev) => ({ ...prev, [currentItem.id]: true }))
+                          }
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-3xl bg-gradient-to-br from-amber-900/60 to-emerald-950/60">
+                          {FOOD_EMOJIS[activeSlide % FOOD_EMOJIS.length]}
+                        </div>
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
+
+                  {/* Veg/Non-Veg Dot */}
+                  <div className="absolute top-1.5 left-1.5 bg-black/60 backdrop-blur-sm p-1 rounded-md">
+                    <span
+                      className={`w-2.5 h-2.5 rounded-sm border-2 flex items-center justify-center ${
+                        currentItem.isVeg ? "border-green-400" : "border-rose-400"
+                      }`}
+                    >
+                      <span
+                        className={`w-1 h-1 rounded-full ${
+                          currentItem.isVeg ? "bg-green-400" : "bg-rose-400"
+                        }`}
+                      />
+                    </span>
+                  </div>
+                </div>
+
+                {/* Dish Info */}
+                <div className="flex-1 text-left min-w-0 pr-1">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[10px] font-bold text-amber-300 uppercase tracking-widest flex items-center gap-1">
+                      <Flame className="w-3 h-3 text-amber-400 fill-amber-400" /> Chef's Special
+                    </span>
+                  </div>
+
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={currentItem.id}
+                      initial={{ opacity: 0, x: 10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -10 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <h3 className="text-white font-bold text-sm truncate leading-snug">
+                        {currentItem.name}
+                      </h3>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-amber-400 font-extrabold text-sm">
+                          {formatRupees(currentItem.priceCents)}
+                        </span>
+                        <span className="text-white/40 text-[11px] group-hover:text-white flex items-center gap-0.5 transition-colors">
+                          Tap to view <ChevronRight className="w-3 h-3" />
+                        </span>
+                      </div>
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
+              </div>
+
+              {/* Slider dots */}
+              {displayItems.length > 1 && (
+                <div className="flex items-center justify-center gap-1.5 mt-2.5 pt-2 border-t border-white/5">
+                  {displayItems.map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveSlide(i);
+                      }}
+                      className={`h-1.5 rounded-full transition-all duration-300 ${
+                        i === activeSlide ? "w-6 bg-amber-400" : "w-1.5 bg-white/20"
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
+            </motion.div>
           )}
 
-          {/* Stats */}
-          <div className={`flex items-center gap-6 mb-7 transition-all duration-700
-            ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}
-            style={{ transitionDelay: "360ms" }}>
-            {[
-              { val: totalItems,  label: "dishes"     },
-              { val: categories,  label: "categories" },
-              { val: featuredItems.filter(i => i.isVeg).length, label: "veg" },
-            ].map((s, i) => (
-              <div key={i} className="text-center">
-                <p className="text-white font-bold text-2xl leading-none">{s.val}</p>
-                <p className="text-white/35 text-xs mt-0.5">{s.label}</p>
+          {/* ── STATS BADGES: Dishes, Categories, Speed ──────────────────────── */}
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.35 }}
+            className="grid grid-cols-3 gap-2 w-full mb-3"
+          >
+            <div className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl py-2 px-1 text-center">
+              <p className="text-white font-black text-lg leading-tight">{totalItems}</p>
+              <p className="text-white/45 text-[11px] uppercase tracking-wider font-medium">
+                Dishes
+              </p>
+            </div>
+            <div className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl py-2 px-1 text-center">
+              <p className="text-white font-black text-lg leading-tight">{categories}</p>
+              <p className="text-white/45 text-[11px] uppercase tracking-wider font-medium">
+                Sections
+              </p>
+            </div>
+            <div className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl py-2 px-1 text-center flex flex-col items-center justify-center">
+              <div className="flex items-center gap-1 text-amber-400 font-black text-base leading-tight">
+                <Clock className="w-3.5 h-3.5" /> 15m
               </div>
+              <p className="text-white/45 text-[11px] uppercase tracking-wider font-medium">
+                Fast Kitchen
+              </p>
+            </div>
+          </motion.div>
+
+          {/* Cashback / Perk Banner */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.6, delay: 0.4 }}
+            className="w-full rounded-2xl px-3.5 py-2 bg-gradient-to-r from-amber-400/15 via-amber-300/10 to-amber-500/15 border border-amber-400/25 flex items-center justify-center gap-2"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin" />
+            <span className="text-amber-200 text-xs font-semibold">
+              Instant 10% dining perk applied at bill
+            </span>
+          </motion.div>
+        </div>
+
+        {/* ── NOT OCCUPIED NOTICE ────────────────────────────────────────────── */}
+        {!isOccupied && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="relative z-20 w-full max-w-sm mx-auto mb-2.5"
+          >
+            <div className="bg-amber-500/20 border border-amber-500/30 rounded-2xl px-3.5 py-2.5 flex items-center gap-2.5 text-amber-200 text-xs font-medium">
+              <span className="text-base">🪑</span>
+              <span>Please ask our service staff to seat your party before ordering.</span>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── BOTTOM ACTION BAR ──────────────────────────────────────────────── */}
+        <motion.footer
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.45 }}
+          className="relative z-20 w-full max-w-sm mx-auto space-y-2.5 pt-1"
+        >
+          {/* Main Action: Explore Menu */}
+          <button
+            onClick={onEnterMenu}
+            className="group relative w-full overflow-hidden rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 p-[1px] shadow-[0_8px_30px_rgba(212,169,76,0.35)] active:scale-[0.98] transition-transform"
+          >
+            <div className="relative w-full bg-gradient-to-r from-[#0d281a] via-[#123824] to-[#0d281a] text-white py-4 px-6 rounded-2xl flex items-center justify-between font-bold text-base group-hover:bg-opacity-90 transition-all">
+              <span className="flex items-center gap-2.5">
+                <span className="text-lg">🍽️</span>
+                <span>Explore Full Menu</span>
+              </span>
+              <div className="w-8 h-8 rounded-full bg-amber-400 text-black flex items-center justify-center font-bold text-sm shadow-md group-hover:translate-x-1 transition-transform">
+                <ArrowRight className="w-4 h-4" />
+              </div>
+            </div>
+          </button>
+
+          {/* Cart button if items exist */}
+          {cartCount > 0 && (
+            <Link
+              href={`/r/${slug}/${qrToken}/cart`}
+              className="w-full bg-white/10 hover:bg-white/15 border border-white/20 text-white py-3.5 px-5 rounded-2xl font-bold text-sm flex items-center justify-between backdrop-blur-xl active:scale-[0.98] transition-all"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="relative">
+                  <ShoppingCart className="w-4 h-4 text-amber-300" />
+                  <span className="absolute -top-1.5 -right-2 bg-amber-400 text-black text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow">
+                    {cartCount}
+                  </span>
+                </div>
+                <span>View Table Cart</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-amber-300 font-extrabold text-sm">
+                {cartTotalCents > 0 && <span>{formatRupees(cartTotalCents)}</span>}
+                <ChevronRight className="w-4 h-4" />
+              </div>
+            </Link>
+          )}
+
+          {/* Quick Staff Assistance Button */}
+          {onOpenAssist && (
+            <button
+              onClick={onOpenAssist}
+              className="w-full flex items-center justify-center gap-2 text-white/50 hover:text-white/90 text-xs font-semibold py-1.5 transition-colors"
+            >
+              <BellRing className="w-3.5 h-3.5 text-amber-400/80" />
+              <span>Need water, extra cutlery or waiter? Tap here</span>
+            </button>
+          )}
+        </motion.footer>
+
+        {/* Scroll cue */}
+        <div className="flex flex-col items-center justify-center pt-2 text-white/30 text-[10px] uppercase tracking-widest pointer-events-none animate-bounce">
+          <span>Scroll to explore perks</span>
+          <ChevronDown className="w-3.5 h-3.5 mt-0.5" />
+        </div>
+      </section>
+
+      {/* ── SECTION 2: Why Digital Table Ordering (Scroll Animation) ───────── */}
+      <section className="snap-start min-h-screen bg-[#FBF7F1] text-gray-900 flex flex-col justify-center px-6 py-12">
+        <div className="max-w-sm mx-auto w-full space-y-6">
+          <div className="text-center">
+            <span className="text-xs uppercase font-extrabold tracking-widest text-emerald-800 bg-emerald-100 px-3 py-1 rounded-full">
+              Seamless Dining
+            </span>
+            <h2
+              className="text-2xl md:text-3xl font-extrabold text-gray-900 mt-2.5 mb-1"
+              style={{ letterSpacing: "-0.02em" }}
+            >
+              How Ordering Works
+            </h2>
+            <p className="text-gray-500 text-xs leading-relaxed">
+              Order directly from your phone — no apps, no waiting, 100% synchronized table.
+            </p>
+          </div>
+
+          <div className="space-y-3.5">
+            {[
+              {
+                icon: "⚡",
+                title: "Instant Kitchen Dispatch",
+                desc: "Your order is sent straight to the chef's screen with zero delay.",
+              },
+              {
+                icon: "🔄",
+                title: "Order Rounds Anytime",
+                desc: "Want extra drinks or hot desserts? Add more dishes throughout your meal.",
+              },
+              {
+                icon: "🔔",
+                title: "One-Tap Waiter Call",
+                desc: "Tap assistance anytime for fresh water, napkins, cutlery or billing.",
+              },
+              {
+                icon: "🧾",
+                title: "Consolidated Table Bill",
+                desc: "All orders placed at Table " + tableLabel + " merge into a single unified tab.",
+              },
+            ].map((card, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.4, delay: i * 0.1 }}
+                className="bg-white rounded-2xl p-4 flex items-start gap-3.5 border border-black/5 shadow-sm hover:shadow-md transition-shadow"
+              >
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-2xl flex items-center justify-center flex-shrink-0">
+                  {card.icon}
+                </div>
+                <div>
+                  <h4 className="font-bold text-gray-900 text-sm mb-0.5">{card.title}</h4>
+                  <p className="text-gray-500 text-xs leading-relaxed">{card.desc}</p>
+                </div>
+              </motion.div>
             ))}
           </div>
 
-          {/* Cashback */}
-          <div className={`bg-[#D4A94C]/12 border border-[#D4A94C]/20 rounded-full px-5 py-2.5 mb-1
-            transition-all duration-700 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3"}`}
-            style={{ transitionDelay: "430ms" }}>
-            <span className="text-[#D4A94C] font-semibold text-sm">🎁 Get 10% cashback on every bill</span>
+          <div className="pt-2">
+            <button
+              onClick={onEnterMenu}
+              className="w-full bg-[#0d281a] text-white py-4 rounded-2xl font-bold text-base shadow-xl shadow-[#0d281a]/20 flex items-center justify-center gap-2 active:scale-[0.98] transition-all hover:bg-[#123824]"
+            >
+              <span>View Full Menu & Order</span>
+              <span className="text-lg">🍽️</span>
+            </button>
           </div>
         </div>
-
-        {/* Not occupied warning */}
-        {!isOccupied && (
-          <div className="relative z-10 mx-5 mb-3">
-            <div className="bg-amber-500/15 border border-amber-500/25 rounded-2xl px-4 py-3 flex items-center gap-2.5">
-              <span className="text-lg">⚠️</span>
-              <p className="text-amber-200 text-sm font-medium">Ask our staff to seat you before ordering</p>
-            </div>
-          </div>
-        )}
-
-        {/* CTA buttons */}
-        <div className={`relative z-10 w-full px-5 pb-8 space-y-2.5
-          transition-all duration-700 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
-          style={{ transitionDelay: "500ms" }}>
-          <button onClick={onEnterMenu}
-            className="w-full bg-white text-[#132A1E] py-4 rounded-2xl font-bold text-base
-              shadow-[0_8px_40px_rgba(0,0,0,0.4)] active:scale-[0.98] transition-all
-              flex items-center justify-center gap-2 hover:bg-gray-50">
-            <span>View Menu</span>
-            <span className="text-xl">🍽️</span>
-          </button>
-
-          {cartCount > 0 && (
-            <Link href={`/r/${slug}/${qrToken}/cart`}
-              className="w-full bg-[#132A1E] border-2 border-white/15 text-white py-3.5 rounded-2xl
-                font-semibold text-sm flex items-center justify-center gap-2
-                active:scale-[0.98] transition-all hover:border-white/25">
-              <ShoppingCart className="h-4 w-4" />
-              View Cart ({cartCount} item{cartCount > 1 ? "s" : ""})
-            </Link>
-          )}
-        </div>
-
-        {/* Scroll hint */}
-        <div className="absolute bottom-20 right-5 flex flex-col items-center gap-0.5 opacity-20 pointer-events-none animate-bounce">
-          <span className="text-white text-[9px] uppercase tracking-widest rotate-90 translate-y-2">Scroll</span>
-          <ChevronDown className="h-3.5 w-3.5 text-white mt-1" />
-        </div>
-
-        {/* CSS keyframes */}
-        <style jsx global>{`
-          @keyframes blobPulse  { 0%,100%{transform:scale(1) translate(0,0)}   50%{transform:scale(1.12) translate(20px,-15px)} }
-          @keyframes lightStreak{ 0%,100%{transform:translateX(-100%)} 50%{transform:translateX(100%)} }
-          @keyframes floatP0 { 0%,100%{transform:translateY(0) rotate(-25deg)} 55%{transform:translateY(-14px) rotate(-20deg)} }
-          @keyframes floatP1 { 0%,100%{transform:translateY(0) rotate(8deg)}   45%{transform:translateY(-9px)  rotate(12deg)}  }
-          @keyframes floatP2 { 0%,100%{transform:translateY(0) rotate(-5deg)}  65%{transform:translateY(-16px) rotate(-1deg)}  }
-          @keyframes floatP3 { 0%,100%{transform:translateY(0) rotate(15deg)}  40%{transform:translateY(-11px) rotate(19deg)}  }
-          @keyframes floatP4 { 0%,100%{transform:translateY(0) rotate(-12deg)} 70%{transform:translateY(-8px)  rotate(-8deg)}  }
-        `}</style>
-      </section>
-
-      {/* ── SECTION 2: Why scan / features strip ───────────────────────────── */}
-      <section className="snap-start min-h-screen bg-[#FBF7F1] flex flex-col items-center justify-center px-6 py-16">
-        <div className="text-center mb-8 w-full max-w-sm">
-          <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Why order with us</p>
-          <h2 className="text-2xl font-bold text-gray-900" style={{ fontFamily: "Georgia,serif" }}>
-            Order your way
-          </h2>
-        </div>
-
-        <div className="w-full max-w-sm space-y-3.5">
-          {[
-            { icon:"⚡", title:"Instant Ordering",    desc:"Browse, add to cart and place your order in under 60 seconds. No app needed." },
-            { icon:"📱", title:"Mobile First",         desc:"Designed for your phone. Big buttons, fast loading, beautiful experience."    },
-            { icon:"🔄", title:"Order Again Anytime",  desc:"Add more dishes to your order anytime during your meal."                     },
-            { icon:"🔔", title:"Request Staff Anytime",desc:"Need water, extra cutlery, or to pay the bill? One tap away."                },
-          ].map((f, i) => (
-            <div key={i} className="bg-white rounded-2xl p-4 flex items-start gap-4 shadow-sm border border-black/5 animate-slide-up"
-              style={{ animationDelay: `${i * 80}ms` }}>
-              <div className="text-3xl flex-shrink-0 mt-0.5">{f.icon}</div>
-              <div>
-                <p className="font-bold text-gray-900 mb-0.5">{f.title}</p>
-                <p className="text-sm text-gray-500 leading-relaxed">{f.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <button onClick={onEnterMenu}
-          className="mt-8 w-full max-w-sm bg-[#132A1E] text-white py-4 rounded-2xl font-bold text-base
-            active:scale-[0.98] transition-all shadow-lg shadow-[#132A1E]/20">
-          Let's Order 🍽️
-        </button>
       </section>
     </div>
   );

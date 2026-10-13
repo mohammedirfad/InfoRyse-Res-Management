@@ -31,37 +31,57 @@ export async function GET(
       );
     }
 
-    const categories = await db.category.findMany({
-      where: { restaurantId: restaurant.id, isActive: true, deletedAt: null },
-      orderBy: { position: "asc" },
-      include: {
-        menuItems: {
-          where: { deletedAt: null },
-          orderBy: { createdAt: "asc" },
-          select: {
-            id: true,
-            name: true,
-            description: true,
-            priceCents: true,
-            imageUrl: true,
-            isVeg: true,
-            isAvailable: true,
+    const [activeSession, categories] = await Promise.all([
+      db.tableSession.findFirst({
+        where:   { tableId: table.id, restaurantId: restaurant.id, status: "OPEN" },
+        select:  { id: true },
+        orderBy: { createdAt: "desc" },
+      }),
+      db.category.findMany({
+        where: { restaurantId: restaurant.id, isActive: true, deletedAt: null },
+        orderBy: { position: "asc" },
+        include: {
+          menuItems: {
+            where: { deletedAt: null },
+            orderBy: { createdAt: "asc" },
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              priceCents: true,
+              imageUrl: true,
+              isVeg: true,
+              isAvailable: true,
+            },
           },
         },
-      },
-    });
+      }),
+    ]);
 
-    return Response.json({
-      restaurant: {
-        name:       restaurant.name,
-        openNow:    restaurant.openNow,
-        logoUrl:    restaurant.logoUrl ?? null,
-        taxName:    restaurant.taxName    ?? "GST",
-        taxPercent: restaurant.taxPercent ?? 5,
-      },
-      table: { label: table.label, status: table.status },
-      categories,
-    });
+    return new Response(
+      JSON.stringify({
+        restaurant: {
+          name:       restaurant.name,
+          openNow:    restaurant.openNow,
+          logoUrl:    restaurant.logoUrl ?? null,
+          taxName:    restaurant.taxName    ?? "GST",
+          taxPercent: restaurant.taxPercent ?? 5,
+        },
+        table: {
+          id:              table.id,
+          label:           table.label,
+          status:          table.status,
+          activeSessionId: activeSession?.id ?? null,
+        },
+        categories,
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "public, s-maxage=5, stale-while-revalidate=15",
+        },
+      }
+    );
   } catch (err) {
     // Log server-side but never expose internals to the customer
     console.error("[menu:get]", err);

@@ -90,6 +90,7 @@ model Category {
   menuItems MenuItem[]
 
   @@index([restaurantId])
+  @@index([restaurantId, position])
 }
 
 model MenuItem {
@@ -108,6 +109,8 @@ model MenuItem {
   createdAt    DateTime @default(now())
 
   @@index([restaurantId])
+  @@index([categoryId])
+  @@index([restaurantId, isAvailable])
 }
 
 model Table {

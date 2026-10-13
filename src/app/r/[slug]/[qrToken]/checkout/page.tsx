@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ChevronRight, Shield } from "lucide-react";
-import { useCart, formatRupees } from "@/components/CartContext";
+import { useCart, formatRupees, getStoredOrders, saveStoredOrders } from "@/components/CartContext";
 
 const TAX_RATE = 0.05;
 const PACKING  = 2000;
@@ -83,9 +83,8 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
 
       if (!res.ok) { setError(json?.error || "Could not place order. Please try again."); setSubmitting(false); return; }
 
-      // Save order to localStorage so cart page shows it as previous order
-      const key = `inforyse_orders_${params.qrToken}`;
-      const existing = JSON.parse(localStorage.getItem(key) ?? "[]");
+      // Save order to localStorage with session ID so cart page shows it during active meal
+      const existing = getStoredOrders(params.qrToken, json.tableSessionId);
       existing.push({
         id:          json.order.id,
         orderNumber: json.order.orderNumber,
@@ -93,12 +92,13 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
         totalCents:  grandTotal,
         createdAt:   new Date().toISOString(),
         items:       lines.map(l => ({
-          nameSnapshot:      l.item.name,
+          nameSnapshot:       l.item.name,
           priceCentsSnapshot: l.item.priceCents,
-          quantity:          l.quantity,
+          quantity:           l.quantity,
         })),
+        sessionId:   json.tableSessionId,
       });
-      localStorage.setItem(key, JSON.stringify(existing));
+      saveStoredOrders(params.qrToken, existing, json.tableSessionId);
 
       // Clear only the current cart lines (NOT the past orders)
       // Call clear() AND explicitly remove from localStorage synchronously

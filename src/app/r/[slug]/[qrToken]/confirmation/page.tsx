@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { UtensilsCrossed, RefreshCw, X, AlertTriangle } from "lucide-react";
+import { getStoredOrders, saveStoredOrders } from "@/components/CartContext";
 
 const STEPS: { label: string; subLabel: string; key: string }[] = [
   { label: "Order Placed",         subLabel: "We received your order",       key: "NEW"       },
@@ -105,14 +106,13 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
         setCancelling(false);
         return;
       }
-      // Remove from past orders in localStorage
+      // Update past orders in localStorage
       try {
-        const key = `inforyse_orders_${params.qrToken}`;
-        const existing = JSON.parse(localStorage.getItem(key) ?? "[]");
-        const updated = existing.map((o: any) =>
+        const existing = getStoredOrders(params.qrToken);
+        const updated = existing.map((o) =>
           String(o.orderNumber) === String(orderNumber) ? { ...o, status: "CANCELLED" } : o
         );
-        localStorage.setItem(key, JSON.stringify(updated));
+        saveStoredOrders(params.qrToken, updated);
       } catch { /* ignore */ }
       setStatus("CANCELLED");
       setCancelled(true);

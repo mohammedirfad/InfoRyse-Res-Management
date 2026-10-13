@@ -3,16 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, RefreshCw } from "lucide-react";
-import { useCart, formatRupees } from "@/components/CartContext";
+import { useCart, formatRupees, getStoredOrders, clearStoredOrders, type StoredPastOrder } from "@/components/CartContext";
 
 const TAX_RATE = 0.05;
 const PACKING  = 2000;
 
-type PastOrder = {
-  id: string; orderNumber: number; status: string;
-  totalCents: number; createdAt: string;
-  items: { nameSnapshot: string; priceCentsSnapshot: number; quantity: number }[];
-};
+type PastOrder = StoredPastOrder;
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   NEW:       { label: "Waiting",   color: "text-orange-500" },
@@ -31,8 +27,7 @@ export default function CartPage({ params }: { params: { slug: string; qrToken: 
   const base = `/r/${params.slug}/${params.qrToken}`;
 
   useEffect(() => {
-    const raw = localStorage.getItem(`inforyse_orders_${params.qrToken}`);
-    if (raw) { try { setPastOrders(JSON.parse(raw)); } catch { /* ignore */ } }
+    setPastOrders(getStoredOrders(params.qrToken));
   }, [params.qrToken]);
 
   const subtotal   = totalCents;
@@ -227,11 +222,21 @@ export default function CartPage({ params }: { params: { slug: string; qrToken: 
                 <span className="text-xl font-extrabold">{formatRupees(confirmedTotal)}</span>
               </div>
 
-              <div className="px-4 mt-3">
+              <div className="px-4 mt-3 space-y-2">
                 <Link href={base}
                   className="flex items-center justify-center w-full border-2 border-gray-900 text-gray-900 py-3.5 rounded-2xl font-bold text-sm active:scale-[0.98] transition-all">
                   + Add more items
                 </Link>
+                <button
+                  onClick={() => {
+                    if (window.confirm("Clear completed orders for this table session?")) {
+                      clearStoredOrders(params.qrToken);
+                      setPastOrders([]);
+                    }
+                  }}
+                  className="w-full text-center text-xs text-gray-400 hover:text-red-500 py-2.5 transition-colors">
+                  Clear this table's order history
+                </button>
               </div>
             </>
           )}

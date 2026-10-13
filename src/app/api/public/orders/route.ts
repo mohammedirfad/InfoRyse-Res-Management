@@ -110,72 +110,93 @@ export async function POST(req: Request) {
       return sum + dbItem.priceCents * line.quantity;
     }, 0);
 
-    // 7) Per-restaurant sequential order number (simple, readable to staff).
-    const lastOrder = await db.order.findFirst({
-      where: { restaurantId: restaurant.id },
-      orderBy: { orderNumber: "desc" },
-      select: { orderNumber: true },
-    });
-    const nextOrderNumber = (lastOrder?.orderNumber ?? 0) + 1;
+    // 7) Sequential order number + table session creation inside resilient transaction
+    let session: { order: any; tableSessionId: string } | null = null;
+    let attempts = 0;
 
-    // 8) Find or create a TableSession for this table (groups all orders for one sitting).
-    // A new session starts when the table is marked OCCUPIED.
-    // All orders from this QR scan attach to the same open session.
-    const session = await db.$transaction(async (tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]) => {
-      // Find an open session for this table
-      let tableSession = await tx.tableSession.findFirst({
-        where: {
-          tableId:     table.id,
-          restaurantId: restaurant.id,
-          status:      "OPEN",
-        },
-        orderBy: { createdAt: "desc" },
-      });
+    while (attempts < 5) {
+      attempts++;
+      try {
+        session = await db.$transaction(async (tx: any) => {
+          const lastOrder = await tx.order.findFirst({
+            where:   { restaurantId: restaurant.id },
+            orderBy: { orderNumber: "desc" },
+            select:  { orderNumber: true },
+          });
+          const nextOrderNumber = (lastOrder?.orderNumber ?? 0) + 1;
 
-      // No open session → create one
-      if (!tableSession) {
-        tableSession = await tx.tableSession.create({
-          data: {
-            restaurantId: restaurant.id,
-            tableId:      table.id,
-            status:       "OPEN",
-          },
+          // Find an open session for this table
+          let tableSession = await tx.tableSession.findFirst({
+            where: {
+              tableId:      table.id,
+              restaurantId: restaurant.id,
+              status:       "OPEN",
+            },
+            orderBy: { createdAt: "desc" },
+          });
+
+          // No open session → create one
+          if (!tableSession) {
+            tableSession = await tx.tableSession.create({
+              data: {
+                restaurantId: restaurant.id,
+                tableId:      table.id,
+                status:       "OPEN",
+              },
+            });
+          }
+
+          const created = await tx.order.create({
+            data: {
+              restaurantId:   restaurant.id,
+              tableId:        table.id,
+              tableSessionId: tableSession.id,
+              orderNumber:    nextOrderNumber,
+              customerName:   body.customerName,
+              customerPhone:  body.customerPhone,
+              customerEmail:  (body as any).customerEmail,
+              notes:          body.notes,
+              orderType:      body.orderType ?? "DINE_IN",
+              paymentMethod:  body.paymentMethod ?? "PAY_AT_RESTAURANT",
+              status:         "NEW",
+              subtotalCents,
+              totalCents:     subtotalCents,
+              idempotencyKey: body.idempotencyKey,
+              items: {
+                create: body.items.map((line) => {
+                  const dbItem = dbItemById.get(line.menuItemId)!;
+                  return {
+                    menuItemId:         dbItem.id,
+                    nameSnapshot:       dbItem.name,
+                    priceCentsSnapshot: dbItem.priceCents,
+                    quantity:           line.quantity,
+                  };
+                }),
+              },
+              statusHistory: { create: { status: "NEW" } },
+            },
+            include: { items: true },
+          });
+
+          return { order: created, tableSessionId: tableSession.id };
         });
+        break;
+      } catch (err: any) {
+        if (err?.code === "P2002" && attempts < 5) {
+          // unique constraint conflict under high concurrency — backoff and retry with next number
+          await new Promise((r) => setTimeout(r, 20 + Math.random() * 40));
+          continue;
+        }
+        throw err;
       }
+    }
 
-      const created = await tx.order.create({
-        data: {
-          restaurantId:  restaurant.id,
-          tableId:       table.id,
-          tableSessionId: tableSession.id,
-          orderNumber:   nextOrderNumber,
-          customerName:  body.customerName,
-          customerPhone: body.customerPhone,
-          customerEmail: (body as any).customerEmail,
-          notes:         body.notes,
-          orderType:     body.orderType ?? "DINE_IN",
-          paymentMethod: body.paymentMethod ?? "PAY_AT_RESTAURANT",
-          status:        "NEW",
-          subtotalCents,
-          totalCents:    subtotalCents,
-          idempotencyKey: body.idempotencyKey,
-          items: {
-            create: body.items.map((line) => {
-              const dbItem = dbItemById.get(line.menuItemId)!;
-              return {
-                menuItemId:         dbItem.id,
-                nameSnapshot:       dbItem.name,
-                priceCentsSnapshot: dbItem.priceCents,
-                quantity:           line.quantity,
-              };
-            }),
-          },
-          statusHistory: { create: { status: "NEW" } },
-        },
-        include: { items: true },
-      });
-      return { order: created, tableSessionId: tableSession.id };
-    });
+    if (!session) {
+      return Response.json(
+        { error: "Could not place order due to high concurrency. Please try again." },
+        { status: 500 }
+      );
+    }
 
     return Response.json({ order: session.order, tableSessionId: session.tableSessionId }, { status: 201 });
   } catch (err) {

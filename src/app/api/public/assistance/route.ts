@@ -37,38 +37,57 @@ export async function POST(req: Request) {
       ...(body.custom ? [`Custom: ${body.custom}`] : []),
     ].join(", ");
 
-    // Record as a zero-item "assistance" order so admin/staff can see it
-    // in the live orders board without needing a separate WebSocket channel.
-    await db.order.create({
-      data: {
-        restaurantId:   restaurant.id,
-        tableId:        table.id,
-        orderNumber:    await nextOrderNumber(restaurant.id),
-        customerName:   `Table ${table.label}`,
-        status:         "NEW",
-        subtotalCents:  0,
-        totalCents:     0,
-        idempotencyKey: `assist_${table.id}_${Date.now()}`,
-        notes:          `🔔 ASSISTANCE REQUEST: ${requestSummary}`,
-        orderType:      "DINE_IN",
-        paymentMethod:  "PAY_AT_RESTAURANT",
-        items: { create: [] },
-        statusHistory: { create: { status: "NEW" } },
-      },
-    });
+    let attempts = 0;
+    let saved = false;
+
+    while (attempts < 5) {
+      attempts++;
+      try {
+        await db.$transaction(async (tx) => {
+          const last = await tx.order.findFirst({
+            where:   { restaurantId: restaurant.id },
+            orderBy: { orderNumber: "desc" },
+            select:  { orderNumber: true },
+          });
+          const orderNum = (last?.orderNumber ?? 0) + 1;
+          const randomSuffix = Math.random().toString(36).substring(2, 8);
+
+          await tx.order.create({
+            data: {
+              restaurantId:   restaurant.id,
+              tableId:        table.id,
+              orderNumber:    orderNum,
+              customerName:   `Table ${table.label}`,
+              status:         "NEW",
+              subtotalCents:  0,
+              totalCents:     0,
+              idempotencyKey: `assist_${table.id}_${Date.now()}_${randomSuffix}`,
+              notes:          `🔔 ASSISTANCE REQUEST: ${requestSummary}`,
+              orderType:      "DINE_IN",
+              paymentMethod:  "PAY_AT_RESTAURANT",
+              items:          { create: [] },
+              statusHistory:  { create: { status: "NEW" } },
+            },
+          });
+        });
+        saved = true;
+        break;
+      } catch (err: any) {
+        if (err?.code === "P2002" && attempts < 5) {
+          await new Promise((r) => setTimeout(r, 20 + Math.random() * 40));
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    if (!saved) {
+      return Response.json({ error: "Could not record assistance request. Please try again." }, { status: 500 });
+    }
 
     return Response.json({ ok: true });
   } catch (err) {
     console.error("[assistance]", err);
     return Response.json({ ok: false }, { status: 500 });
   }
-}
-
-async function nextOrderNumber(restaurantId: string) {
-  const last = await db.order.findFirst({
-    where: { restaurantId },
-    orderBy: { orderNumber: "desc" },
-    select: { orderNumber: true },
-  });
-  return (last?.orderNumber ?? 0) + 1;
 }

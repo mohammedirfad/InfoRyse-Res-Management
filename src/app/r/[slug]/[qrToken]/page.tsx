@@ -10,7 +10,7 @@ import { useCart, formatRupees, type MenuItem } from "@/components/CartContext";
 type Category  = { id: string; name: string; menuItems: MenuItem[] };
 type MenuData  = {
   restaurant: { name: string; openNow: boolean; address?: string; logoUrl?: string | null; taxName?: string; taxPercent?: number };
-  table:       { label: string; status: string };
+  table:       { id?: string; label: string; status: string; activeSessionId?: string | null };
   categories:  Category[];
 };
 
@@ -241,7 +241,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
   const [heroFrozen, setHeroFrozen] = useState(false); // stop auto-advance on interaction
   const [phase, setPhase]       = useState<"landing"|"menu">("landing"); // landing splash first
   const searchRef = useRef<HTMLInputElement>(null);
-  const { addItem, totalCount, totalCents } = useCart();
+  const { addItem, totalCount, totalCents, syncSession } = useCart();
 
   /* fetch + cache in sessionStorage */
   useEffect(() => {
@@ -252,6 +252,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
         const j: MenuData = JSON.parse(cached);
         setData(j);
         setActiveCat(j.categories[0]?.id ?? null);
+        syncSession(j.table.activeSessionId, j.table.status);
         // still refresh in background
       } catch { /* ignore */ }
     }
@@ -269,10 +270,11 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
       .then((j: MenuData) => {
         setData(j);
         setActiveCat(j.categories[0]?.id ?? null);
+        syncSession(j.table.activeSessionId, j.table.status);
         sessionStorage.setItem(cacheKey, JSON.stringify(j));
       })
       .catch(e => { if (!data) setError(e.message); });
-  }, [params.slug, params.qrToken]);
+  }, [params.slug, params.qrToken, syncSession]);
 
   /* hero auto-advance — stable, won't re-trigger on every render */
   const allItems = useMemo(() => data?.categories.flatMap(c=>c.menuItems).filter(i=>i.isAvailable) ?? [], [data]);
@@ -350,9 +352,11 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
       totalItems={allItems.length}
       categories={d.categories.length}
       cartCount={totalCount}
+      cartTotalCents={totalCents}
       slug={params.slug}
       qrToken={params.qrToken}
       onEnterMenu={() => setPhase("menu")}
+      onOpenAssist={() => setShowAssist(true)}
     />
   );
 
