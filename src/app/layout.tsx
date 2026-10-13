@@ -19,11 +19,15 @@ export const metadata: Metadata = {
   description: "Digital Menu & QR Ordering SaaS",
 };
 
+import { LanguageProvider } from "@/lib/i18n";
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={inter.variable}>
       <body className={`min-h-screen bg-white text-gray-900 antialiased ${inter.className}`}>
-        {children}
+        <LanguageProvider>
+          {children}
+        </LanguageProvider>
       </body>
     </html>
   );

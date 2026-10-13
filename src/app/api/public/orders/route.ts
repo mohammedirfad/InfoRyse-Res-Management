@@ -180,6 +180,13 @@ export async function POST(req: Request) {
             include: { items: true },
           });
 
+          if (table.status !== "OCCUPIED") {
+            await tx.table.update({
+              where: { id: table.id },
+              data:  { status: "OCCUPIED" },
+            });
+          }
+
           return { order: created, tableSessionId: tableSession.id };
         });
         break;

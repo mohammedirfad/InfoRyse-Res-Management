@@ -12,9 +12,8 @@ import {
   clearStoredOrders,
   type StoredPastOrder,
 } from "@/components/CartContext";
-
-const TAX_RATE = 0.05;
-const PACKING  = 2000;
+import { useLanguage } from "@/lib/i18n";
+import { LanguageSelector } from "@/components/LanguageSelector";
 
 interface TableSessionData {
   table: { id: string; label: string; status: string };
@@ -56,6 +55,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string; bg: string; 
 
 function CartPageContent({ params }: { params: { slug: string; qrToken: string } }) {
   const { lines, setQuantity, removeItem, totalCents, syncSession } = useCart();
+  const { t, tDish } = useLanguage();
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab") === "confirmed" ? "confirmed" : "new";
 
@@ -129,12 +129,11 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
   }, [params.qrToken, refreshTableOrders]);
 
   const subtotal   = totalCents;
-  const tax        = Math.round(subtotal * TAX_RATE);
-  const grandTotal = subtotal + tax + PACKING;
+  const grandTotal = subtotal;
 
   // Running total calculation
   const liveTableTotal = sessionData?.session
-    ? sessionData.session.totalCents
+    ? Math.max(0, sessionData.session.subtotalCents - (sessionData.session as any).discountCents || sessionData.session.subtotalCents)
     : pastOrders.filter((o) => o.status !== "CANCELLED").reduce((s, o) => s + o.totalCents, 0);
 
   function fmtTime(d: string) {
@@ -159,22 +158,25 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               <ArrowLeft className="h-5 w-5 text-gray-700" />
             </Link>
             <div>
-              <h1 className="font-bold text-gray-900 text-base leading-tight">Order & Table Tab</h1>
-              <p className="text-[11px] font-semibold text-emerald-700">Table {tableLabel}</p>
+              <h1 className="font-bold text-gray-900 text-base leading-tight">{t("orderAndTableTab", "Order & Table Tab")}</h1>
+              <p className="text-[11px] font-semibold text-emerald-700">{t("table", "Table")} {tableLabel}</p>
             </div>
           </div>
 
-          {tab === "confirmed" && (
-            <button
-              onClick={refreshTableOrders}
-              disabled={isFetchingSession}
-              aria-label="Refresh orders"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold active:scale-95 transition-all"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${isFetchingSession ? "animate-spin text-emerald-600" : ""}`} />
-              <span>{isFetchingSession ? "Updating…" : "Live sync"}</span>
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <LanguageSelector variant="compact" />
+            {tab === "confirmed" && (
+              <button
+                onClick={refreshTableOrders}
+                disabled={isFetchingSession}
+                aria-label="Refresh orders"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold active:scale-95 transition-all"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isFetchingSession ? "animate-spin text-emerald-600" : ""}`} />
+                <span>{isFetchingSession ? "…" : "Live"}</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Navigation Tabs */}
@@ -185,7 +187,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               tab === "new" ? "text-gray-900" : "text-gray-400 hover:text-gray-600"
             }`}
           >
-            Yet to order {lines.length > 0 && `(${lines.length})`}
+            {t("newOrder", "Current Cart")} {lines.length > 0 && `(${lines.length})`}
             {tab === "new" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-900 rounded-full" />}
           </button>
           <button
@@ -194,7 +196,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               tab === "confirmed" ? "text-gray-900" : "text-gray-400 hover:text-gray-600"
             }`}
           >
-            Confirmed Table Tab {confirmedCount > 0 && `(${confirmedCount})`}
+            {t("confirmedOrders", "Table Bill & Tab")} {confirmedCount > 0 && `(${confirmedCount})`}
             {tab === "confirmed" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600 rounded-full" />}
           </button>
         </div>
@@ -284,19 +286,11 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               <div className="px-4 py-4 bg-white mt-3 border-y border-gray-100">
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between text-gray-500">
-                    <span>Subtotal</span>
-                    <span>{formatRupees(subtotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-500">
-                    <span>Packing & Service</span>
-                    <span>{formatRupees(PACKING)}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-500">
-                    <span>Taxes (5% GST)</span>
-                    <span>{formatRupees(tax)}</span>
+                    <span>{t("subtotal", "Subtotal")}</span>
+                    <span className="font-semibold text-gray-800">{formatRupees(subtotal)}</span>
                   </div>
                   <div className="flex justify-between font-bold text-gray-900 pt-2 border-t border-gray-100 text-base">
-                    <span>Total for this order</span>
+                    <span>{t("totalForOrder", "Total for this order")}</span>
                     <span className="text-emerald-700">{formatRupees(grandTotal)}</span>
                   </div>
                 </div>
@@ -311,7 +305,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                 href={`${base}/checkout?note=${encodeURIComponent(note)}`}
                 className="flex items-center justify-between w-full bg-gray-900 text-white px-6 py-4 rounded-2xl font-bold text-base active:scale-[0.98] transition-all shadow-md"
               >
-                <span>Proceed to checkout</span>
+                <span>{t("proceedToCheckout", "Proceed to checkout")}</span>
                 <span className="bg-white/20 px-3 py-1 rounded-xl text-sm font-semibold">{formatRupees(grandTotal)}</span>
               </Link>
             </div>
@@ -493,21 +487,22 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                   {sessionData?.session && (
                     <div className="border-t border-gray-100 pt-3 space-y-1.5 text-xs text-gray-600">
                       <div className="flex justify-between">
-                        <span>Items Subtotal</span>
-                        <span>{formatRupees(sessionData.session.subtotalCents)}</span>
+                        <span>{t("subtotal", "Items Subtotal")}</span>
+                        <span className="font-semibold text-gray-900">{formatRupees(sessionData.session.subtotalCents)}</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span>Packing & Service</span>
-                        <span>{formatRupees(sessionData.session.packingCents)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>GST Taxes (5%)</span>
-                        <span>{formatRupees(sessionData.session.taxCents)}</span>
-                      </div>
+                      {(sessionData.session as any).discountCents > 0 && (
+                        <div className="flex justify-between text-emerald-700 font-semibold">
+                          <span>{(sessionData.session as any).discountName || t("discount", "Discount")}</span>
+                          <span>−{formatRupees((sessionData.session as any).discountCents)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between font-black text-gray-900 text-sm pt-2 border-t border-gray-100">
-                        <span>Total Table Bill</span>
-                        <span className="text-emerald-700">{formatRupees(sessionData.session.totalCents)}</span>
+                        <span>{t("runningTotalBill", "Running Table Bill")}</span>
+                        <span className="text-emerald-700">{formatRupees(liveTableTotal)}</span>
                       </div>
+                      <p className="text-[10px] text-gray-400 text-center pt-1">
+                        Official GST invoice printed upon settling at the counter.
+                      </p>
                     </div>
                   )}
                 </div>

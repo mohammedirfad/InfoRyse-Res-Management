@@ -11,9 +11,45 @@ export async function GET() {
     const tables = await db.table.findMany({
       where: { restaurantId, deletedAt: null },
       orderBy: { label: "asc" },
+      include: {
+        sessions: {
+          where: { status: "OPEN" },
+          take: 1,
+          include: {
+            orders: {
+              where: { status: { not: "CANCELLED" } },
+              select: { id: true, subtotalCents: true },
+            },
+          },
+        },
+      },
     });
-    return Response.json({
-      tables: tables.map((t) => ({ ...t, menuUrl: buildCustomerMenuUrl(restaurant.slug, t.qrToken) })),
+
+    const mapped = tables.map((t) => {
+      const activeSession = t.sessions?.[0] || null;
+      const activeOrders = activeSession?.orders || [];
+      const hasActiveOrders = activeOrders.length > 0;
+      const activeSubtotal = activeOrders.reduce((s, o) => s + o.subtotalCents, 0);
+
+      return {
+        id: t.id,
+        label: t.label,
+        section: t.section,
+        capacity: t.capacity,
+        status: hasActiveOrders ? "OCCUPIED" : t.status,
+        qrToken: t.qrToken,
+        menuUrl: buildCustomerMenuUrl(restaurant.slug, t.qrToken),
+        hasActiveSession: Boolean(activeSession),
+        activeOrderCount: activeOrders.length,
+        activeSubtotalCents: activeSubtotal,
+      };
+    });
+
+    return new Response(JSON.stringify({ tables: mapped }), {
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+      },
     });
   } catch (err) {
     return tenantErrorResponse(err);

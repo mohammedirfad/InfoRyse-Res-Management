@@ -53,6 +53,7 @@ model Restaurant {
   tables        Table[]
   orders        Order[]
   tableSessions TableSession[]
+  bills         Bill[]
 
   @@index([slug])
 }
@@ -130,6 +131,7 @@ model Table {
 
   orders       Order[]
   sessions     TableSession[]
+  bills        Bill[]
 
   @@index([restaurantId])
 }
@@ -205,3 +207,36 @@ model OrderStatusHistory {
 
   @@index([orderId])
 }
+
+model Bill {
+  id              String      @id @default(uuid())
+  restaurantId    String
+  restaurant      Restaurant  @relation(fields: [restaurantId], references: [id])
+  tableId         String?
+  table           Table?      @relation(fields: [tableId], references: [id])
+  tableSessionId  String?
+  billNumber      Int
+  tableLabel      String
+  customerName    String?
+  customerPhone   String?
+  customerEmail   String?
+  orderCount      Int         @default(1)
+  subtotalCents   Int
+  discountCents   Int         @default(0)
+  discountPercent Float       @default(0.0)
+  discountName    String?
+  taxCents        Int         @default(0)
+  taxPercent      Float       @default(5.0)
+  taxName         String      @default("GST")
+  packingCents    Int         @default(0)
+  totalCents      Int
+  paymentMethod   String      @default("CASH") // CASH, UPI, CARD, OTHER
+  paymentStatus   String      @default("PAID") // PAID, PENDING
+  paidAt          DateTime?
+  itemsJson       String      // JSON string of [{ name, quantity, unitPrice, subtotal }]
+  createdAt       DateTime    @default(now())
+
+  @@index([restaurantId, createdAt])
+  @@unique([restaurantId, billNumber])
+}
+
