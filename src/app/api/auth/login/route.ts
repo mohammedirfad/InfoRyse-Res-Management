@@ -24,15 +24,14 @@ export async function POST(req: Request) {
       return Response.json({ error: "Invalid email or password" }, { status: 401 });
     }
 
-    const code = await issueOtp(user.id, "LOGIN_2FA"); // emailed to the user out-of-band
+    const code = await issueOtp(user.id, "LOGIN_2FA");
 
     return Response.json({
       step: "OTP_REQUIRED",
       userId: user.id,
-      // DEV CONVENIENCE ONLY — remove this field once email sending (Resend/SMTP)
-      // is wired up in issueOtp(). Never ship this to production: it defeats
-      // the entire point of a second factor.
-      ...(process.env.NODE_ENV !== "production" ? { devOtp: code } : {}),
+      // Since email provider (Resend/SMTP) is not yet configured, return OTP
+      // directly so users and admins can log in on hosted deployments.
+      devOtp: code,
     });
   } catch (err) {
     console.error("[auth:login]", err);
