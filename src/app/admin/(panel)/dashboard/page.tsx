@@ -23,12 +23,12 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const QUICK_ACTIONS = [
+  { href: "/admin/orders", label: "Live Orders",      icon: ShoppingBag, color: "bg-blue-50 text-blue-700 border-blue-200" },
+  { href: "/admin/bill",   label: "Table Bill",       icon: Clock,       color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   { href: "/admin/menu",   label: "Add Menu Item",    icon: Plus,        color: "bg-green-50 text-green-700 border-green-200" },
-  { href: "/admin/menu",   label: "Manage Categories",icon: LayoutGrid,  color: "bg-blue-50 text-blue-700 border-blue-200" },
-  { href: "/admin/offers", label: "Create Offer",     icon: TrendingUp,  color: "bg-amber-50 text-amber-700 border-amber-200" },
-  { href: "/admin/tables", label: "Generate QR",      icon: QrCode,      color: "bg-purple-50 text-purple-700 border-purple-200" },
   { href: "/admin/tables", label: "Manage Tables",    icon: LayoutGrid,  color: "bg-pink-50 text-pink-700 border-pink-200" },
-  { href: "/admin/analytics", label: "View Reports",  icon: BarChart2,   color: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+  { href: "/admin/offers", label: "Create Offer",     icon: TrendingUp,  color: "bg-amber-50 text-amber-700 border-amber-200", ownerOnly: true },
+  { href: "/admin/analytics", label: "View Reports",  icon: BarChart2,   color: "bg-indigo-50 text-indigo-700 border-indigo-200", ownerOnly: true },
 ];
 
 function buildHourlySales(orders: Order[]) {
@@ -47,14 +47,21 @@ function buildHourlySales(orders: Order[]) {
 export default function DashboardPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [restaurantName, setRestaurantName] = useState("Your Restaurant");
+  const [userRole, setUserRole] = useState("OWNER");
+
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/admin/orders")
-      .then((r) => r.json())
-      .then((d) => setOrders(d.orders ?? []));
-    fetch("/api/admin/me")
-      .then((r) => r.json())
-      .then((d) => setRestaurantName(d.restaurant?.name ?? "Your Restaurant"));
+    Promise.all([
+      fetch("/api/admin/orders").then((r) => r.json()).catch(() => ({ orders: [] })),
+      fetch("/api/admin/me").then((r) => r.json()).catch(() => ({})),
+    ])
+      .then(([ordersData, meData]) => {
+        setOrders(ordersData.orders ?? []);
+        if (meData.restaurant?.name) setRestaurantName(meData.restaurant.name);
+        if (meData.role) setUserRole(meData.role);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const today = orders.filter(
@@ -241,7 +248,7 @@ export default function DashboardPage() {
           <div className="card p-5">
             <h2 className="font-semibold text-gray-900 mb-3">Quick Actions</h2>
             <div className="grid grid-cols-3 gap-2">
-              {QUICK_ACTIONS.slice(0, 6).map((a) => (
+              {QUICK_ACTIONS.filter(a => !(userRole === "STAFF" && a.ownerOnly)).slice(0, 6).map((a) => (
                 <Link
                   key={a.href + a.label}
                   href={a.href}

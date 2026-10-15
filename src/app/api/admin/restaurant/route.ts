@@ -5,7 +5,12 @@ import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 export const dynamic = "force-dynamic";
 
 const PatchSchema = z.object({
-  name:            z.string().min(1).max(100).optional(),
+  name:            z.string().trim().min(1).max(100).optional(),
+  ownerName:       z.string().trim().max(100).optional().nullable(),
+  contactEmail:    z.string().trim().email().optional().nullable(),
+  contactPhone:    z.string().trim().max(25).optional().nullable(),
+  location:        z.string().trim().max(200).optional().nullable(),
+  logoUrl:         z.string().optional().nullable(),
   openNow:         z.boolean().optional(),
   taxName:         z.string().max(30).optional(),
   taxPercent:      z.number().min(0).max(30).optional(),
@@ -26,7 +31,10 @@ export async function GET() {
 
 export async function PATCH(req: Request) {
   try {
-    const { restaurantId } = await requireRestaurantUser();
+    const { restaurantId, role } = await requireRestaurantUser();
+    if (role !== "OWNER") {
+      return Response.json({ error: "Access denied. Only restaurant owners can modify restaurant settings." }, { status: 403 });
+    }
     const body = PatchSchema.parse(await req.json());
     const updated = await db.restaurant.update({
       where: { id: restaurantId },

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { emitOrderEvent } from "@/lib/events";
 import type { Prisma } from "@prisma/client";
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
@@ -41,6 +42,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       }),
     ]);
     const updated = await db.order.findUnique({ where: { id: order.id } });
+
+    emitOrderEvent({
+      restaurantId,
+      type: "order_updated",
+      data: { orderId: order.id, status: nextStatus },
+    });
 
     return Response.json({ order: updated });
   } catch (err) {

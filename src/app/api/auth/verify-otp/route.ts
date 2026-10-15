@@ -13,10 +13,25 @@ export async function POST(req: Request) {
     const ok = await verifyOtp(userId, "LOGIN_2FA", code);
     if (!ok) return Response.json({ error: "Invalid or expired code" }, { status: 401 });
 
-    const user = await db.user.findUniqueOrThrow({ where: { id: userId } });
+    const user = await db.user.findUniqueOrThrow({
+      where: { id: userId },
+      include: { restaurant: { select: { isActive: true } } },
+    });
+
+    if (user.restaurant && !user.restaurant.isActive) {
+      return Response.json(
+        { error: "Account Suspended: This restaurant has been deactivated by Super Admin." },
+        { status: 403 }
+      );
+    }
+
     await createSession({ userId: user.id, role: user.role, restaurantId: user.restaurantId });
 
-    return Response.json({ ok: true, role: user.role });
+    return Response.json({
+      ok: true,
+      role: user.role,
+      mustChangePassword: user.mustChangePassword,
+    });
   } catch (err) {
     console.error("[auth:verify-otp]", err);
     return Response.json({ error: "Verification failed" }, { status: 500 });

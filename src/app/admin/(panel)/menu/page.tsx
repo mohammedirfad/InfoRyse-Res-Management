@@ -137,12 +137,25 @@ export default function MenuManagementPage() {
     load();
   }
 
-  async function addCategory() {
-    if (!newCatName.trim()) return;
-    await fetch("/api/admin/categories", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newCatName }),
-    });
-    setNewCatName(""); load();
+  async function addCategory(customName?: string) {
+    const targetName = (customName || newCatName).trim();
+    if (!targetName) return;
+    try {
+      const res = await fetch("/api/admin/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: targetName }),
+      });
+      const data = await res.json();
+      setNewCatName("");
+      if (data.category) {
+        setCategories((prev) => [...prev, data.category]);
+        setForm((f) => ({ ...f, categoryId: data.category.id }));
+      }
+      load();
+    } catch {
+      // silent
+    }
   }
 
   const filtered = items.filter((i) => {
@@ -392,11 +405,23 @@ export default function MenuManagementPage() {
               </div>
 
               {/* Add category */}
-              <div className="bg-gray-50 rounded-2xl p-3">
-                <p className="text-xs font-medium text-gray-500 mb-2">Add new category</p>
+              <div className="bg-gray-50 rounded-2xl p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-700">Add or Quick-Pick Category</p>
                 <div className="flex gap-2">
-                  <input className="input flex-1 text-xs py-2" placeholder="Category name" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} />
-                  <button onClick={addCategory} className="btn-primary bg-[#132A1E] text-white text-xs px-3 py-2">Add</button>
+                  <input className="input flex-1 text-xs py-2 bg-white" placeholder="Type custom category name..." value={newCatName} onChange={(e) => setNewCatName(e.target.value)} />
+                  <button type="button" onClick={() => addCategory()} className="btn-primary bg-[#132A1E] text-white text-xs px-3 py-2 rounded-xl font-bold">Add</button>
+                </div>
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {["Breakfast", "Snacks & Quick Bites", "Combos & Meals", "Breads & Rice", "Hot Beverages", "Cold Drinks", "Desserts"].map(cName => (
+                    <button
+                      key={cName}
+                      type="button"
+                      onClick={() => addCategory(cName)}
+                      className="text-[10px] bg-white border border-gray-200 text-gray-600 hover:text-emerald-800 hover:border-emerald-300 px-2 py-0.5 rounded-md font-medium transition-colors"
+                    >
+                      + {cName}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>

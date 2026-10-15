@@ -26,12 +26,14 @@ export default function SuperAdminSidebar() {
       {/* Logo */}
       <div className="px-5 py-5 border-b border-white/10">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
-            <Zap className="h-5 w-5 text-blue-400" />
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-[#1F4733] to-[#132A1E] border border-[#D4A94C]/30 p-1.5 flex items-center justify-center flex-shrink-0 shadow-sm">
+            <img src="/icon.svg" alt="InfoRyse" className="h-full w-full object-contain" />
           </div>
           <div>
-            <p className="font-bold text-white text-base leading-tight">InfoRyse</p>
-            <p className="text-[10px] text-blue-400 leading-tight">IT Solutions</p>
+            <p className="font-bold text-white text-base leading-tight">
+              Info<span className="text-[#D4A94C]">Ryse</span>
+            </p>
+            <p className="text-[10px] text-[#D4A94C] font-semibold leading-tight tracking-wider uppercase">Enterprise Cloud</p>
           </div>
         </div>
         <div className="mt-3 bg-white/5 rounded-xl px-3 py-2">

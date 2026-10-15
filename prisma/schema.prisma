@@ -44,6 +44,11 @@ model Restaurant {
   discountActive   Boolean  @default(false)
   discountPercent  Float?   @default(0.0)
   discountName     String?  @default("Special Offer")
+  ownerName        String?
+  contactEmail     String?
+  contactPhone     String?
+  location         String?
+  plan             String?  @default("Pro")
   createdAt        DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -59,13 +64,16 @@ model Restaurant {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String
-  role         Role
-  restaurantId String? // null for SUPER_ADMIN
-  restaurant   Restaurant? @relation(fields: [restaurantId], references: [id])
-  createdAt    DateTime @default(now())
+  id                 String   @id @default(uuid())
+  email              String   @unique
+  name               String?
+  phone              String?
+  passwordHash       String
+  role               Role
+  mustChangePassword Boolean  @default(false)
+  restaurantId       String? // null for SUPER_ADMIN
+  restaurant         Restaurant? @relation(fields: [restaurantId], references: [id])
+  createdAt          DateTime @default(now())
 
   @@index([restaurantId])
 }

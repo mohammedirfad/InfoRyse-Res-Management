@@ -59,7 +59,7 @@ function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
 }
 
-export async function issueOtp(userId: string, purpose: string) {
+export async function issueOtp(userId: string, purpose: string, userEmail?: string) {
   const code = generateOtp();
   const codeHash = await bcrypt.hash(code, 10);
   await db.otpCode.create({
@@ -70,7 +70,19 @@ export async function issueOtp(userId: string, purpose: string) {
       expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
     },
   });
-  // Send `code` via email here (Resend / SMTP). Never log it in production.
+
+  if (userEmail) {
+    // Import dynamically or dispatch email
+    import("@/lib/email").then(({ sendEmail, buildOtpEmailHtml }) => {
+      sendEmail({
+        to: userEmail,
+        subject: `Your InfoRyse Verification Code: ${code}`,
+        html: buildOtpEmailHtml({ code }),
+        text: `Your InfoRyse verification code is: ${code}. It expires in 5 minutes.`,
+      }).catch((err) => console.error("[Auth:OTP Email]", err));
+    });
+  }
+
   return code;
 }
 

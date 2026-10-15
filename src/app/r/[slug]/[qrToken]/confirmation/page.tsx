@@ -51,25 +51,40 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   const canCancel   = CANCELLABLE.includes(status) && !cancelled;
   const currentIdx  = STATUS_ORDER.indexOf(status);
 
-  // Smart polling
+  // Smart polling with error backoff
   useEffect(() => {
     if (!orderNumber) return;
     let stopped = false;
     let interval = 5000;
+    let failCount = 0;
 
     async function poll() {
       if (stopped) return;
       setIsPolling(true);
       const newStatus = await fetchStatus(params.slug, orderNumber);
       setIsPolling(false);
-      if (newStatus && newStatus !== status) {
-        setStatus(newStatus);
-        setLastUpdated(new Date());
-        if (newStatus === "CANCELLED") setCancelled(true);
+
+      if (newStatus) {
+        failCount = 0;
+        if (newStatus !== status) {
+          setStatus(newStatus);
+          setLastUpdated(new Date());
+          if (newStatus === "CANCELLED") setCancelled(true);
+        }
+        if (newStatus === "ACCEPTED" || newStatus === "PREPARING") interval = 10000;
+        if (newStatus === "READY") interval = 8000;
+        if (newStatus === "COMPLETED" || newStatus === "CANCELLED") {
+          stopped = true;
+          return;
+        }
+      } else {
+        failCount++;
+        if (failCount >= 3) {
+          // Back off if order is pending or lookup failed
+          interval = 15000;
+        }
       }
-      if (newStatus === "ACCEPTED" || newStatus === "PREPARING") interval = 12000;
-      if (newStatus === "READY") interval = 8000;
-      if (newStatus === "COMPLETED" || newStatus === "CANCELLED") { stopped = true; return; }
+
       if (!stopped) pollTimer.current = setTimeout(poll, interval);
     }
 
@@ -131,53 +146,57 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
     <div className="min-h-screen bg-[#FBF7F1] pb-12">
 
       {/* Hero */}
-      <div className="relative bg-gradient-to-br from-[#0D1F15] to-[#132A1E] text-white px-5 pt-14 pb-16 rounded-b-[2.5rem] overflow-hidden">
+      <div className="relative bg-gradient-to-br from-[#0D1F15] to-[#132A1E] text-white px-5 pt-10 pb-8 rounded-b-3xl shadow-md overflow-hidden">
         <div className="absolute -top-10 -right-10 h-48 w-48 rounded-full bg-[#D4A94C]/10 blur-xl pointer-events-none" />
         <div className="relative flex flex-col items-center text-center">
-          <div className="relative mb-5">
-            <div className="absolute inset-0 rounded-full bg-green-400/20 scale-150 animate-pulse pointer-events-none" />
-            <div className="relative h-24 w-24 rounded-full bg-gradient-to-br from-green-400 to-green-500 flex items-center justify-center shadow-2xl animate-pop">
-              <svg className="h-12 w-12 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+          <div className="relative mb-4">
+            <div className="absolute inset-0 rounded-full bg-emerald-400/20 scale-150 animate-pulse pointer-events-none" />
+            <div className="relative h-20 w-20 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-xl animate-pop">
+              <svg className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
               </svg>
             </div>
           </div>
-          <h1 className="text-3xl font-display mb-1">
+          <h1 className="text-2xl sm:text-3xl font-display mb-1 text-white">
             Thank You{name ? `, ${name.split(" ")[0]}` : ""}! 🎉
           </h1>
-          <p className="text-white/60 text-sm max-w-xs leading-relaxed">
+          <p className="text-emerald-100/70 text-xs sm:text-sm max-w-xs leading-relaxed">
             Your order has been sent to the kitchen!
           </p>
         </div>
       </div>
 
-      <div className="px-4 -mt-6 space-y-3.5">
+      <div className="px-4 pt-4 space-y-4 max-w-lg mx-auto">
 
         {/* Order details */}
         {orderNumber && (
-          <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-black/5 shadow-xs overflow-hidden">
             <div className="bg-[#132A1E]/5 px-5 py-4 flex items-center justify-between border-b border-black/5">
               <div>
-                <p className="text-xs text-gray-400 font-medium">Order ID</p>
-                <p className="text-2xl font-extrabold text-[#132A1E] font-mono tracking-tight">{orderId}</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Order ID</p>
+                <p className="text-xl sm:text-2xl font-extrabold text-[#132A1E] font-mono tracking-tight mt-0.5">{orderId}</p>
               </div>
               <div className="text-right">
-                <p className="text-xs text-gray-400">Total</p>
-                <p className="text-xl font-bold text-gray-900">₹{(total / 100).toFixed(0)}</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Total</p>
+                <p className="text-xl font-extrabold text-gray-900 mt-0.5">₹{(total / 100).toFixed(0)}</p>
               </div>
             </div>
             <div className="px-5 py-4 grid grid-cols-2 gap-4 text-sm">
-              <div><p className="text-xs text-gray-400">Date</p>
-                <p className="font-semibold text-gray-800">{placedAt.current.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}</p>
+              <div>
+                <p className="text-xs text-gray-400">Date</p>
+                <p className="font-semibold text-gray-800 mt-0.5">{placedAt.current.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}</p>
               </div>
-              <div><p className="text-xs text-gray-400">Time</p>
-                <p className="font-semibold text-gray-800">{fmt(placedAt.current)}</p>
+              <div>
+                <p className="text-xs text-gray-400">Time</p>
+                <p className="font-semibold text-gray-800 mt-0.5">{fmt(placedAt.current)}</p>
               </div>
-              <div><p className="text-xs text-gray-400">Type</p>
-                <p className="font-semibold text-gray-800">Dine In</p>
+              <div>
+                <p className="text-xs text-gray-400">Type</p>
+                <p className="font-semibold text-gray-800 mt-0.5">Dine In</p>
               </div>
-              <div><p className="text-xs text-gray-400">Payment</p>
-                <p className="font-semibold text-gray-800">Pay at Counter</p>
+              <div>
+                <p className="text-xs text-gray-400">Payment</p>
+                <p className="font-semibold text-gray-800 mt-0.5">Pay at Counter</p>
               </div>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { emitOrderEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,12 @@ export async function POST(
         data:  { status: "AVAILABLE" },
       }),
     ]);
+
+    emitOrderEvent({
+      restaurantId,
+      type: "bill_updated",
+      data: { sessionId: session.id, tableId: session.tableId },
+    });
 
     return Response.json({ ok: true });
   } catch (err) {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { checkOrderRateLimit } from "@/lib/rateLimit";
+import { emitOrderEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -206,6 +207,17 @@ export async function POST(req: Request) {
         { status: 500 }
       );
     }
+
+    emitOrderEvent({
+      restaurantId: restaurant.id,
+      type: "order_created",
+      data: {
+        orderId: session.order.id,
+        orderNumber: session.order.orderNumber,
+        tableId: table.id,
+        totalCents: session.order.totalCents,
+      },
+    });
 
     return Response.json({ order: session.order, tableSessionId: session.tableSessionId }, { status: 201 });
   } catch (err) {

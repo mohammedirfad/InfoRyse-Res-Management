@@ -228,18 +228,39 @@ export default function BillPage() {
     fetchBills(1);
   }, [fetchTablesAndRestaurant, fetchBills]);
 
-  // Live Auto-Refresh (Polling every 3.5s when on Live tab)
+  // Real-Time Event Driven Updates (zero polling spam)
   useEffect(() => {
-    if (activeTab !== "live") return;
-    const interval = setInterval(() => {
-      fetchTablesAndRestaurant(false);
-      if (selectedTableRef.current) {
-        loadBill(selectedTableRef.current, true);
-      }
-    }, 3500);
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource("/api/admin/events");
+      es.addEventListener("order_created", () => {
+        fetchTablesAndRestaurant(false);
+        if (selectedTableRef.current) {
+          loadBill(selectedTableRef.current, true);
+        }
+      });
+      es.addEventListener("order_updated", () => {
+        fetchTablesAndRestaurant(false);
+        if (selectedTableRef.current) {
+          loadBill(selectedTableRef.current, true);
+        }
+      });
+      es.addEventListener("bill_updated", () => {
+        fetchTablesAndRestaurant(false);
+        if (selectedTableRef.current) {
+          loadBill(selectedTableRef.current, true);
+        }
+      });
+    } catch {
+      // EventSource fallback
+    }
 
-    return () => clearInterval(interval);
-  }, [activeTab, fetchTablesAndRestaurant, loadBill]);
+    return () => {
+      if (es) {
+        es.close();
+      }
+    };
+  }, [fetchTablesAndRestaurant, loadBill]);
 
   // Trigger Settle Payment modal
   function openPaymentModal() {

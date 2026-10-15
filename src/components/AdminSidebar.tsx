@@ -16,19 +16,20 @@ const NAV = [
   { href: "/admin/menu",       label: "Menu Management",    icon: UtensilsCrossed },
   { href: "/admin/tables",     label: "Table Management",   icon: LayoutGrid },
   { href: "/admin/qr-menu",    label: "QR Menu",            icon: QrCode },
-  { href: "/admin/offers",     label: "Offers & Promotions",icon: Tag },
   { href: "/admin/customers",  label: "Customers",          icon: Users },
-  { href: "/admin/analytics",  label: "Analytics",          icon: BarChart2 },
-  { href: "/admin/staff",      label: "Staff Management",   icon: ChefHat },
-  { href: "/admin/profile",    label: "Restaurant Profile", icon: User },
-  { href: "/admin/settings",   label: "Settings",           icon: Settings },
+  { href: "/admin/offers",     label: "Offers & Promotions",icon: Tag,           ownerOnly: true },
+  { href: "/admin/analytics",  label: "Analytics",          icon: BarChart2,     ownerOnly: true },
+  { href: "/admin/staff",      label: "Staff Management",   icon: ChefHat,       ownerOnly: true },
+  { href: "/admin/profile",    label: "Restaurant Profile", icon: User,          ownerOnly: true },
+  { href: "/admin/settings",   label: "Settings",           icon: Settings,      ownerOnly: true },
 ];
 
 interface Props {
   restaurant: { name: string; openNow: boolean; slug: string } | null;
+  userRole?: string;
 }
 
-export default function AdminSidebar({ restaurant }: Props) {
+export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) {
   const pathname    = usePathname();
   const [open, setOpen] = useState(false);
 
@@ -42,17 +43,26 @@ export default function AdminSidebar({ restaurant }: Props) {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  const visibleNav = NAV.filter((item) => {
+    if (userRole === "STAFF" && item.ownerOnly) return false;
+    return true;
+  });
+
   const sidebarContent = (
     <>
       {/* Logo */}
       <div className="px-5 py-5 border-b border-white/10 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-[#D4A94C]/20 flex items-center justify-center text-[#D4A94C] font-bold text-lg">
-            K
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-[#1F4733] to-[#132A1E] border border-[#D4A94C]/30 p-1.5 flex items-center justify-center flex-shrink-0 shadow-sm">
+            <img src="/icon.svg" alt="InfoRyse" className="h-full w-full object-contain" />
           </div>
-          <div className="min-w-0">
-            <p className="font-bold text-white text-base leading-tight">Kpe</p>
-            <p className="text-[10px] text-[#D4A94C] leading-tight truncate">Good Food · Brighter Moments</p>
+          <div className="min-w-0 flex-1">
+            <p className="font-black text-white text-lg tracking-tight leading-tight">
+              Info<span className="text-[#D4A94C]">Ryse</span>
+            </p>
+            <p className="text-[9px] font-bold text-[#D4A94C]/90 tracking-wider uppercase leading-tight">
+              Restaurant OS
+            </p>
           </div>
           {/* Close button — mobile only */}
           <button onClick={() => setOpen(false)} className="ml-auto lg:hidden p-1 text-white/60 hover:text-white">
@@ -60,12 +70,21 @@ export default function AdminSidebar({ restaurant }: Props) {
           </button>
         </div>
         {restaurant && (
-          <div className="mt-3 flex items-center justify-between">
-            <p className="text-sm text-white font-medium truncate max-w-[130px]">{restaurant.name}</p>
-            <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold flex-shrink-0
-              ${restaurant.openNow ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
-              <div className={`h-1.5 w-1.5 rounded-full ${restaurant.openNow ? "bg-green-400 animate-pulse" : "bg-red-400"}`} />
-              {restaurant.openNow ? "Open" : "Closed"}
+          <div className="mt-3 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-white font-medium truncate max-w-[130px]">{restaurant.name}</p>
+              <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold flex-shrink-0
+                ${restaurant.openNow ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                <div className={`h-1.5 w-1.5 rounded-full ${restaurant.openNow ? "bg-green-400 animate-pulse" : "bg-red-400"}`} />
+                {restaurant.openNow ? "Open" : "Closed"}
+              </div>
+            </div>
+            <div className="flex items-center">
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                userRole === "STAFF" ? "bg-amber-400/20 text-amber-300 border border-amber-400/30" : "bg-emerald-400/20 text-emerald-300 border border-emerald-400/30"
+              }`}>
+                {userRole === "STAFF" ? "Staff Operations" : "Owner / Admin"}
+              </span>
             </div>
           </div>
         )}
@@ -73,7 +92,7 @@ export default function AdminSidebar({ restaurant }: Props) {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
-        {NAV.map(({ href, label, icon: Icon }) => {
+        {visibleNav.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== "/admin/dashboard" && pathname.startsWith(href));
           return (
             <Link

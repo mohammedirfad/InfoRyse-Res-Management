@@ -63,8 +63,14 @@ export default function SettingsPage() {
     twoFactor: false, loginAlerts: true,
   });
 
+  const [accessDenied, setAccessDenied] = useState(false);
+
   useEffect(() => {
     fetch("/api/admin/me").then(r => r.json()).then(d => {
+      if (d.role === "STAFF") {
+        setAccessDenied(true);
+        return;
+      }
       if (d.restaurant) {
         setRestName(d.restaurant.name ?? "");
         setOpenNow(d.restaurant.openNow ?? true);
@@ -97,6 +103,25 @@ export default function SettingsPage() {
     { id: "security",      label: "Security Settings",    icon: "🔒" },
     { id: "danger",        label: "Danger Zone",          icon: "⚠️" },
   ];
+
+  if (accessDenied) {
+    return (
+      <div className="p-8 max-w-lg mx-auto text-center space-y-4 pt-16">
+        <div className="h-16 w-16 mx-auto bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center">
+          <Shield className="h-8 w-8" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900">Owner Access Required</h2>
+        <p className="text-sm text-slate-500">
+          Restaurant Settings and Configuration can only be modified by the restaurant owner.
+        </p>
+        <div className="pt-2">
+          <a href="/admin/orders" className="btn-primary bg-[#132A1E] text-white py-2.5 px-5 rounded-xl inline-flex text-xs font-bold">
+            ← Return to Orders Queue
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col lg:flex-row h-full lg:h-screen overflow-hidden">

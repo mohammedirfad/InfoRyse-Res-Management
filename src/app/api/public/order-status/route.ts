@@ -14,27 +14,43 @@ export const dynamic = "force-dynamic";
  * - No includes (no items, no table, no statusHistory)
  * - Response is ~100 bytes vs ~5KB for the full order list
  */
+const restaurantSlugCache = new Map<string, { id: string; ts: number }>();
+const SLUG_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 export async function GET(req: Request) {
-  const url         = new URL(req.url);
-  const slug        = url.searchParams.get("slug");
-  const orderNumber = Number(url.searchParams.get("orderNumber"));
+  const url = new URL(req.url);
+  const slug = url.searchParams.get("slug")?.trim();
+  const rawOrderNumber = url.searchParams.get("orderNumber") || "";
+  const orderNumber = parseInt(rawOrderNumber.replace(/\D/g, ""), 10);
 
   if (!slug || isNaN(orderNumber)) {
     return Response.json({ error: "Invalid parameters" }, { status: 400 });
   }
 
   try {
-    const restaurant = await db.restaurant.findUnique({
-      where:  { slug },
-      select: { id: true },
-    });
+    let restaurantId: string | null = null;
+    const now = Date.now();
+    const cached = restaurantSlugCache.get(slug);
 
-    if (!restaurant) {
-      return Response.json({ error: "Not found" }, { status: 404 });
+    if (cached && now - cached.ts < SLUG_CACHE_TTL) {
+      restaurantId = cached.id;
+    } else {
+      const restaurant = await db.restaurant.findUnique({
+        where:  { slug },
+        select: { id: true },
+      });
+      if (restaurant) {
+        restaurantId = restaurant.id;
+        restaurantSlugCache.set(slug, { id: restaurant.id, ts: now });
+      }
+    }
+
+    if (!restaurantId) {
+      return Response.json({ error: "Restaurant not found" }, { status: 404 });
     }
 
     const order = await db.order.findFirst({
-      where:  { restaurantId: restaurant.id, orderNumber },
+      where:  { restaurantId, orderNumber },
       select: { status: true, createdAt: true },
     });
 

@@ -25,7 +25,11 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
   const [payment, setPayment]   = useState<PaymentMethod>("PAY_AT_RESTAURANT");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError]       = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<{ name?: string; contact?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{
+    name?: string;
+    phone?: string;
+    email?: string;
+  }>({});
   const [idempotencyKey]        = useState(() => crypto.randomUUID());
 
   const [restaurantDiscount, setRestaurantDiscount] = useState<{
@@ -57,14 +61,25 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
   const grandTotal = Math.max(0, subtotal - discount);
 
   function validate() {
-    const errs: { name?: string; contact?: string } = {};
+    const errs: { name?: string; phone?: string; email?: string } = {};
     if (!name.trim()) errs.name = "Name is required";
-    if (!phone.trim() && !email.trim()) {
-      errs.contact = "Please enter your phone number or email";
-    } else if (phone.trim() && !/^[6-9]\d{9}$/.test(phone.replace(/\s/g, ""))) {
-      errs.contact = "Enter a valid 10-digit Indian mobile number";
-    } else if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errs.contact = "Enter a valid email address";
+
+    const cleanPhone = phone.replace(/\D/g, "");
+    const trimmedEmail = email.trim();
+
+    if (!cleanPhone && !trimmedEmail) {
+      errs.phone = "Enter your 10-digit mobile number or email";
+    } else {
+      if (cleanPhone) {
+        if (cleanPhone.length !== 10 || !/^[6-9]\d{9}$/.test(cleanPhone)) {
+          errs.phone = "Enter a valid 10-digit Indian mobile number";
+        }
+      }
+      if (trimmedEmail) {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+          errs.email = "Enter a valid email address";
+        }
+      }
     }
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
@@ -207,17 +222,22 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
           <div>
             <input
               className={`w-full bg-gray-50 rounded-xl px-4 py-3 text-sm border focus:outline-none focus:ring-1 focus:ring-emerald-700 ${
-                fieldErrors.contact && !phone.trim() ? "border-red-400 ring-1 ring-red-400" : "border-gray-200"
+                fieldErrors.phone ? "border-red-400 ring-1 ring-red-400" : "border-gray-200"
               }`}
               placeholder={t("mobileNumber", "Phone number * (10 digits)")}
               type="tel"
               inputMode="numeric"
+              maxLength={10}
               value={phone}
               onChange={(e) => {
-                setPhone(e.target.value);
-                setFieldErrors((f) => ({ ...f, contact: undefined }));
+                const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+                setPhone(digits);
+                setFieldErrors((f) => ({ ...f, phone: undefined }));
               }}
             />
+            {fieldErrors.phone && (
+              <p className="text-xs text-red-500 mt-1 flex items-center gap-1">⚠️ {fieldErrors.phone}</p>
+            )}
           </div>
 
           {/* Divider */}
@@ -231,18 +251,18 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
           <div>
             <input
               className={`w-full bg-gray-50 rounded-xl px-4 py-3 text-sm border focus:outline-none focus:ring-1 focus:ring-emerald-700 ${
-                fieldErrors.contact && !email.trim() ? "border-red-400 ring-1 ring-red-400" : "border-gray-200"
+                fieldErrors.email ? "border-red-400 ring-1 ring-red-400" : "border-gray-200"
               }`}
               placeholder={t("emailAddress", "Email address")}
               type="email"
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);
-                setFieldErrors((f) => ({ ...f, contact: undefined }));
+                setFieldErrors((f) => ({ ...f, email: undefined }));
               }}
             />
-            {fieldErrors.contact && (
-              <p className="text-xs text-red-500 mt-1 flex items-center gap-1">⚠️ {fieldErrors.contact}</p>
+            {fieldErrors.email && (
+              <p className="text-xs text-red-500 mt-1 flex items-center gap-1">⚠️ {fieldErrors.email}</p>
             )}
             <p className="text-[11px] text-gray-400 mt-1">Phone or email is required for live order status</p>
           </div>

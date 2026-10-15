@@ -241,7 +241,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                         <div className={`w-2 h-2 rounded-full ${item.isVeg ? "bg-green-600" : "bg-red-600"}`} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900 text-sm truncate">{item.name}</p>
+                        <p className="font-semibold text-gray-900 text-sm truncate">{tDish(item.name)}</p>
                         <p className="text-xs text-gray-400 mt-0.5">{formatRupees(item.priceCents)} each</p>
                       </div>
                     </div>
@@ -435,7 +435,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                               <div key={iIdx} className="flex items-center justify-between py-1.5 text-xs">
                                 <div className="flex items-center gap-2 min-w-0">
                                   <span className="font-bold text-gray-900 w-5">{i.quantity}×</span>
-                                  <span className="text-gray-800 font-medium truncate">{name}</span>
+                                  <span className="text-gray-800 font-medium truncate">{tDish(name)}</span>
                                 </div>
                                 <span className="font-bold text-gray-900 text-right ml-2">
                                   {formatRupees(price * i.quantity)}
@@ -471,7 +471,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                         <div key={idx} className="flex items-center justify-between py-2 text-xs">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className="font-bold text-gray-900 w-5">{item.quantity}×</span>
-                            <span className="text-gray-800 font-medium truncate">{item.name}</span>
+                            <span className="text-gray-800 font-medium truncate">{tDish(item.name)}</span>
                           </div>
                           <span className="font-bold text-gray-900 text-right ml-2">
                             {formatRupees(item.subtotal)}

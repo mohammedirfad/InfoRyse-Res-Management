@@ -17,20 +17,29 @@ export async function POST(req: Request) {
       return Response.json({ error: "Too many attempts. Try again later." }, { status: 429 });
     }
 
-    const user = await db.user.findUnique({ where: { email } });
-    // Same generic error whether the email doesn't exist or the password is
-    // wrong — don't let attackers enumerate valid emails.
+    const user = await db.user.findUnique({
+      where: { email },
+      include: { restaurant: { select: { isActive: true, name: true } } },
+    });
+
+    // Check credential correctness
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
       return Response.json({ error: "Invalid email or password" }, { status: 401 });
     }
 
-    const code = await issueOtp(user.id, "LOGIN_2FA");
+    // Check if restaurant is suspended/blocked by Super Admin
+    if (user.restaurant && !user.restaurant.isActive) {
+      return Response.json(
+        { error: `Account Suspended: ${user.restaurant.name} has been deactivated or blocked by Super Administration. Please contact support@inforyse.com.` },
+        { status: 403 }
+      );
+    }
+
+    const code = await issueOtp(user.id, "LOGIN_2FA", user.email);
 
     return Response.json({
       step: "OTP_REQUIRED",
       userId: user.id,
-      // Since email provider (Resend/SMTP) is not yet configured, return OTP
-      // directly so users and admins can log in on hosted deployments.
       devOtp: code,
     });
   } catch (err) {

@@ -812,7 +812,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                   </span>
                 )}
               </div>
-              <h2 className="text-xl font-bold text-gray-900 leading-snug">{selectedItem.name}</h2>
+              <h2 className="text-xl font-bold text-gray-900 leading-snug">{tDish(selectedItem.name)}</h2>
               {selectedItem.description && (
                 <p className="text-sm text-gray-500 mt-2 leading-relaxed">{selectedItem.description}</p>
               )}

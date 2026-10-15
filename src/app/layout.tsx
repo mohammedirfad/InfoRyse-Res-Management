@@ -15,8 +15,13 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title:       "InfoRyse — QR Ordering",
-  description: "Digital Menu & QR Ordering SaaS",
+  title:       "InfoRyse — QR Ordering & Restaurant OS",
+  description: "High-Performance Digital Menu & Restaurant Management System",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 import { LanguageProvider } from "@/lib/i18n";

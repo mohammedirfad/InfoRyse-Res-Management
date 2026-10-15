@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 64" width="100%" height="100%">
+  <defs>
+    <linearGradient id="logoPrimaryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#132A1E" />
+      <stop offset="100%" stop-color="#1F4733" />
+    </linearGradient>
+    <linearGradient id="logoGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F3D17A" />
+      <stop offset="50%" stop-color="#D4A94C" />
+      <stop offset="100%" stop-color="#A47D2E" />
+    </linearGradient>
+  </defs>
+
+  <!-- Icon Emblem -->
+  <g transform="translate(4, 4)">
+    <rect x="0" y="0" width="56" height="56" rx="16" fill="url(#logoPrimaryGrad)" />
+    <rect x="0" y="0" width="56" height="56" rx="16" fill="none" stroke="url(#logoGoldGrad)" stroke-width="1.5" opacity="0.5" />
+    
+    <g transform="translate(10, 10)">
+      <circle cx="18" cy="6" r="2.8" fill="url(#logoGoldGrad)" />
+      <path d="M 6 18 C 6 10, 11 7, 18 7 C 25 7, 30 10, 30 18 Z" 
+            fill="none" 
+            stroke="url(#logoGoldGrad)" 
+            stroke-width="2.5" 
+            stroke-linecap="round" />
+      <path d="M 3 21 L 33 21" 
+            stroke="url(#logoGoldGrad)" 
+            stroke-width="2.5" 
+            stroke-linecap="round" />
+      <path d="M 12 27 C 15 25, 21 25, 24 27" 
+            fill="none" 
+            stroke="#FFFFFF" 
+            stroke-width="2" 
+            stroke-linecap="round" />
+      <path d="M 9 31 C 14 28, 22 28, 27 31" 
+            fill="none" 
+            stroke="url(#logoGoldGrad)" 
+            stroke-width="2" 
+            stroke-linecap="round" />
+    </g>
+  </g>
+
+  <!-- Typography -->
+  <g transform="translate(74, 18)">
+    <!-- "InfoRyse" -->
+    <text x="0" y="20" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="24" font-weight="800" letter-spacing="-0.5" fill="#FFFFFF">
+      Info<tspan fill="url(#logoGoldGrad)">Ryse</tspan>
+    </text>
+    
+    <!-- Subtitle Badge -->
+    <text x="1" y="34" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" letter-spacing="2.2" fill="#D4A94C" opacity="0.85">
+      RESTAURANT OS
+    </text>
+  </g>
+</svg>
