@@ -31,7 +31,7 @@ const config: Config = {
       },
       fontFamily: {
         display: ["Georgia", "serif"],
-        sans: ["Inter", "system-ui", "sans-serif"],
+        sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
       },
       keyframes: {
         "slide-up": {

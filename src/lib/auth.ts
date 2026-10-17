@@ -4,7 +4,11 @@ import { cookies } from "next/headers";
 import { db } from "./db";
 
 const SESSION_COOKIE = "inforyse_session";
-const secret = new TextEncoder().encode(process.env.SESSION_SECRET || "dev-secret-change-me");
+const configuredSecret = process.env.SESSION_SECRET;
+if (process.env.NODE_ENV === "production" && (!configuredSecret || configuredSecret.length < 32)) {
+  throw new Error("SESSION_SECRET must be configured with at least 32 characters in production.");
+}
+const secret = new TextEncoder().encode(configuredSecret || "dev-only-insecure-session-secret");
 
 export type SessionPayload = {
   userId: string;

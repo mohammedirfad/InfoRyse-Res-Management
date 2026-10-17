@@ -1,6 +1,8 @@
+import { randomBytes } from "crypto";
 import { db } from "../src/lib/db";
 import { hashPassword } from "../src/lib/auth";
 import { generateQrToken } from "../src/lib/qr";
+import { getPublicAppUrl } from "../src/lib/appUrl";
 import { sendEmail, buildOnboardingEmailHtml } from "../src/lib/email";
 
 interface DishDef {
@@ -277,7 +279,7 @@ async function main() {
   const email = "potradeirfadk@gmail.com";
   const restaurantName = "Shri Brahmi Pure Veg Restaurant";
   const slug = "shri-brahmi-pure-veg";
-  const tempPassword = "Brahmi@2026!";
+  const unissuedPassword = randomBytes(32).toString("base64url");
 
   console.log(`Starting restaurant & menu setup for ${email}...`);
 
@@ -285,7 +287,7 @@ async function main() {
   let user = await db.user.findUnique({ where: { email } });
   let restaurant = await db.restaurant.findUnique({ where: { slug } });
 
-  const passwordHash = await hashPassword(tempPassword);
+  const passwordHash = await hashPassword(unissuedPassword);
 
   if (!restaurant) {
     restaurant = await db.restaurant.create({
@@ -317,7 +319,7 @@ async function main() {
         passwordHash,
         role: "OWNER",
         restaurantId: restaurant.id,
-        mustChangePassword: false, // directly usable!
+        mustChangePassword: true,
       },
     });
     console.log(`Created Owner User: ${user.email}`);
@@ -328,7 +330,7 @@ async function main() {
         restaurantId: restaurant.id,
         passwordHash,
         role: "OWNER",
-        mustChangePassword: false,
+        mustChangePassword: true,
       },
     });
     console.log(`Updated Owner User: ${user.email} with new password`);
@@ -423,12 +425,11 @@ async function main() {
   console.log(`Successfully seeded ${totalDishesCreated} new dishes across ${MENU_DATA.length} categories!`);
 
   // 5. Send onboarding email to the owner
-  const loginUrl = "http://localhost:3000/admin/login";
+  const loginUrl = `${getPublicAppUrl()}/admin/login`;
   const emailHtml = buildOnboardingEmailHtml({
     restaurantName: restaurant.name,
     ownerName: "Irfad K",
     ownerEmail: email,
-    tempPassword,
     loginUrl,
     slug: restaurant.slug,
   });
@@ -438,7 +439,7 @@ async function main() {
       to: email,
       subject: `Welcome to InfoRyse: Login Details for ${restaurant.name}`,
       html: emailHtml,
-      text: `Welcome Irfad K!\n\nYour restaurant "${restaurant.name}" has been created with the full menu from your PDF.\nLogin URL: ${loginUrl}\nEmail: ${email}\nPassword: ${tempPassword}`,
+      text: `Welcome Irfad K!\n\nYour restaurant "${restaurant.name}" has been created with the full menu.\nRestaurant Admin URL: ${loginUrl}\nLogin email: ${email}\nSelect Forgot password on the login page to verify your email and set a password.`,
     });
     console.log(`Sent login onboarding email to ${email}`);
   } catch (err) {
@@ -451,7 +452,7 @@ async function main() {
   console.log(`Restaurant Slug : ${restaurant.slug}`);
   console.log(`Admin Login URL : http://localhost:3000/admin/login`);
   console.log(`Owner Email     : ${email}`);
-  console.log(`Owner Password  : ${tempPassword}`);
+  console.log(`Owner Password  : Use the Forgot password link at ${loginUrl}`);
   console.log("=======================================================\n");
 }
 

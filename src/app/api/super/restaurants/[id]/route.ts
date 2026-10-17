@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireSuperAdmin, tenantErrorResponse } from "@/lib/tenant";
+import { invalidatePublicMenu } from "@/lib/publicMenuCache";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
       return r;
     });
+    invalidatePublicMenu(updated.id);
 
     return Response.json({ restaurant: updated });
   } catch (err: any) {

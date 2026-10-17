@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireSuperAdmin, tenantErrorResponse } from "@/lib/tenant";
+import { invalidatePublicMenu } from "@/lib/publicMenuCache";
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   try {
@@ -9,6 +10,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       where: { id: restaurant.id },
       data: { isActive: !restaurant.isActive },
     });
+    invalidatePublicMenu(updated.id);
     return Response.json({ restaurant: updated });
   } catch (err) {
     return tenantErrorResponse(err);

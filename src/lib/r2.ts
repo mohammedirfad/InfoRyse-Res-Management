@@ -40,13 +40,13 @@ const r2 = new S3Client({
 export async function getPresignedUploadUrl(
   key:         string,        // e.g. "menu-items/uuid.jpg"
   contentType: string,        // e.g. "image/jpeg"
-  maxBytes     = 5 * 1024 * 1024  // 5 MB default
+  contentLength = 5 * 1024 * 1024
 ): Promise<{ uploadUrl: string; publicUrl: string }> {
   const command = new PutObjectCommand({
     Bucket:        BUCKET_NAME,
     Key:           key,
     ContentType:   contentType,
-    ContentLength: maxBytes,   // prevents oversized uploads
+    ContentLength: contentLength,
     CacheControl:  "public, max-age=31536000, immutable", // CDN cache forever
   });
 

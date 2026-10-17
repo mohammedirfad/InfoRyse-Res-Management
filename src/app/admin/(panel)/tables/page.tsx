@@ -32,6 +32,7 @@ export default function TablesPage() {
   const [section, setSection]       = useState("Indoor");
   const [generating, setGenerating] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [tableBusy, setTableBusy] = useState(false);
   const [filterSection, setFilterSection] = useState("all");
 
   // cache in sessionStorage for speed
@@ -86,14 +87,47 @@ export default function TablesPage() {
   async function generateTables() {
     setGenerating(true);
     const startIndex = tables.length + 1;
-    await fetch("/api/admin/tables/bulk", {
+    const res = await fetch("/api/admin/tables/bulk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ count, section, startIndex }),
     });
+    const data = await res.json();
     setGenerating(false);
+    if (!res.ok) {
+      alert(data.error || "Could not create tables. Please refresh and try again.");
+      return;
+    }
     sessionStorage.removeItem("admin_tables");
     load(true);
+  }
+
+  async function editTable(table: Table) {
+    const label = window.prompt("Table name", table.label);
+    if (label === null) return;
+    const section = window.prompt("Section", table.section ?? "") ;
+    if (section === null) return;
+    const res = await fetch(`/api/admin/tables/${table.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label, section: section || null }),
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || "Could not update table"); return; }
+    sessionStorage.removeItem("admin_tables");
+    await load(true);
+  }
+
+  async function deleteTable(table: Table) {
+    if (!window.confirm(`Delete ${table.label} and deactivate its QR code?`)) return;
+    setTableBusy(true);
+    const res = await fetch(`/api/admin/tables/${table.id}`, { method: "DELETE" });
+    const data = await res.json();
+    setTableBusy(false);
+    if (!res.ok) { alert(data.error || "Could not delete table"); return; }
+    setQrImages((images) => { const next = { ...images }; delete next[table.id]; return next; });
+    setSelected(null);
+    sessionStorage.removeItem("admin_tables");
+    await load(true);
   }
 
   function openTable(t: Table) {
@@ -395,6 +429,15 @@ export default function TablesPage() {
                     <span className="font-semibold text-gray-900">{value}</span>
                   </div>
                 ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => editTable(selected)} disabled={tableBusy} className="w-full rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                  Edit Table
+                </button>
+                <button onClick={() => deleteTable(selected)} disabled={tableBusy} className="w-full rounded-xl border border-red-200 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">
+                  Delete Table
+                </button>
               </div>
 
               {/* Regenerate QR */}

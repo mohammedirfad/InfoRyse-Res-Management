@@ -1,46 +1,17 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { invalidatePublicMenu } from "@/lib/publicMenuCache";
 
 export const dynamic = "force-dynamic";
-
-const DEFAULT_CATEGORIES = [
-  "Main Course",
-  "Starters & Appetizers",
-  "Beverages & Drinks",
-  "Desserts & Sweets",
-  "Today's Specials",
-];
 
 export async function GET() {
   try {
     const { restaurantId } = await requireRestaurantUser();
-    let categories = await db.category.findMany({
+    const categories = await db.category.findMany({
       where: { restaurantId, deletedAt: null },
       orderBy: { position: "asc" },
     });
-
-    // If new restaurant has 0 categories, auto-seed standard categories for them!
-    if (categories.length === 0) {
-      await db.$transaction(
-        DEFAULT_CATEGORIES.map((name, index) =>
-          db.category.create({
-            data: {
-              restaurantId,
-              name,
-              position: index + 1,
-              isActive: true,
-            },
-          })
-        )
-      );
-
-      categories = await db.category.findMany({
-        where: { restaurantId, deletedAt: null },
-        orderBy: { position: "asc" },
-      });
-    }
-
     return Response.json({ categories });
   } catch (err) {
     return tenantErrorResponse(err);
@@ -53,11 +24,26 @@ export async function POST(req: Request) {
   try {
     const { restaurantId } = await requireRestaurantUser();
     const { name } = BodySchema.parse(await req.json());
-    const count = await db.category.count({ where: { restaurantId } });
-    const category = await db.category.create({
-      data: { restaurantId, name, position: count + 1, isActive: true },
+    const existing = await db.category.findFirst({
+      where: { restaurantId, deletedAt: null, name: { equals: name, mode: "insensitive" } },
     });
-    return Response.json({ category }, { status: 201 });
+    if (existing) return Response.json({ category: existing, duplicate: true }, { status: 200 });
+    const count = await db.category.count({ where: { restaurantId, deletedAt: null } });
+    try {
+      const category = await db.category.create({
+        data: { restaurantId, name, position: count + 1, isActive: true },
+      });
+      invalidatePublicMenu(restaurantId);
+      return Response.json({ category }, { status: 201 });
+    } catch (err: any) {
+      if (err?.code === "P2002") {
+        const duplicate = await db.category.findFirst({
+          where: { restaurantId, deletedAt: null, name: { equals: name, mode: "insensitive" } },
+        });
+        if (duplicate) return Response.json({ category: duplicate, duplicate: true }, { status: 200 });
+      }
+      throw err;
+    }
   } catch (err) {
     return tenantErrorResponse(err);
   }

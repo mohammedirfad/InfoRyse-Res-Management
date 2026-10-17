@@ -228,38 +228,14 @@ export default function BillPage() {
     fetchBills(1);
   }, [fetchTablesAndRestaurant, fetchBills]);
 
-  // Real-Time Event Driven Updates (zero polling spam)
+  // Polling is reliable across Vercel serverless instances, which do not share
+  // the process-local event emitter used by the development server.
   useEffect(() => {
-    let es: EventSource | null = null;
-    try {
-      es = new EventSource("/api/admin/events");
-      es.addEventListener("order_created", () => {
-        fetchTablesAndRestaurant(false);
-        if (selectedTableRef.current) {
-          loadBill(selectedTableRef.current, true);
-        }
-      });
-      es.addEventListener("order_updated", () => {
-        fetchTablesAndRestaurant(false);
-        if (selectedTableRef.current) {
-          loadBill(selectedTableRef.current, true);
-        }
-      });
-      es.addEventListener("bill_updated", () => {
-        fetchTablesAndRestaurant(false);
-        if (selectedTableRef.current) {
-          loadBill(selectedTableRef.current, true);
-        }
-      });
-    } catch {
-      // EventSource fallback
-    }
-
-    return () => {
-      if (es) {
-        es.close();
-      }
-    };
+    const interval = window.setInterval(() => {
+      fetchTablesAndRestaurant(false);
+      if (selectedTableRef.current) loadBill(selectedTableRef.current, true);
+    }, 15000);
+    return () => window.clearInterval(interval);
   }, [fetchTablesAndRestaurant, loadBill]);
 
   // Trigger Settle Payment modal

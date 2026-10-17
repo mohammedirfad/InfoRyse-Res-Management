@@ -43,7 +43,7 @@ export async function POST(req: Request) {
       ok: true,
       userId: user.id,
       email: user.email,
-      devOtp: code,
+      ...(process.env.NODE_ENV !== "production" ? { devOtp: code } : {}),
       message: `A 6-digit verification code has been dispatched to ${user.email}.`,
     });
   } catch (err: any) {

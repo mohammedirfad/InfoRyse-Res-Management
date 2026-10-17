@@ -32,19 +32,34 @@ export async function POST(req: Request) {
       select: { slug: true },
     });
 
-    const toCreate = Array.from({ length: body.count }, (_, i) => {
-      const index = body.startIndex + i;
-      return {
-        restaurantId,
-        label: `${body.labelPrefix}${index}`,
-        section: body.section,
-        capacity: body.capacity,
-        qrToken: generateQrToken(),
-      };
+    const existing = await db.table.findMany({
+      where: { restaurantId },
+      select: { label: true },
     });
+    const usedLabels = new Set(existing.map((table) => table.label.toLowerCase()));
+    const labels: string[] = [];
+    let nextIndex = body.startIndex;
+    while (labels.length < body.count) {
+      const label = `${body.labelPrefix}${nextIndex++}`;
+      if (usedLabels.has(label.toLowerCase())) continue;
+      usedLabels.add(label.toLowerCase());
+      labels.push(label);
+    }
+    const toCreate = labels.map((label) => ({
+      restaurantId,
+      label,
+      section: body.section,
+      capacity: body.capacity,
+      qrToken: generateQrToken(),
+    }));
 
     // Single insert — if anything fails, no partial batch of tables is left behind.
-    await db.table.createMany({ data: toCreate });
+    try {
+      await db.table.createMany({ data: toCreate });
+    } catch (err: any) {
+      if (err?.code === "P2002") return Response.json({ error: "Tables changed at the same time. Refresh and create again." }, { status: 409 });
+      throw err;
+    }
 
     const created = await db.table.findMany({
       where: { restaurantId, label: { in: toCreate.map((t) => t.label) } },

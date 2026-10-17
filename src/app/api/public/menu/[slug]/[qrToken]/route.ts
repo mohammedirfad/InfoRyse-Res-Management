@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { getPublicMenuCategories } from "@/lib/publicMenuCache";
 
 export const dynamic = "force-dynamic";
 
@@ -7,37 +8,43 @@ export async function GET(
   { params }: { params: { slug: string; qrToken: string } }
 ) {
   try {
-    const restaurant = await db.restaurant.findUnique({
-      where: { slug: params.slug },
+    const table = await db.table.findFirst({
+      where: {
+        qrToken: params.qrToken,
+        deletedAt: null,
+        restaurant: { slug: params.slug },
+      },
       select: {
         id: true,
-        name: true,
-        isActive: true,
-        openNow: true,
-        taxName: true,
-        taxPercent: true,
-        logoUrl: true,
-        discountActive: true,
-        discountPercent: true,
-        discountName: true,
+        label: true,
+        status: true,
+        restaurant: {
+          select: {
+            id: true,
+            isActive: true,
+            name: true,
+            openNow: true,
+            taxName: true,
+            taxPercent: true,
+            logoUrl: true,
+            discountActive: true,
+            discountPercent: true,
+            discountName: true,
+          },
+        },
       },
-    });
-
-    if (!restaurant || !restaurant.isActive) {
-      return Response.json(
-        { error: "Restaurant not found or currently unavailable" },
-        { status: 404 }
-      );
-    }
-
-    const table = await db.table.findFirst({
-      where: { qrToken: params.qrToken, restaurantId: restaurant.id, deletedAt: null },
-      select: { id: true, label: true, status: true },
     });
 
     if (!table) {
       return Response.json(
         { error: "This QR code is no longer valid. Please ask staff for a new one." },
+        { status: 404 }
+      );
+    }
+    const restaurant = table.restaurant;
+    if (!restaurant.isActive) {
+      return Response.json(
+        { error: "Restaurant not found or currently unavailable" },
         { status: 404 }
       );
     }
@@ -48,25 +55,7 @@ export async function GET(
         select:  { id: true },
         orderBy: { createdAt: "desc" },
       }),
-      db.category.findMany({
-        where: { restaurantId: restaurant.id, isActive: true, deletedAt: null },
-        orderBy: { position: "asc" },
-        include: {
-          menuItems: {
-            where: { deletedAt: null },
-            orderBy: { createdAt: "asc" },
-            select: {
-              id: true,
-              name: true,
-              description: true,
-              priceCents: true,
-              imageUrl: true,
-              isVeg: true,
-              isAvailable: true,
-            },
-          },
-        },
-      }),
+      getPublicMenuCategories(restaurant.id),
     ]);
 
     return new Response(
@@ -92,7 +81,9 @@ export async function GET(
       {
         headers: {
           "Content-Type": "application/json",
-          "Cache-Control": "public, s-maxage=5, stale-while-revalidate=15",
+          // The response contains table/session state. Only the catalog is cached
+          // internally, shared across a restaurant's QR codes.
+          "Cache-Control": "private, no-store",
         },
       }
     );

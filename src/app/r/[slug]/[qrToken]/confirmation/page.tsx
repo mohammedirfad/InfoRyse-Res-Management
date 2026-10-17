@@ -50,52 +50,27 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   const canCancel   = CANCELLABLE.includes(status) && !cancelled;
   const currentIdx  = STATUS_ORDER.indexOf(status);
 
-  // Real-time EventSource stream + gentle 30s heartbeat fallback
+  // Poll the persisted order state: process-local events are not shared across
+  // Vercel serverless instances, so an EventSource can otherwise stay stale.
   useEffect(() => {
     if (!orderNumber) return;
     let stopped = false;
-    let es: EventSource | null = null;
-
-    // 1. Initial quick status check
-    fetchStatus(params.slug, orderNumber).then((s) => {
+    const refresh = () => fetchStatus(params.slug, orderNumber).then((s) => {
       if (s && !stopped) {
         setStatus(s);
         setLastUpdated(new Date());
         if (s === "CANCELLED") setCancelled(true);
       }
     });
-
-    // 2. Real-time EventSource connection (Zero delay, zero polling spam!)
-    try {
-      es = new EventSource(
-        `/api/public/order-events?slug=${encodeURIComponent(params.slug)}&orderNumber=${encodeURIComponent(orderNumber)}`
-      );
-
-      es.addEventListener("order_status", (e: MessageEvent) => {
-        try {
-          const payload = JSON.parse(e.data);
-          if (payload?.status && !stopped) {
-            setStatus(payload.status);
-            setLastUpdated(new Date());
-            if (payload.status === "CANCELLED") setCancelled(true);
-            if (payload.status === "COMPLETED" || payload.status === "CANCELLED") {
-              es?.close();
-            }
-          }
-        } catch { /* ignore parse error */ }
-      });
-
-      es.onerror = () => {
-        // EventSource will auto-reconnect if temporary network drop
-      };
-    } catch { /* ignore */ }
+    refresh();
+    const interval = window.setInterval(refresh, 8000);
 
     // Show "order more" nudge after 30s idle
     nudgeTimer.current = setTimeout(() => setShowNudge(true), 30000);
 
     return () => {
       stopped = true;
-      if (es) es.close();
+      window.clearInterval(interval);
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { randomBytes } from "crypto";
 import { db } from "@/lib/db";
 import { requireSuperAdmin, tenantErrorResponse } from "@/lib/tenant";
 import { hashPassword } from "@/lib/auth";
 import { slugify } from "@/lib/slug";
 import { sendEmail, buildOnboardingEmailHtml } from "@/lib/email";
 import { generateQrToken } from "@/lib/qr";
+import { getPublicAppUrl } from "@/lib/appUrl";
 
 export const dynamic = "force-dynamic";
 
@@ -36,15 +38,6 @@ async function uniqueSlug(name: string) {
   return candidate;
 }
 
-function generateDummyPassword(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-  let randomPart = "";
-  for (let i = 0; i < 6; i++) {
-    randomPart += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return `Info@${randomPart}!`;
-}
-
 const BodySchema = z.object({
   name: z.string().trim().min(2, "Restaurant name must be at least 2 characters").max(100),
   ownerName: z.string().trim().min(2, "Owner name must be at least 2 characters"),
@@ -52,7 +45,6 @@ const BodySchema = z.object({
   ownerPhone: z.string().trim().min(7, "Please provide a valid phone number").max(20).optional().or(z.literal("")),
   location: z.string().trim().min(2, "Location is required").max(120),
   plan: z.enum(["Basic", "Pro", "Premium", "Enterprise"]).default("Pro"),
-  ownerTempPassword: z.string().trim().min(8, "Password must be at least 8 characters").optional(),
 });
 
 export async function POST(req: Request) {
@@ -71,9 +63,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const tempPassword = body.ownerTempPassword && body.ownerTempPassword.length >= 8
-      ? body.ownerTempPassword
-      : generateDummyPassword();
+    // Store only a hash of an inaccessible random password. The owner sets
+    // their real password through the email OTP flow from /admin/login.
+    const unissuedPassword = randomBytes(32).toString("base64url");
 
     const slug = await uniqueSlug(body.name);
 
@@ -91,7 +83,7 @@ export async function POST(req: Request) {
         },
       });
 
-      const passwordHash = await hashPassword(tempPassword);
+      const passwordHash = await hashPassword(unissuedPassword);
 
       await tx.user.create({
         data: {
@@ -121,17 +113,13 @@ export async function POST(req: Request) {
       return r;
     });
 
-    const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "localhost:3000";
-    const proto = req.headers.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || `${proto}://${host}`;
-    const loginUrl = `${appUrl}/admin/login`;
+    const loginUrl = `${getPublicAppUrl(req.url)}/admin/login`;
 
     // Build & send high-end corporate onboarding email
     const emailHtml = buildOnboardingEmailHtml({
       restaurantName: restaurant.name,
       ownerName: body.ownerName,
       ownerEmail: body.ownerEmail.toLowerCase(),
-      tempPassword,
       loginUrl,
       slug: restaurant.slug,
     });
@@ -140,7 +128,7 @@ export async function POST(req: Request) {
       to: body.ownerEmail.toLowerCase(),
       subject: `Welcome to InfoRyse: Administrative Access for ${restaurant.name}`,
       html: emailHtml,
-      text: `Welcome ${body.ownerName}!\n\nYour restaurant "${restaurant.name}" has been created.\nLogin URL: ${loginUrl}\nEmail: ${body.ownerEmail}\nTemporary Password: ${tempPassword}\n\nNote: You will be required to change your password immediately upon first sign-in.`,
+      text: `Welcome ${body.ownerName}!\n\nYour restaurant "${restaurant.name}" has been created.\nRestaurant Admin URL: ${loginUrl}\nLogin email: ${body.ownerEmail}\n\nOpen the login page and select Forgot password to verify your email and set your password.`,
     });
 
     return Response.json(
@@ -148,7 +136,6 @@ export async function POST(req: Request) {
         restaurant,
         credentials: {
           email: body.ownerEmail.toLowerCase(),
-          tempPassword,
           loginUrl,
           emailSent: emailResult.success,
         },

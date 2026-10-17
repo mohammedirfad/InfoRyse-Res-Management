@@ -247,6 +247,8 @@ function ItemCard({
           <img
             src={imageUrl}
             alt={item.name}
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             onError={() => setImgErr(true)}
           />
@@ -397,35 +399,50 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
 
   /* fetch + cache in sessionStorage */
   useEffect(() => {
+    let cancelled = false;
     const cacheKey = `menu_${params.slug}_${params.qrToken}`;
     const cached = sessionStorage.getItem(cacheKey);
+    let hasCachedMenu = false;
     if (cached) {
       try {
         const j: MenuData = JSON.parse(cached);
+        hasCachedMenu = true;
         setData(j);
         setActiveCat(j.categories[0]?.id ?? null);
         syncSession(j.table.activeSessionId, j.table.status);
         // still refresh in background
       } catch { /* ignore */ }
     }
-    fetch(`/api/public/menu/${params.slug}/${params.qrToken}`, {
-      headers: { "Cache-Control": "no-cache" },
-    })
-      .then(async r => {
-        let json: any = null;
-        try { json = await r.json(); } catch {
-          throw new Error("Menu temporarily unavailable. Please try again.");
+    void (async () => {
+      let lastError: Error | null = null;
+      for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
+        try {
+          const response = await fetch(`/api/public/menu/${params.slug}/${params.qrToken}`, { cache: "no-store" });
+          const json = await response.json().catch(() => null);
+          if (!response.ok) {
+            const error = new Error(json?.error ?? "Unable to load menu.");
+            if (response.status < 500) throw error;
+            lastError = error;
+          } else if (json) {
+            if (cancelled) return;
+            const menu = json as MenuData;
+            setData(menu);
+            setActiveCat(menu.categories[0]?.id ?? null);
+            syncSession(menu.table.activeSessionId, menu.table.status);
+            sessionStorage.setItem(cacheKey, JSON.stringify(menu));
+            return;
+          } else {
+            lastError = new Error("Menu temporarily unavailable. Please try again.");
+          }
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error("Menu temporarily unavailable. Please try again.");
+          if (lastError.message.includes("no longer valid") || lastError.message.includes("not found")) break;
         }
-        if (!r.ok) throw new Error(json?.error ?? "Unable to load menu.");
-        return json;
-      })
-      .then((j: MenuData) => {
-        setData(j);
-        setActiveCat(j.categories[0]?.id ?? null);
-        syncSession(j.table.activeSessionId, j.table.status);
-        sessionStorage.setItem(cacheKey, JSON.stringify(j));
-      })
-      .catch(e => { if (!data) setError(e.message); });
+        if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+      if (!cancelled && !hasCachedMenu) setError(lastError?.message ?? "Unable to load menu.");
+    })();
+    return () => { cancelled = true; };
   }, [params.slug, params.qrToken, syncSession]);
 
   /* hero auto-advance — stable, won't re-trigger on every render */
@@ -626,6 +643,8 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                       <img
                         src={item.imageUrl}
                         alt={item.name}
+                        loading="lazy"
+                        decoding="async"
                         className="relative z-10 w-full h-full object-cover"
                         onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
                       />

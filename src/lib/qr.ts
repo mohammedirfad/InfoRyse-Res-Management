@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import QRCode from "qrcode";
+import { getPublicAppUrl } from "@/lib/appUrl";
 
-const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://app.inforyse.com";
 
 /** One of these per table. Random, immutable, never guessable, decoupled from table label. */
 export function generateQrToken() {
@@ -10,7 +10,7 @@ export function generateQrToken() {
 
 export function buildCustomerMenuUrl(slug: string, qrToken: string) {
   // Route is /r/[slug]/[qrToken] — no /t/ segment
-  return `${BASE_URL}/r/${slug}/${qrToken}`;
+  return `${getPublicAppUrl()}/r/${slug}/${qrToken}`;
 }
 
 /** Returns a PNG data URL, ready to <img src=...> or embed in a printable sheet. */

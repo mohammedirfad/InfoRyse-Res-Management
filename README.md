@@ -26,7 +26,7 @@ npm install
 ### 2. Configure environment
 ```bash
 cp .env.example .env
-# Fill in your Supabase DATABASE_URL and SESSION_SECRET
+# Fill in your Supabase transaction-pool DATABASE_URL and SESSION_SECRET
 ```
 
 ### 3. Run database migrations
@@ -47,6 +47,10 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000)
+
+### Vercel database connection
+
+For Vercel runtime traffic, set `DATABASE_URL` to the Supabase **Transaction pooler** URI (port `6543`) with `pgbouncer=true` and `connection_limit=1`. Set `DIRECT_URL` to the Supabase direct database URI for Prisma migrations (or the Session pooler URI on port `5432` when the direct endpoint is unreachable). Do not use a Session pooler connection for high-concurrency serverless runtime traffic. Apply all checked-in migrations with `npx prisma migrate deploy` before switching production traffic.
 
 ---
 
@@ -101,6 +105,17 @@ prisma/
 4. Run `npm run build && npm start`
 
 **Recommended:** Vercel (frontend) + Supabase (database)
+
+### Vercel production checklist
+
+- Set `NEXT_PUBLIC_APP_URL` to the canonical HTTPS production domain. QR URLs also use Vercel's production domain as a fallback.
+- Keep Supabase and Vercel in nearby regions. The Prisma connection pool defaults to one connection per Vercel function instance to avoid exhausting Supabase's connection limit.
+- Configure Cloudflare R2 bucket CORS to allow `PUT` from the production domain and allow the `Content-Type` request header. Make the bucket public-read (or use a CDN domain) and set `R2_PUBLIC_URL` to that public origin.
+- Apply database changes before promoting the new app: `npx prisma migrate deploy`. This release includes a migration that merges duplicate active categories while retaining their menu items, repairs duplicate table labels, and adds uniqueness constraints.
+- Confirm `DATABASE_URL`, `SESSION_SECRET`, email delivery credentials, and all `R2_*` values are set in the Vercel Production environment. Preview deployments should use a separate database if they run migrations.
+- `SESSION_SECRET` must be a random value of at least 32 characters; production startup/build now fails closed if it is missing or too short.
+
+Image upload sends files directly to R2; Vercel's local filesystem is not used for persistent image storage.
 
 ---
 

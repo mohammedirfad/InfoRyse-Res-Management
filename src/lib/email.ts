@@ -126,20 +126,18 @@ export async function sendEmail({
 }
 
 /**
- * Generates an executive corporate onboarding email with temporary password & login URL.
+ * Generates an onboarding email with the shared admin URL and password-reset instructions.
  */
 export function buildOnboardingEmailHtml({
   restaurantName,
   ownerName,
   ownerEmail,
-  tempPassword,
   loginUrl,
   slug,
 }: {
   restaurantName: string;
   ownerName: string;
   ownerEmail: string;
-  tempPassword: string;
   loginUrl: string;
   slug: string;
 }): string {
@@ -192,7 +190,7 @@ export function buildOnboardingEmailHtml({
     <div class="content">
       <h2 class="salutation">Welcome, ${ownerName || "Partner"}! 👋</h2>
       <p class="lead-text">
-        Your restaurant <strong>${restaurantName}</strong> has been officially registered on the <strong>InfoRyse POS & Operations Platform</strong>. Below are your temporary administrative access credentials.
+        Your restaurant <strong>${restaurantName}</strong> has been registered on the <strong>InfoRyse POS & Operations Platform</strong>. Use the secure password reset flow to set your account password.
       </p>
 
       <div class="card">
@@ -206,21 +204,13 @@ export function buildOnboardingEmailHtml({
             <td style="padding: 8px 0; font-size: 13px; color: #64748b; font-weight: 500;">Login Email:</td>
             <td style="padding: 8px 0; text-align: right; font-size: 14px; font-weight: 700; color: #0f172a; font-family: monospace;">${ownerEmail}</td>
           </tr>
-          <tr>
-            <td style="padding: 8px 0; font-size: 13px; color: #64748b; font-weight: 500;">Temporary Password:</td>
-            <td style="padding: 8px 0; text-align: right;">
-              <span style="font-family: monospace; font-size: 14px; font-weight: 700; background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 6px; border: 1px solid #bae6fd;">
-                ${tempPassword}
-              </span>
-            </td>
-          </tr>
         </table>
       </div>
 
       <div class="security-notice">
         <h4>🔒 Mandatory Security Action Required</h4>
         <p>
-          For your restaurant's security, you have been issued a temporary dummy password. <strong>You will be required to change your password immediately upon your first sign-in</strong> before access to your restaurant dashboard is granted.
+          No password is included in this email. Open the portal and choose <strong>Forgot password</strong> to verify your email and set a password securely.
         </p>
       </div>
 

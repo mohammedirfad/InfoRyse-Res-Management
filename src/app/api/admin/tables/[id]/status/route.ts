@@ -9,7 +9,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const { restaurantId } = await requireRestaurantUser();
     const { status } = BodySchema.parse(await req.json());
 
-    const table = await db.table.findFirst({ where: { id: params.id, restaurantId } });
+    const table = await db.table.findFirst({ where: { id: params.id, restaurantId, deletedAt: null } });
     if (!table) return Response.json({ error: "Not found" }, { status: 404 });
 
     const updated = await db.$transaction(async (tx) => {

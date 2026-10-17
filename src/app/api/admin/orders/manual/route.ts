@@ -2,6 +2,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { emitOrderEvent } from "@/lib/events";
+import { reserveOrderNumber } from "@/lib/orderNumber";
 
 export const dynamic = "force-dynamic";
 
@@ -50,14 +51,11 @@ export async function POST(req: Request) {
       return s + item.priceCents * l.quantity;
     }, 0);
 
-    const lastOrder = await db.order.findFirst({
-      where: { restaurantId }, orderBy: { orderNumber: "desc" }, select: { orderNumber: true },
-    });
-    const nextNum = (lastOrder?.orderNumber ?? 0) + 1;
-
+    const orderNumber = await reserveOrderNumber(restaurantId);
     const order = await db.$transaction(async tx => {
       let tableSessionId: string | null = null;
       if (body.tableId) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${body.tableId}))::text AS "locked"`;
         let session = await tx.tableSession.findFirst({
           where: { tableId: body.tableId, restaurantId, status: "OPEN" },
         });
@@ -76,7 +74,7 @@ export async function POST(req: Request) {
           restaurantId,
           tableId:       body.tableId,
           tableSessionId,
-          orderNumber:   nextNum,
+          orderNumber,
           customerName:  body.customerName,
           customerPhone: body.customerPhone,
           notes:         body.notes,

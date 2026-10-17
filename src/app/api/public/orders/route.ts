@@ -2,6 +2,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { checkOrderRateLimit } from "@/lib/rateLimit";
 import { emitOrderEvent } from "@/lib/events";
+import { reserveOrderNumber } from "@/lib/orderNumber";
 
 export const dynamic = "force-dynamic";
 
@@ -111,21 +112,14 @@ export async function POST(req: Request) {
       return sum + dbItem.priceCents * line.quantity;
     }, 0);
 
-    // 7) Sequential order number + table session creation inside resilient transaction
-    let session: { order: any; tableSessionId: string } | null = null;
-    let attempts = 0;
-
-    while (attempts < 5) {
-      attempts++;
-      try {
-        session = await db.$transaction(async (tx: any) => {
-          const lastOrder = await tx.order.findFirst({
-            where:   { restaurantId: restaurant.id },
-            orderBy: { orderNumber: "desc" },
-            select:  { orderNumber: true },
-          });
-          const nextOrderNumber = (lastOrder?.orderNumber ?? 0) + 1;
-
+    // 7) Reserve a tenant-local order number atomically across Vercel instances.
+    const orderNumber = await reserveOrderNumber(restaurant.id);
+    let session: { order: any; tableSessionId: string };
+    try {
+      session = await db.$transaction(async (tx: any) => {
+          // Only serialize first-session creation for this table. Other tables
+          // keep accepting orders concurrently.
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${table.id}))::text AS "locked"`;
           // Find an open session for this table
           let tableSession = await tx.tableSession.findFirst({
             where: {
@@ -152,7 +146,7 @@ export async function POST(req: Request) {
               restaurantId:   restaurant.id,
               tableId:        table.id,
               tableSessionId: tableSession.id,
-              orderNumber:    nextOrderNumber,
+              orderNumber,
               customerName:   body.customerName,
               customerPhone:  body.customerPhone,
               customerEmail:  (body as any).customerEmail,
@@ -189,23 +183,15 @@ export async function POST(req: Request) {
           }
 
           return { order: created, tableSessionId: tableSession.id };
-        });
-        break;
-      } catch (err: any) {
-        if (err?.code === "P2002" && attempts < 5) {
-          // unique constraint conflict under high concurrency — backoff and retry with next number
-          await new Promise((r) => setTimeout(r, 20 + Math.random() * 40));
-          continue;
-        }
-        throw err;
+      });
+    } catch (err: any) {
+      // Concurrent retries with the same idempotency key can race past the
+      // initial lookup. Return the already-created order instead of a 500.
+      if (err?.code === "P2002") {
+        const duplicate = await db.order.findUnique({ where: { idempotencyKey: body.idempotencyKey } });
+        if (duplicate) return Response.json({ order: duplicate, duplicate: true }, { status: 200 });
       }
-    }
-
-    if (!session) {
-      return Response.json(
-        { error: "Could not place order due to high concurrency. Please try again." },
-        { status: 500 }
-      );
+      throw err;
     }
 
     emitOrderEvent({

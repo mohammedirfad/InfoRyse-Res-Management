@@ -49,6 +49,7 @@ model Restaurant {
   contactPhone     String?
   location         String?
   plan             String?  @default("Pro")
+  nextOrderNumber  Int      @default(1)
   createdAt        DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -123,6 +124,7 @@ model MenuItem {
   @@index([restaurantId])
   @@index([categoryId])
   @@index([restaurantId, isAvailable])
+  @@index([categoryId, deletedAt, createdAt])
 }
 
 model Table {
@@ -142,6 +144,7 @@ model Table {
   bills        Bill[]
 
   @@index([restaurantId])
+  @@unique([restaurantId, label])
 }
 
 /// Tracks a group of orders placed at one table in one sitting.

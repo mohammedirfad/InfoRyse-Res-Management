@@ -31,7 +31,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   try {
     const { restaurantId } = await requireRestaurantUser();
 
-    const table = await db.table.findFirst({ where: { id: params.id, restaurantId } });
+    const table = await db.table.findFirst({ where: { id: params.id, restaurantId, deletedAt: null } });
     if (!table) return Response.json({ error: "Table not found" }, { status: 404 });
 
     const newToken = generateQrToken();

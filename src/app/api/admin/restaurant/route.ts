@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { invalidatePublicMenu } from "@/lib/publicMenuCache";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,7 @@ export async function PATCH(req: Request) {
       where: { id: restaurantId },
       data:  body,
     });
+    invalidatePublicMenu(restaurantId);
     return Response.json({ restaurant: updated });
   } catch (err) {
     return tenantErrorResponse(err);

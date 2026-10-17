@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { emitOrderEvent } from "@/lib/events";
+import { reserveOrderNumber } from "@/lib/orderNumber";
 
 export const dynamic = "force-dynamic";
 
@@ -38,26 +39,14 @@ export async function POST(req: Request) {
       ...(body.custom ? [`Custom: ${body.custom}`] : []),
     ].join(", ");
 
-    let attempts = 0;
-    let saved = false;
-
-    while (attempts < 5) {
-      attempts++;
-      try {
-        await db.$transaction(async (tx) => {
-          const last = await tx.order.findFirst({
-            where:   { restaurantId: restaurant.id },
-            orderBy: { orderNumber: "desc" },
-            select:  { orderNumber: true },
-          });
-          const orderNum = (last?.orderNumber ?? 0) + 1;
+    const orderNumber = await reserveOrderNumber(restaurant.id);
+    await db.$transaction(async (tx) => {
           const randomSuffix = Math.random().toString(36).substring(2, 8);
-
           await tx.order.create({
             data: {
               restaurantId:   restaurant.id,
               tableId:        table.id,
-              orderNumber:    orderNum,
+              orderNumber,
               customerName:   `Table ${table.label}`,
               status:         "NEW",
               subtotalCents:  0,
@@ -70,21 +59,7 @@ export async function POST(req: Request) {
               statusHistory:  { create: { status: "NEW" } },
             },
           });
-        });
-        saved = true;
-        break;
-      } catch (err: any) {
-        if (err?.code === "P2002" && attempts < 5) {
-          await new Promise((r) => setTimeout(r, 20 + Math.random() * 40));
-          continue;
-        }
-        throw err;
-      }
-    }
-
-    if (!saved) {
-      return Response.json({ error: "Could not record assistance request. Please try again." }, { status: 500 });
-    }
+    });
 
     emitOrderEvent({
       restaurantId: restaurant.id,

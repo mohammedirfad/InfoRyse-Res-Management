@@ -173,7 +173,8 @@ export default function OrdersPage() {
     }
   }
 
-  // Polling loader
+  // Serverless instances do not share the in-memory EventEmitter. Polling
+  // gives every Vercel instance the same reliable source of truth.
   const load = useCallback(async () => {
     if (isFetching.current) return;
     isFetching.current = true;
@@ -210,28 +211,8 @@ export default function OrdersPage() {
     // Initial fetch
     load();
 
-    // Real-time EventSource connection (SSE event stream - zero polling)
-    let es: EventSource | null = null;
-    try {
-      es = new EventSource("/api/admin/events");
-      es.addEventListener("order_created", () => {
-        load();
-      });
-      es.addEventListener("order_updated", () => {
-        load();
-      });
-      es.addEventListener("bill_updated", () => {
-        load();
-      });
-    } catch {
-      // EventSource fallback
-    }
-
-    return () => {
-      if (es) {
-        es.close();
-      }
-    };
+    const interval = window.setInterval(load, 10000);
+    return () => window.clearInterval(interval);
   }, [load]);
 
   // Toast auto-dismiss progress bar timer

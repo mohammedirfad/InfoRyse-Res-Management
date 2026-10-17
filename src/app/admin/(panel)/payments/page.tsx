@@ -104,20 +104,10 @@ export default function PaymentsPage() {
     fetchBills(1);
   }, [fetchBills]);
 
-  // Real-time auto-refresh when new bill is paid
+  // Polling works across separate serverless instances in production.
   useEffect(() => {
-    let es: EventSource | null = null;
-    try {
-      es = new EventSource("/api/admin/events");
-      es.addEventListener("bill_updated", () => {
-        fetchBills(1);
-      });
-    } catch {
-      // ignore
-    }
-    return () => {
-      es?.close();
-    };
+    const interval = window.setInterval(() => fetchBills(page), 15000);
+    return () => window.clearInterval(interval);
   }, [fetchBills]);
 
   // Thermal Print Receipt

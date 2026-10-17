@@ -27,7 +27,6 @@ type CreatedCredentials = {
   restaurant: Restaurant;
   credentials: {
     email: string;
-    tempPassword: string;
     loginUrl: string;
     emailSent: boolean;
   };
@@ -50,7 +49,6 @@ export default function RestaurantsPage() {
     ownerPhone: "",
     location: "",
     plan: "Pro" as "Basic" | "Pro" | "Premium" | "Enterprise",
-    tempPassword: "",
   });
 
   // Created credentials modal
@@ -124,10 +122,6 @@ export default function RestaurantsPage() {
       setFormError("Please enter the restaurant's location/city.");
       return;
     }
-    if (formData.tempPassword && formData.tempPassword.length < 8) {
-      setFormError("Temporary password must be at least 8 characters if provided.");
-      return;
-    }
 
     setSubmitting(true);
     try {
@@ -141,7 +135,6 @@ export default function RestaurantsPage() {
           ownerPhone: formData.ownerPhone.trim(),
           location: formData.location.trim(),
           plan: formData.plan,
-          ownerTempPassword: formData.tempPassword.trim() || undefined,
         }),
       });
 
@@ -161,7 +154,6 @@ export default function RestaurantsPage() {
         ownerPhone: "",
         location: "",
         plan: "Pro",
-        tempPassword: "",
       });
       load();
     } catch {
@@ -181,6 +173,16 @@ export default function RestaurantsPage() {
       setSelected({ ...selected, isActive: !selected.isActive });
     }
     load();
+  }
+
+  async function sendAccessReset(r: Restaurant) {
+    const res = await fetch(`/api/super/restaurants/${r.id}/reset-access`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Could not send a password reset email.");
+      return;
+    }
+    alert(`Password reset instructions sent to ${data.email}. No password was displayed.`);
   }
 
   // Open email modal
@@ -300,7 +302,7 @@ export default function RestaurantsPage() {
                 </span>
               </h1>
               <p className="text-sm text-slate-500 mt-0.5">
-                Onboard new restaurants, generate temporary credentials, dispatch corporate emails, and manage partner accounts.
+                Onboard restaurants, provide their shared admin login URL, send secure access resets, and manage partner accounts.
               </p>
             </div>
             <div className="flex gap-2">
@@ -440,6 +442,21 @@ export default function RestaurantsPage() {
                       <td className="text-xs text-slate-400">{formatDate(r.createdAt)}</td>
                       <td className="text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => sendAccessReset(r)}
+                            title="Send secure owner password reset email"
+                            className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-emerald-700 hover:border-emerald-300 transition-colors"
+                          >
+                            <Lock className="h-4 w-4" />
+                          </button>
+                          <a
+                            href="/admin/login"
+                            onClick={(event) => event.stopPropagation()}
+                            title="Restaurant Admin login"
+                            className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-blue-700 hover:border-blue-300 transition-colors"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
                           <button
                             onClick={() => openEmailModal(r)}
                             title="Send Direct Email to Owner"
@@ -592,17 +609,6 @@ export default function RestaurantsPage() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="text-xs font-bold text-slate-700 mb-1 block">
-                    Custom Dummy Password (Optional)
-                  </label>
-                  <input
-                    className="input"
-                    placeholder="Leave blank to auto-generate"
-                    value={formData.tempPassword}
-                    onChange={(e) => setFormData({ ...formData, tempPassword: e.target.value })}
-                  />
-                </div>
               </div>
 
               <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 text-xs text-blue-900 space-y-1">
@@ -610,9 +616,9 @@ export default function RestaurantsPage() {
                   <ShieldAlert className="h-4 w-4 text-blue-600" /> Automated Onboarding Workflow:
                 </p>
                 <p className="text-blue-800 leading-relaxed">
-                  1. Tenant & initial 4 tables are automatically created.<br />
-                  2. An executive corporate onboarding email with dummy credentials will be dispatched to the owner.<br />
-                  3. <strong>First-Time Password Enforced:</strong> The owner will be strictly required to change the password before accessing the restaurant panel.
+                  1. A tenant and secure owner account are created.<br />
+                  2. Login instructions are sent to the owner's email.<br />
+                  3. The owner changes the one-time password on first sign-in. Use the reset action if access is lost.
                 </p>
               </div>
 
@@ -647,7 +653,9 @@ export default function RestaurantsPage() {
               </div>
               <h2 className="text-xl font-bold">Restaurant Onboarded Successfully!</h2>
               <p className="text-xs text-emerald-100 mt-1">
-                Corporate onboarding email dispatched to {createdInfo.credentials.email}
+                {createdInfo.credentials.emailSent
+                  ? `Onboarding email sent to ${createdInfo.credentials.email}`
+                  : `Onboarding email could not be sent. Send a reset email to ${createdInfo.credentials.email}.`}
               </p>
             </div>
 
@@ -685,24 +693,10 @@ export default function RestaurantsPage() {
                     </button>
                   </div>
                 </div>
-                <div className="flex items-center justify-between border-t border-slate-200 pt-2">
-                  <span className="text-xs font-bold text-slate-500 uppercase">Temporary Password</span>
-                  <div className="flex items-center gap-2">
-                    <code className="text-xs bg-amber-100 text-amber-900 font-bold px-2.5 py-1 rounded border border-amber-300 font-mono">
-                      {createdInfo.credentials.tempPassword}
-                    </code>
-                    <button
-                      onClick={() => copyToClipboard(createdInfo.credentials.tempPassword, "pass")}
-                      className="p-1 rounded hover:bg-slate-200 text-slate-600"
-                    >
-                      {copiedField === "pass" ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
-                  </div>
-                </div>
               </div>
 
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 leading-relaxed">
-                🔒 <strong>Forced Password Update:</strong> When the owner signs in with this temporary password, the system will immediately require them to create a new secure password before accessing any restaurant features.
+                🔒 <strong>Secure access:</strong> Owners set or reset their password through an email verification code.
               </div>
 
               <button

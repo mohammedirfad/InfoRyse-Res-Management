@@ -190,15 +190,54 @@ export default function MenuManagementPage() {
         body: JSON.stringify({ name: targetName }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        setSaveError(data.error || "Could not add category");
+        return;
+      }
       setNewCatName("");
-      if (data.category) {
+      if (data.category && !categories.some((category) => category.id === data.category.id)) {
         setCategories((prev) => [...prev, data.category]);
         setForm((f) => ({ ...f, categoryId: data.category.id }));
       }
-      load();
+      await load();
     } catch {
-      // silent
+      setSaveError("Could not add category. Please try again.");
     }
+  }
+
+  async function deleteCategory(category: Category) {
+    const itemCount = items.filter((item) => item.category.id === category.id).length;
+    const alternatives = categories.filter((candidate) => candidate.id !== category.id);
+    if (itemCount && !alternatives.length) {
+      setSaveError("Add another category before deleting the category that contains menu items.");
+      return;
+    }
+    let replacementCategoryId: string | undefined;
+    if (itemCount) {
+      const choices = alternatives.map((candidate, index) => `${index + 1}. ${candidate.name}`).join("\n");
+      const choice = window.prompt(`Move ${itemCount} menu item(s) to which category?\n${choices}`, "1");
+      if (choice === null) return;
+      const index = Number(choice) - 1;
+      if (!Number.isInteger(index) || !alternatives[index]) {
+        setSaveError("Enter a valid replacement category number.");
+        return;
+      }
+      replacementCategoryId = alternatives[index].id;
+    }
+    if (!window.confirm(`Delete category “${category.name}”?${itemCount ? ` Its ${itemCount} item(s) will be moved.` : ""}`)) return;
+    const res = await fetch(`/api/admin/categories/${category.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ replacementCategoryId }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setSaveError(data.error || "Could not delete category");
+      return;
+    }
+    if (activeFilter === category.id) setActiveFilter("all");
+    if (form.categoryId === category.id) setForm((current) => ({ ...current, categoryId: replacementCategoryId ?? "" }));
+    await load();
   }
 
   const filtered = items.filter((i) => {
@@ -237,7 +276,7 @@ export default function MenuManagementPage() {
               All Items
               <span className={`text-xs rounded-full px-1.5 ${activeFilter === "all" ? "bg-white/20" : "bg-gray-100 text-gray-400"}`}>{items.length}</span>
             </button>
-            {categories.map((c) => (
+                  {categories.map((c) => (
               <button
                 key={c.id}
                 onClick={() => setActiveFilter(c.id)}
@@ -457,6 +496,16 @@ export default function MenuManagementPage() {
               {/* Add category */}
               <div className="bg-gray-50 rounded-2xl p-3 space-y-2">
                 <p className="text-xs font-semibold text-gray-700">Add or Quick-Pick Category</p>
+                <div className="flex flex-wrap gap-1">
+                  {categories.map((category) => (
+                    <span key={category.id} className="inline-flex items-center gap-1 rounded-md bg-white border border-gray-200 px-2 py-1 text-[10px] text-gray-600">
+                      {category.name}
+                      <button type="button" aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)} className="text-gray-400 hover:text-red-600">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
                 <div className="flex gap-2">
                   <input className="input flex-1 text-xs py-2 bg-white" placeholder="Type custom category name..." value={newCatName} onChange={(e) => setNewCatName(e.target.value)} />
                   <button type="button" onClick={() => addCategory()} className="btn-primary bg-[#132A1E] text-white text-xs px-3 py-2 rounded-xl font-bold">Add</button>

@@ -17,6 +17,7 @@ const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
 const BodySchema = z.object({
   contentType: z.string(),
+  fileSize: z.number().int().positive().max(MAX_SIZE_BYTES),
   // "folder" lets callers organise: "menu-items", "restaurant-logos", "covers"
   folder: z.enum(["menu-items", "restaurant-logos", "covers", "staff"]).default("menu-items"),
 });
@@ -29,7 +30,7 @@ const BodySchema = z.object({
 export async function POST(req: Request) {
   try {
     const { restaurantId } = await requireRestaurantUser();
-    const { contentType, folder } = BodySchema.parse(await req.json());
+    const { contentType, fileSize, folder } = BodySchema.parse(await req.json());
 
     const ext = ALLOWED_TYPES[contentType];
     if (!ext) {
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
     const { uploadUrl, publicUrl } = await getPresignedUploadUrl(
       key,
       contentType,
-      MAX_SIZE_BYTES
+      fileSize
     );
 
     return Response.json({ uploadUrl, publicUrl, key });

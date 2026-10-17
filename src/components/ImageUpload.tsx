@@ -52,47 +52,38 @@ export default function ImageUpload({
     setPreview(localUrl);
 
     try {
-      // Direct high-speed upload to server storage (zero-card, 100% reliable)
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("folder", folder);
+      const urlRes = await fetch("/api/admin/upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contentType: file.type, fileSize: file.size, folder }),
+      });
+      const signed = await urlRes.json();
+      if (!urlRes.ok) throw new Error(signed.error || "Could not prepare image upload");
 
-      const publicUrl = await new Promise<string>((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/api/admin/upload");
+        xhr.open("PUT", signed.uploadUrl);
+        xhr.setRequestHeader("Content-Type", file.type);
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
         };
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const res = JSON.parse(xhr.responseText);
-              if (res.publicUrl || res.url) {
-                resolve(res.publicUrl || res.url);
-              } else {
-                reject(new Error(res.error || "Upload failed"));
-              }
-            } catch {
-              reject(new Error("Invalid response from upload server"));
-            }
+            resolve();
           } else {
-            try {
-              const res = JSON.parse(xhr.responseText);
-              reject(new Error(res.error || `Upload failed with status ${xhr.status}`));
-            } catch {
-              reject(new Error(`Upload failed with status ${xhr.status}`));
-            }
+            reject(new Error(`Image storage rejected the upload (${xhr.status}). Check the bucket CORS and R2 settings.`));
           }
         };
         xhr.onerror = () => reject(new Error("Network error during upload"));
-        xhr.send(formData);
+        xhr.send(file);
       });
 
       setProgress(100);
-      onChange(publicUrl); // save the permanent URL
+      onChange(signed.publicUrl);
       URL.revokeObjectURL(localUrl);
       setPreview(null);
     } catch (err: any) {
+      URL.revokeObjectURL(localUrl);
       setError(err.message ?? "Upload failed");
       setPreview(null);
     } finally {

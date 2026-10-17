@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { invalidatePublicMenu } from "@/lib/publicMenuCache";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,7 @@ export async function POST(req: Request) {
     if (!category) return Response.json({ error: "Invalid category" }, { status: 400 });
 
     const item = await db.menuItem.create({ data: { ...body, restaurantId } });
+    invalidatePublicMenu(restaurantId);
     return Response.json({ item }, { status: 201 });
   } catch (err) {
     return tenantErrorResponse(err);

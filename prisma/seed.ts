@@ -177,6 +177,16 @@ async function main() {
     }
   }
 
+  // Keep the atomic restaurant order counter ahead of seeded records.
+  await db.$executeRaw`
+    UPDATE "Restaurant"
+    SET "nextOrderNumber" = COALESCE(
+      (SELECT MAX("orderNumber") + 1 FROM "Order" WHERE "restaurantId" = ${restaurant.id}),
+      1
+    )
+    WHERE "id" = ${restaurant.id}
+  `;
+
   console.log("\n✅ Seed complete!\n");
   console.log("┌─────────────────────────────────────────────────┐");
   console.log("│  Super Admin   superadmin@inforyse.com           │");
