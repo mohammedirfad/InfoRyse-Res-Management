@@ -160,18 +160,59 @@ export async function POST(req: Request) {
             paidAt: new Date(),
           },
         });
+
+        // Mark all confirmed orders in this session as COMPLETED so they are closed
+        await tx.order.updateMany({
+          where: { tableSessionId, restaurantId, status: { not: "CANCELLED" } },
+          data: { status: "COMPLETED" },
+        });
       }
 
-      // Mark table Available again
+      // Mark table Available again and complete any remaining active orders
       if (tableId) {
         await tx.table.update({
           where: { id: tableId },
           data: { status: "AVAILABLE" },
         });
+
+        // Mark any remaining active orders for this table as COMPLETED
+        await tx.order.updateMany({
+          where: { tableId, restaurantId, status: { notIn: ["CANCELLED", "COMPLETED"] } },
+          data: { status: "COMPLETED" },
+        });
+
+        // Finalize and close any remaining open sessions for this table
+        await tx.tableSession.updateMany({
+          where: { tableId, restaurantId, status: "OPEN" },
+          data: {
+            status: "FINALIZED",
+            finalizedAt: new Date(),
+            paidAt: new Date(),
+          },
+        });
       }
 
       return bill;
     });
+
+    // Real-time broadcast to admin panel and tables
+    const { emitOrderEvent } = await import("@/lib/events");
+    emitOrderEvent({
+      restaurantId,
+      type: "bill_updated",
+      data: {
+        billId: createdBill.id,
+        tableId: createdBill.tableId,
+        tableSessionId: createdBill.tableSessionId,
+      },
+    });
+    if (createdBill.tableId) {
+      emitOrderEvent({
+        restaurantId,
+        type: "order_updated",
+        data: { tableId: createdBill.tableId },
+      });
+    }
 
     return Response.json({ bill: createdBill }, { status: 201 });
   } catch (err) {

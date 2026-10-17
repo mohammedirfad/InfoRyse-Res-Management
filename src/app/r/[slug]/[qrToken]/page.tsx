@@ -242,7 +242,7 @@ function ItemCard({
       }`}
     >
       {/* Food Image with Floating Quantity Controller on Image */}
-      <div className="relative aspect-4/3 w-full rounded-2xl overflow-hidden bg-gray-100 mb-2.5">
+      <div className="relative w-full h-36 rounded-2xl overflow-hidden bg-gray-100 mb-2.5 flex-shrink-0">
         {!imgErr ? (
           <img
             src={imageUrl}
@@ -315,12 +315,10 @@ function ItemCard({
       {/* Dish Details */}
       <div className="flex flex-col flex-1 justify-between">
         <div>
-          <h3 className="font-bold text-gray-900 text-sm leading-snug line-clamp-1">{tDish(item.name)}</h3>
-          {item.description && (
-            <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5 leading-relaxed">
-              {item.description}
-            </p>
-          )}
+          <h3 className="font-bold text-gray-900 text-sm leading-snug line-clamp-1 h-5">{tDish(item.name)}</h3>
+          <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5 leading-relaxed h-4">
+            {item.description || "\u00A0"}
+          </p>
         </div>
 
         {/* Price & Savings */}
@@ -359,9 +357,14 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
   const [heroIdx, setHeroIdx]   = useState(0);
   const [heroFrozen, setHeroFrozen] = useState(false); // stop auto-advance on interaction
   const [phase, setPhase]       = useState<"landing"|"menu">("landing"); // landing splash first
+  const [visibleLimit, setVisibleLimit] = useState(16);
   const searchRef = useRef<HTMLInputElement>(null);
   const { lines, addItem, setQuantity, removeItem, totalCount, totalCents, syncSession } = useCart();
   const { t, tDish, tCategory } = useLanguage();
+
+  useEffect(() => {
+    setVisibleLimit(16);
+  }, [activeCat, search, vegFilter]);
 
   const getItemQuantity = useCallback((id: string) => {
     return lines.find((l) => l.item.id === id)?.quantity ?? 0;
@@ -750,7 +753,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                 </div>
               )}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
-                {items.map((item, idx) => (
+                {items.slice(0, visibleLimit).map((item, idx) => (
                   <ItemCard
                     key={item.id}
                     item={item}
@@ -766,6 +769,18 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                   />
                 ))}
               </div>
+              {items.length > visibleLimit && (
+                <div className="mt-5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleLimit((prev) => prev + 16)}
+                    className="inline-flex items-center gap-2 bg-gray-900 hover:bg-black text-white text-xs font-bold px-6 py-3 rounded-full shadow-md active:scale-95 transition-all"
+                  >
+                    <span>Load More Dishes ({items.length - visibleLimit} remaining)</span>
+                    <span>↓</span>
+                  </button>
+                </div>
+              )}
             </div>
           ));
         })()}

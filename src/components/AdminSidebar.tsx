@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, ShoppingBag, UtensilsCrossed, LayoutGrid, QrCode,
-  Tag, Users, BarChart2, User, Settings, ChefHat, Bell, Menu, X, Receipt
+  Tag, Users, BarChart2, User, Settings, ChefHat, Bell, Menu, X, Receipt, History
 } from "lucide-react";
 import LogoutButton from "./LogoutButton";
 
@@ -13,6 +13,7 @@ const NAV = [
   { href: "/admin/dashboard",  label: "Dashboard",          icon: LayoutDashboard },
   { href: "/admin/orders",     label: "Orders",             icon: ShoppingBag,  badge: true },
   { href: "/admin/bill",       label: "Table Bill",         icon: Receipt },
+  { href: "/admin/payments",   label: "Payment History",    icon: History },
   { href: "/admin/menu",       label: "Menu Management",    icon: UtensilsCrossed },
   { href: "/admin/tables",     label: "Table Management",   icon: LayoutGrid },
   { href: "/admin/qr-menu",    label: "QR Menu",            icon: QrCode },

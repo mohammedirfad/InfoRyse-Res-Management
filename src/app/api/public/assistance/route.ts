@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { emitOrderEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +85,11 @@ export async function POST(req: Request) {
     if (!saved) {
       return Response.json({ error: "Could not record assistance request. Please try again." }, { status: 500 });
     }
+
+    emitOrderEvent({
+      restaurantId: restaurant.id,
+      type: "order_created",
+    });
 
     return Response.json({ ok: true });
   } catch (err) {

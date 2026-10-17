@@ -45,61 +45,61 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelled, setCancelled]     = useState(false);
 
-  const pollTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nudgeTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDone      = status === "COMPLETED" || status === "CANCELLED";
   const canCancel   = CANCELLABLE.includes(status) && !cancelled;
   const currentIdx  = STATUS_ORDER.indexOf(status);
 
-  // Smart polling with error backoff
+  // Real-time EventSource stream + gentle 30s heartbeat fallback
   useEffect(() => {
     if (!orderNumber) return;
     let stopped = false;
-    let interval = 5000;
-    let failCount = 0;
+    let es: EventSource | null = null;
 
-    async function poll() {
-      if (stopped) return;
-      setIsPolling(true);
-      const newStatus = await fetchStatus(params.slug, orderNumber);
-      setIsPolling(false);
-
-      if (newStatus) {
-        failCount = 0;
-        if (newStatus !== status) {
-          setStatus(newStatus);
-          setLastUpdated(new Date());
-          if (newStatus === "CANCELLED") setCancelled(true);
-        }
-        if (newStatus === "ACCEPTED" || newStatus === "PREPARING") interval = 10000;
-        if (newStatus === "READY") interval = 8000;
-        if (newStatus === "COMPLETED" || newStatus === "CANCELLED") {
-          stopped = true;
-          return;
-        }
-      } else {
-        failCount++;
-        if (failCount >= 3) {
-          // Back off if order is pending or lookup failed
-          interval = 15000;
-        }
+    // 1. Initial quick status check
+    fetchStatus(params.slug, orderNumber).then((s) => {
+      if (s && !stopped) {
+        setStatus(s);
+        setLastUpdated(new Date());
+        if (s === "CANCELLED") setCancelled(true);
       }
+    });
 
-      if (!stopped) pollTimer.current = setTimeout(poll, interval);
-    }
+    // 2. Real-time EventSource connection (Zero delay, zero polling spam!)
+    try {
+      es = new EventSource(
+        `/api/public/order-events?slug=${encodeURIComponent(params.slug)}&orderNumber=${encodeURIComponent(orderNumber)}`
+      );
 
-    poll();
+      es.addEventListener("order_status", (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data);
+          if (payload?.status && !stopped) {
+            setStatus(payload.status);
+            setLastUpdated(new Date());
+            if (payload.status === "CANCELLED") setCancelled(true);
+            if (payload.status === "COMPLETED" || payload.status === "CANCELLED") {
+              es?.close();
+            }
+          }
+        } catch { /* ignore parse error */ }
+      });
+
+      es.onerror = () => {
+        // EventSource will auto-reconnect if temporary network drop
+      };
+    } catch { /* ignore */ }
 
     // Show "order more" nudge after 30s idle
     nudgeTimer.current = setTimeout(() => setShowNudge(true), 30000);
 
     return () => {
       stopped = true;
-      if (pollTimer.current) clearTimeout(pollTimer.current);
+      if (es) es.close();
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [orderNumber]);
 
   // Build readable order ID: e.g. #RIV0010
   const prefix = (restaurantName || params.slug || "ORD")

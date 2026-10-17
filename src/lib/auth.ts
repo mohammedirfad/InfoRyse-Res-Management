@@ -62,24 +62,36 @@ function generateOtp() {
 export async function issueOtp(userId: string, purpose: string, userEmail?: string) {
   const code = generateOtp();
   const codeHash = await bcrypt.hash(code, 10);
+  const isPasswordReset = purpose === "PASSWORD_RESET";
+  const ttlMs = isPasswordReset ? 15 * 60 * 1000 : 5 * 60 * 1000;
+
   await db.otpCode.create({
     data: {
       userId,
       codeHash,
       purpose,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
+      expiresAt: new Date(Date.now() + ttlMs),
     },
   });
 
   if (userEmail) {
     // Import dynamically or dispatch email
-    import("@/lib/email").then(({ sendEmail, buildOtpEmailHtml }) => {
-      sendEmail({
-        to: userEmail,
-        subject: `Your InfoRyse Verification Code: ${code}`,
-        html: buildOtpEmailHtml({ code }),
-        text: `Your InfoRyse verification code is: ${code}. It expires in 5 minutes.`,
-      }).catch((err) => console.error("[Auth:OTP Email]", err));
+    import("@/lib/email").then(({ sendEmail, buildOtpEmailHtml, buildPasswordResetEmailHtml }) => {
+      if (isPasswordReset) {
+        sendEmail({
+          to: userEmail,
+          subject: `Your InfoRyse Password Reset Code: ${code}`,
+          html: buildPasswordResetEmailHtml({ code, email: userEmail }),
+          text: `Your InfoRyse password reset code is: ${code}. It expires in 15 minutes.`,
+        }).catch((err) => console.error("[Auth:Password Reset Email]", err));
+      } else {
+        sendEmail({
+          to: userEmail,
+          subject: `Your InfoRyse Verification Code: ${code}`,
+          html: buildOtpEmailHtml({ code }),
+          text: `Your InfoRyse verification code is: ${code}. It expires in 5 minutes.`,
+        }).catch((err) => console.error("[Auth:OTP Email]", err));
+      }
     });
   }
 

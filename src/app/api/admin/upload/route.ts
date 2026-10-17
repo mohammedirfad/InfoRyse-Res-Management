@@ -53,10 +53,14 @@ export async function POST(req: Request) {
     const uploadDir = path.join(process.cwd(), "public", "uploads");
     await fs.mkdir(uploadDir, { recursive: true });
 
+    // Differentiate prefix based on folder (e.g. restaurant-logos vs menu-items)
+    const folder = (formData.get("folder") as string) || "menu-items";
+    const prefix = folder.includes("logo") ? "logo" : "dish";
+
     // Generate safe, unique filename
     const ext = EXTENSION_MAP[file.type] || ".jpg";
     const randomHex = crypto.randomBytes(8).toString("hex");
-    const filename = `dish_${restaurantId.slice(0, 8)}_${Date.now()}_${randomHex}${ext}`;
+    const filename = `${prefix}_${restaurantId.slice(0, 8)}_${Date.now()}_${randomHex}${ext}`;
     const destinationPath = path.join(uploadDir, filename);
 
     // Write file to disk

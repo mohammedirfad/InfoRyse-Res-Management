@@ -20,11 +20,12 @@ export async function GET() {
 
 const BodySchema = z.object({
   name:        z.string().min(1).max(100),
-  categoryId:  z.string().uuid(),
+  categoryId:  z.string().min(1),
   priceCents:  z.number().int().min(0),
-  description: z.string().max(300).optional(),
+  description: z.string().max(1000).nullable().optional(),
   isVeg:       z.boolean().default(true),
-  imageUrl:    z.string().url().nullable().optional(),
+  isAvailable: z.boolean().default(true).optional(),
+  imageUrl:    z.string().nullable().optional(),
 });
 
 export async function POST(req: Request) {

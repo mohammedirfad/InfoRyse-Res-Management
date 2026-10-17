@@ -50,15 +50,16 @@ export async function GET(
       },
     });
 
-    // 2) Resilient fallback: If no open session exists yet or session has 0 orders,
-    //    check if there are recent orders placed for this table in the last 12 hours
+    // 2) Resilient fallback: Only check if there are active unlinked orders placed for this table
+    // (e.g. guest ordered directly before session was created). NEVER resurrect completed or cancelled orders!
     if (!session || session.orders.length === 0) {
       const recentOrders = await db.order.findMany({
         where: {
           tableId: params.tableId,
           restaurantId,
-          status: { notIn: ["CANCELLED"] },
-          createdAt: { gte: new Date(Date.now() - 12 * 60 * 60 * 1000) },
+          tableSessionId: null,
+          status: { in: ["NEW", "ACCEPTED", "PREPARING", "READY"] },
+          createdAt: { gte: new Date(Date.now() - 4 * 60 * 60 * 1000) },
         },
         include: { items: true },
         orderBy: { createdAt: "asc" },
@@ -78,7 +79,7 @@ export async function GET(
             orders: recentOrders,
           } as any;
         } else {
-          // Open session had 0 orders, link any recent orders
+          // Open session had 0 orders, link any unlinked active orders
           await db.order.updateMany({
             where: { id: { in: recentOrders.map((o) => o.id) } },
             data:  { tableSessionId: session.id },
@@ -89,7 +90,7 @@ export async function GET(
           } as any;
         }
 
-        // Also ensure table status is OCCUPIED
+        // Also ensure table status is OCCUPIED only if there are active uncompleted orders
         if (table.status !== "OCCUPIED") {
           await db.table.update({
             where: { id: table.id },

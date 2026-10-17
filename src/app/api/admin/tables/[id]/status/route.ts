@@ -26,10 +26,21 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       } else if (status === "AVAILABLE") {
         await tx.tableSession.updateMany({
           where: { tableId: table.id, restaurantId, status: "OPEN" },
-          data:  { status: "FINALIZED", finalizedAt: new Date() },
+          data:  { status: "FINALIZED", finalizedAt: new Date(), paidAt: new Date() },
+        });
+        await tx.order.updateMany({
+          where: { tableId: table.id, restaurantId, status: { notIn: ["CANCELLED", "COMPLETED"] } },
+          data: { status: "COMPLETED" },
         });
       }
       return u;
+    });
+
+    const { emitOrderEvent } = await import("@/lib/events");
+    emitOrderEvent({
+      restaurantId,
+      type: "order_updated",
+      data: { tableId: table.id, status },
     });
 
     return Response.json({ table: updated });

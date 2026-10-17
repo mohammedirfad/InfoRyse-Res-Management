@@ -49,6 +49,8 @@ export default function MenuManagementPage() {
     imageUrl: "",
   });
   const [newCatName, setNewCatName]     = useState("");
+  const [saving, setSaving]             = useState(false);
+  const [saveError, setSaveError]       = useState<string | null>(null);
 
   async function load() {
     try {
@@ -88,6 +90,7 @@ export default function MenuManagementPage() {
 
   function openEdit(item: MenuItem) {
     setEditItem(item);
+    setSaveError(null);
     setForm({
       name: item.name, price: (item.priceCents / 100).toString(),
       categoryId: item.category.id, isVeg: item.isVeg, description: item.description ?? "",
@@ -101,26 +104,66 @@ export default function MenuManagementPage() {
 
   function openAdd() {
     setEditItem(null);
+    setSaveError(null);
     setForm({ ...BLANK_FORM, categoryId: categories[0]?.id ?? "" });
     setShowAdd(true);
   }
 
   async function save() {
-    const body = {
-      name: form.name, priceCents: Math.round(Number(form.price) * 100),
-      categoryId: form.categoryId, isVeg: form.isVeg, description: form.description,
-      isAvailable: form.isAvailable, imageUrl: form.imageUrl || null,
-    };
-    if (editItem) {
-      await fetch(`/api/admin/menu-items/${editItem.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      });
-    } else {
-      await fetch("/api/admin/menu-items", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      });
+    setSaveError(null);
+    if (!form.name.trim()) {
+      setSaveError("Item name is required.");
+      return;
     }
-    setEditItem(null); setShowAdd(false); load();
+    const parsedPrice = Number(form.price);
+    if (isNaN(parsedPrice) || parsedPrice < 0) {
+      setSaveError("Please enter a valid price (₹).");
+      return;
+    }
+    if (!form.categoryId) {
+      setSaveError("Please select a category.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const body = {
+        name: form.name.trim(),
+        priceCents: Math.round(parsedPrice * 100),
+        categoryId: form.categoryId,
+        isVeg: form.isVeg,
+        description: form.description.trim() || null,
+        isAvailable: form.isAvailable,
+        imageUrl: form.imageUrl.trim() || null,
+      };
+
+      const url = editItem ? `/api/admin/menu-items/${editItem.id}` : "/api/admin/menu-items";
+      const method = editItem ? "PATCH" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setSaveError(data.error || "Failed to save menu item");
+        return;
+      }
+
+      // Bust cached items so the changes immediately reflect everywhere
+      try {
+        sessionStorage.removeItem("inforyse_admin_items");
+      } catch { /* ignore */ }
+
+      setEditItem(null);
+      setShowAdd(false);
+      await load();
+    } catch (err: any) {
+      setSaveError(err.message || "Failed to save item. Please check network.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function deleteItem(item: MenuItem) {
@@ -293,6 +336,13 @@ export default function MenuManagementPage() {
                       <tr key={item.id} className="cursor-pointer" onClick={() => openEdit(item)}>
                         <td>
                           <div className="flex items-center gap-3">
+                            {item.imageUrl ? (
+                              <img src={item.imageUrl} alt="" className="h-9 w-9 rounded-xl object-cover flex-shrink-0 border border-black/5" />
+                            ) : (
+                              <div className="h-9 w-9 rounded-xl bg-gray-100 flex items-center justify-center text-sm flex-shrink-0">
+                                {catEmoji(item.category.name)}
+                              </div>
+                            )}
                             <div className={`h-3.5 w-3.5 rounded-sm border-2 flex-shrink-0 ${item.isVeg ? "border-green-600" : "border-red-600"}`} />
                             <div>
                               <p className="font-medium text-gray-900">{item.name}</p>
@@ -427,14 +477,21 @@ export default function MenuManagementPage() {
             </div>
           </div>
 
+          {saveError && (
+            <div className="px-5 py-2.5 bg-red-50 border-t border-red-100 text-red-600 text-xs font-medium flex items-center gap-2">
+              <span>⚠️</span>
+              <span>{saveError}</span>
+            </div>
+          )}
+
           <div className="p-5 border-t border-black/5 grid grid-cols-2 gap-2">
             {editItem && (
-              <button onClick={() => deleteItem(editItem)} className="btn-primary border-2 border-red-200 text-red-500 justify-center py-3 rounded-2xl text-sm">
+              <button disabled={saving} onClick={() => deleteItem(editItem)} className="btn-primary border-2 border-red-200 text-red-500 justify-center py-3 rounded-2xl text-sm disabled:opacity-50">
                 <Trash2 className="h-4 w-4" /> Delete
               </button>
             )}
-            <button onClick={save} className={`btn-primary bg-[#132A1E] text-white justify-center py-3 rounded-2xl text-sm ${!editItem ? "col-span-2" : ""}`}>
-              {editItem ? "Update Item" : "Save Item"}
+            <button disabled={saving} onClick={save} className={`btn-primary bg-[#132A1E] text-white justify-center py-3 rounded-2xl text-sm disabled:opacity-50 ${!editItem ? "col-span-2" : ""}`}>
+              {saving ? "Saving..." : editItem ? "Update Item" : "Save Item"}
             </button>
           </div>
         </div>

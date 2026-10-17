@@ -16,6 +16,25 @@ export type SendEmailOptions = {
   text?: string;
 };
 
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<br\s*[\/]?>/gi, "\n")
+    .replace(/<\/tr>/gi, "\n")
+    .replace(/<\/td>/gi, "  ")
+    .replace(/<h[1-6][^>]*>/gi, "\n\n")
+    .replace(/<\/h[1-6]>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /**
  * Sends real email to the recipient's inbox using Gmail SMTP (testerqa852@gmail.com)
  * or Resend. If no credentials are provided in .env, prints rich diagnostic logs.
@@ -27,6 +46,8 @@ export async function sendEmail({
   text,
 }: SendEmailOptions): Promise<{ success: boolean; error?: string }> {
   try {
+    const plainText = text || htmlToPlainText(html);
+
     // 1. Primary: Gmail SMTP transport (required for sending directly from testerqa852@gmail.com)
     if (smtpPass) {
       const transporter = nodemailer.createTransport({
@@ -45,7 +66,14 @@ export async function sendEmail({
         to,
         subject,
         html,
-        text: text || subject,
+        text: plainText,
+        headers: {
+          "X-Priority": "1",
+          "X-MSMail-Priority": "High",
+          "Importance": "high",
+          "Auto-Submitted": "auto-generated",
+          "X-Auto-Response-Suppress": "All",
+        },
       });
 
       console.log(`\n✅ [Email:Gmail SMTP] REAL EMAIL DISPATCHED TO INBOX!`);
@@ -298,6 +326,55 @@ export function buildOtpEmailHtml({ code }: { code: string }): string {
       ${code}
     </div>
     <p style="color: #94a3b8; font-size: 12px; margin-bottom: 0;">This code expires in 5 minutes. Never share this code with anyone.</p>
+  </div>
+</body>
+</html>`;
+}
+
+/**
+ * Generates an executive password reset code email for Restaurant Owners & Staff.
+ */
+export function buildPasswordResetEmailHtml({ code, email }: { code: string; email?: string }): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Reset Your InfoRyse Password</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0d1a14;">
+  <div style="max-width: 520px; margin: 36px auto; background: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.4); border: 1px solid #e2e8f0;">
+    <div style="background: linear-gradient(135deg, #132A1E 0%, #1F4733 100%); padding: 32px 28px; text-align: center;">
+      <div style="display: inline-block; width: 48px; height: 48px; border-radius: 14px; background: rgba(212, 169, 76, 0.15); border: 1px solid rgba(212, 169, 76, 0.3); margin-bottom: 12px; line-height: 48px; font-size: 22px;">
+        🔐
+      </div>
+      <h1 style="color: #ffffff; font-size: 24px; font-weight: 800; margin: 0 0 6px 0; letter-spacing: -0.02em;">
+        Info<span style="color: #D4A94C;">Ryse</span> Password Reset
+      </h1>
+      <p style="color: #a7f3d0; font-size: 13px; margin: 0;">Official security request for your restaurant partner account</p>
+    </div>
+
+    <div style="padding: 32px 28px; text-align: center;">
+      <p style="font-size: 15px; color: #334155; margin: 0 0 8px 0;">
+        We received a request to reset the password for <strong>${email || "your account"}</strong>.
+      </p>
+      <p style="font-size: 13px; color: #64748b; margin: 0 0 24px 0;">
+        Enter the 6-digit verification code below to authorize setting a new password:
+      </p>
+
+      <div style="background: #f0fdf4; border: 2px dashed #10b981; border-radius: 16px; padding: 18px 24px; display: inline-block; margin-bottom: 24px;">
+        <span style="font-family: monospace; font-size: 36px; font-weight: 800; letter-spacing: 0.3em; color: #065f46;">
+          ${code}
+        </span>
+      </div>
+
+      <div style="background: #f8fafc; border-radius: 12px; padding: 14px 18px; text-align: left; font-size: 12px; color: #64748b; line-height: 1.5; margin-bottom: 20px;">
+        🔒 <strong>Security Warning:</strong> This code is valid for 15 minutes. If you did not request a password reset, you can safely ignore this email — your existing password remains unchanged.
+      </div>
+    </div>
+
+    <div style="background: #f8fafc; padding: 16px 28px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 11px; color: #94a3b8;">
+      © ${new Date().getFullYear()} InfoRyse Technologies Ltd. · Secured Restaurant Operating System
+    </div>
   </div>
 </body>
 </html>`;

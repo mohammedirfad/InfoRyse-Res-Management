@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { emitOrderEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,12 @@ export async function POST(
         data: { orderId: order.id, status: "CANCELLED" },
       }),
     ]);
+
+    emitOrderEvent({
+      restaurantId: restaurant.id,
+      type: "order_updated",
+      data: { orderId: order.id, orderNumber, status: "CANCELLED" },
+    });
 
     return Response.json({ ok: true, message: "Order cancelled successfully." });
   } catch (err) {

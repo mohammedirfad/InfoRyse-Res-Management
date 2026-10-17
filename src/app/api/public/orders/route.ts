@@ -64,11 +64,11 @@ export async function POST(req: Request) {
       return Response.json({ error: "Restaurant is currently closed" }, { status: 409 });
     }
 
-    // 3) Gate: table must be OCCUPIED — this is the main defense against a
-    //    screenshot of the QR being used away from the table later.
-    if (table.status !== "OCCUPIED") {
+    // 3) Gate: table must be ready for ordering (AVAILABLE or OCCUPIED).
+    // Reserved or Out of Service tables cannot place orders.
+    if (table.status !== "OCCUPIED" && table.status !== "AVAILABLE") {
       return Response.json(
-        { error: "Please ask our staff to seat you before ordering" },
+        { error: "This table is currently unavailable or reserved. Please ask our staff to assist you." },
         { status: 409 }
       );
     }

@@ -60,15 +60,15 @@ export async function GET(req: Request) {
       },
     });
 
-    // Resilient fallback: If no open session exists yet, check if there are recent unlinked orders for this table
+    // Resilient fallback: If no open session exists yet, check if there are recent unlinked active orders for this table
     if (!session) {
       const recentOrders = await db.order.findMany({
         where: {
           tableId: table.id,
           restaurantId: restaurant.id,
           tableSessionId: null,
-          status: { notIn: ["CANCELLED"] },
-          createdAt: { gte: new Date(Date.now() - 12 * 60 * 60 * 1000) },
+          status: { in: ["NEW", "ACCEPTED", "PREPARING", "READY"] },
+          createdAt: { gte: new Date(Date.now() - 4 * 60 * 60 * 1000) },
         },
         include: { items: true },
         orderBy: { createdAt: "asc" },

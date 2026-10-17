@@ -133,7 +133,6 @@ export default function OrdersPage() {
 
   const prevNewCount = useRef(-1);
   const audioCtx = useRef<AudioContext | null>(null);
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFetching = useRef(false);
 
   // Dual-tone executive chime for incoming orders

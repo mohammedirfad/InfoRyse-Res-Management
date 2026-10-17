@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { emitOrderEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,12 @@ export async function POST(req: Request) {
         },
         include: { items: true, table: true },
       });
+    });
+
+    emitOrderEvent({
+      restaurantId,
+      type: "order_created",
+      data: order,
     });
 
     return Response.json({ order }, { status: 201 });

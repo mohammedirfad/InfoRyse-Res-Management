@@ -17,7 +17,7 @@ export async function GET() {
           take: 1,
           include: {
             orders: {
-              where: { status: { not: "CANCELLED" } },
+              where: { status: { notIn: ["CANCELLED", "COMPLETED"] } },
               select: { id: true, subtotalCents: true },
             },
           },

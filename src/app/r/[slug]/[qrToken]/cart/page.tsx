@@ -116,17 +116,17 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
   }, [params.slug, params.qrToken, syncSession]);
 
   useEffect(() => {
-    // Initial fetch
+    // Initial fetch on mount
     setPastOrders(getStoredOrders(params.qrToken));
     refreshTableOrders();
-
-    // Poll every 7 seconds when confirmed tab or active page
-    const timer = setInterval(() => {
-      refreshTableOrders();
-    }, 7000);
-
-    return () => clearInterval(timer);
   }, [params.qrToken, refreshTableOrders]);
+
+  // Refresh table orders when user views the confirmed tab
+  useEffect(() => {
+    if (tab === "confirmed") {
+      refreshTableOrders();
+    }
+  }, [tab, refreshTableOrders]);
 
   const subtotal   = totalCents;
   const grandTotal = subtotal;
@@ -325,9 +325,20 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                   Table {tableLabel} · Live Running Tab
                 </span>
               </div>
-              <span className="text-xs text-zinc-400">
-                {confirmedCount} {confirmedCount === 1 ? "round" : "rounds"}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-400">
+                  {confirmedCount} {confirmedCount === 1 ? "round" : "rounds"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => refreshTableOrders()}
+                  disabled={isFetchingSession}
+                  className="p-1 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+                  title="Refresh tab"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isFetchingSession ? "animate-spin text-emerald-400" : ""}`} />
+                </button>
+              </div>
             </div>
 
             <div className="mt-4 flex items-baseline justify-between border-t border-white/10 pt-3">

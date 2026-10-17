@@ -7,11 +7,11 @@ export const dynamic = "force-dynamic";
 const PatchSchema = z.object({
   isAvailable:  z.boolean().optional(),
   priceCents:   z.number().int().min(0).optional(),
-  name:         z.string().optional(),
-  description:  z.string().optional(),
-  categoryId:   z.string().optional(),
+  name:         z.string().min(1).max(100).optional(),
+  description:  z.string().max(1000).nullable().optional(),
+  categoryId:   z.string().min(1).optional(),
   isVeg:        z.boolean().optional(),
-  imageUrl:     z.string().url().nullable().optional(),
+  imageUrl:     z.string().nullable().optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {

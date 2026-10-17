@@ -46,7 +46,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     emitOrderEvent({
       restaurantId,
       type: "order_updated",
-      data: { orderId: order.id, status: nextStatus },
+      data: { orderId: order.id, orderNumber: order.orderNumber, status: nextStatus },
     });
 
     return Response.json({ order: updated });

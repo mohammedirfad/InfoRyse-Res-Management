@@ -314,8 +314,19 @@ export default function BillPage() {
       }
 
       setSettlingPayment(false);
+      // Immediately reset local table tab to clean available state
+      setSession(null);
+      setSelectedTable((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "AVAILABLE",
+              activeOrderCount: 0,
+              activeSubtotalCents: 0,
+            }
+          : null
+      );
       await fetchTablesAndRestaurant(false);
-      await loadBill(selectedTable);
       fetchBills(1);
     } catch (err) {
       console.error("Failed to store bill:", err);
