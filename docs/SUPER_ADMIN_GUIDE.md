@@ -166,7 +166,7 @@ To guarantee emails land in the **Primary Inbox**:
 - **DATABASE_URL**: Uses port `5432` with session pooler mode (`aws-0-ap-southeast-1.pooler.supabase.com:5432`).
 - This allows full support for Prisma prepared statements, transactions (`db.$transaction`), and high-concurrency table ordering without connection exhaustion.
 
-### 3. Image Storage (Cloudflare R2 / Server Uploads)
+### 3. Image Storage (Supabase Storage)
 - Menu dish photos, restaurant logos, and promotional banners are stored securely with automated size optimization.
 - Files are bounded and delivered through high-speed CDN edges to ensure zero delay on customer mobile networks.
 

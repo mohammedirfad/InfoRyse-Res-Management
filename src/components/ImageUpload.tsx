@@ -30,6 +30,37 @@ export default function ImageUpload({
     portrait:  "aspect-[3/4]",
   }[aspectRatio];
 
+  async function optimizeImage(file: File): Promise<File> {
+    if (file.type === "image/gif" || typeof createImageBitmap === "undefined") return file;
+
+    let bitmap: ImageBitmap | undefined;
+    try {
+      bitmap = await createImageBitmap(file);
+      const longestSide = Math.max(bitmap.width, bitmap.height);
+      if (longestSide <= 1600 && file.size <= 500 * 1024) return file;
+
+      const scale = Math.min(1, 1600 / longestSide);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) return file;
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+      const blob = await new Promise<Blob | null>(resolve =>
+        canvas.toBlob(resolve, "image/webp", 0.82)
+      );
+      if (!blob || blob.size >= file.size) return file;
+
+      const name = file.name.replace(/\.[^.]+$/, "") || "image";
+      return new File([blob], `${name}.webp`, { type: "image/webp", lastModified: Date.now() });
+    } catch {
+      return file;
+    } finally {
+      bitmap?.close();
+    }
+  }
+
   async function upload(file: File) {
     setLoading(true);
     setError(null);
@@ -52,10 +83,11 @@ export default function ImageUpload({
     setPreview(localUrl);
 
     try {
+      const uploadFile = await optimizeImage(file);
       const urlRes = await fetch("/api/admin/upload-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contentType: file.type, fileSize: file.size, folder }),
+        body: JSON.stringify({ contentType: uploadFile.type, fileSize: uploadFile.size, folder }),
       });
       const signed = await urlRes.json();
       if (!urlRes.ok) throw new Error(signed.error || "Could not prepare image upload");
@@ -63,7 +95,7 @@ export default function ImageUpload({
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", signed.uploadUrl);
-        xhr.setRequestHeader("Content-Type", file.type);
+        xhr.setRequestHeader("Content-Type", uploadFile.type);
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
         };
@@ -71,11 +103,11 @@ export default function ImageUpload({
           if (xhr.status >= 200 && xhr.status < 300) {
             resolve();
           } else {
-            reject(new Error(`Image storage rejected the upload (${xhr.status}). Check the bucket CORS and R2 settings.`));
+            reject(new Error(`Image storage rejected the upload (${xhr.status}). Check the storage bucket settings.`));
           }
         };
         xhr.onerror = () => reject(new Error("Network error during upload"));
-        xhr.send(file);
+        xhr.send(uploadFile);
       });
 
       setProgress(100);

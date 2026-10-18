@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { getPresignedUploadUrl } from "@/lib/r2";
+import { createSignedImageUpload, StorageConfigurationError } from "@/lib/supabaseStorage";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +24,7 @@ const BodySchema = z.object({
 
 /**
  * POST /api/admin/upload-url
- * Returns a presigned R2 URL the browser can PUT an image to directly.
+ * Returns a short-lived Supabase Storage URL the browser can PUT an image to directly.
  * Scoped to the requesting restaurant so images are namespaced per tenant.
  */
 export async function POST(req: Request) {
@@ -44,14 +44,16 @@ export async function POST(req: Request) {
     // Namespaced per restaurant — no cross-tenant access possible
     const key = `restaurants/${restaurantId}/${folder}/${randomUUID()}.${ext}`;
 
-    const { uploadUrl, publicUrl } = await getPresignedUploadUrl(
-      key,
-      contentType,
-      fileSize
-    );
+    const { uploadUrl, publicUrl } = await createSignedImageUpload(key);
 
     return Response.json({ uploadUrl, publicUrl, key });
   } catch (err) {
+    if (err instanceof StorageConfigurationError) {
+      return Response.json(
+        { error: "Image storage is not configured. Please contact the system administrator." },
+        { status: 503 }
+      );
+    }
     return tenantErrorResponse(err);
   }
 }

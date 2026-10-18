@@ -110,12 +110,12 @@ prisma/
 
 - Set `NEXT_PUBLIC_APP_URL` to the canonical HTTPS production domain. QR URLs also use Vercel's production domain as a fallback.
 - Keep Supabase and Vercel in nearby regions. The Prisma connection pool defaults to one connection per Vercel function instance to avoid exhausting Supabase's connection limit.
-- Configure Cloudflare R2 bucket CORS to allow `PUT` from the production domain and allow the `Content-Type` request header. Make the bucket public-read (or use a CDN domain) and set `R2_PUBLIC_URL` to that public origin.
+- Create a public Supabase Storage bucket named `restaurant-images` with a 5 MB file limit and JPEG, PNG, WebP, and GIF MIME types. The app creates short-lived signed upload URLs server-side; keep `SUPABASE_SERVICE_ROLE_KEY` private and never prefix it with `NEXT_PUBLIC_`.
 - Apply database changes before promoting the new app: `npx prisma migrate deploy`. This release includes a migration that merges duplicate active categories while retaining their menu items, repairs duplicate table labels, and adds uniqueness constraints.
-- Confirm `DATABASE_URL`, `SESSION_SECRET`, email delivery credentials, and all `R2_*` values are set in the Vercel Production environment. Preview deployments should use a separate database if they run migrations.
+- Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET` in local and Vercel environments, along with `DATABASE_URL`, `SESSION_SECRET`, and email delivery credentials. Preview deployments should use a separate database if they run migrations.
 - `SESSION_SECRET` must be a random value of at least 32 characters; production startup/build now fails closed if it is missing or too short.
 
-Image upload sends files directly to R2; Vercel's local filesystem is not used for persistent image storage.
+Image upload sends files directly to Supabase Storage using a time-limited upload token; Vercel's local filesystem is not used for persistent image storage. Supabase Storage delivers stored assets through its CDN. The Free plan currently includes 1 GB of storage and 10 GB of monthly bandwidth; monitor usage and plan for paid capacity if the restaurant fleet exceeds those quotas.
 
 ---
 
