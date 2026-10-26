@@ -118,6 +118,10 @@ model MenuItem {
   imageUrl     String?
   isVeg        Boolean  @default(true)
   isAvailable  Boolean  @default(true)
+  isBestseller Boolean  @default(false)
+  isPopular    Boolean  @default(false)
+  isChefsPick  Boolean  @default(false)
+  isTodaySpecial Boolean @default(false)
   deletedAt    DateTime?
   createdAt    DateTime @default(now())
 
@@ -159,6 +163,7 @@ model TableSession {
   status         String    @default("OPEN")
   finalizedAt    DateTime?
   paidAt         DateTime?
+  billRequestedAt DateTime?
   createdAt      DateTime  @default(now())
 
   orders         Order[]

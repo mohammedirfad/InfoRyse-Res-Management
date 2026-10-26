@@ -79,6 +79,66 @@ body {
   @apply bg-slate-50/80;
 }
 
+@media (max-width: 1023px) {
+  .admin-panel-main .h-screen,
+  .super-panel-main .h-screen {
+    height: auto !important;
+    min-height: calc(100dvh - 3.5rem);
+    overflow: visible !important;
+  }
+
+  .admin-panel-main .h-screen > .flex-1,
+  .super-panel-main .h-screen > .flex-1 {
+    min-width: 0;
+    overflow: visible !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .admin-panel-main,
+  .super-panel-main {
+    width: 100%;
+    max-width: 100vw;
+  }
+
+  .admin-panel-main .grid.grid-cols-4,
+  .admin-panel-main .grid.grid-cols-5,
+  .super-panel-main .grid.grid-cols-4,
+  .super-panel-main .grid.grid-cols-5 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-panel-main .grid.grid-cols-3,
+  .super-panel-main .grid.grid-cols-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-panel-main table,
+  .super-panel-main table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-panel-main .w-80,
+  .super-panel-main .w-80 {
+    position: fixed;
+    inset: 3.5rem 0 0 auto;
+    z-index: 40;
+    width: min(100vw, 24rem);
+    max-width: 100vw;
+    height: calc(100dvh - 3.5rem);
+    box-shadow: 0 0 0 100vmax rgb(15 23 42 / 35%), 0 12px 40px rgb(15 23 42 / 20%);
+  }
+
+  .admin-panel-main .px-6,
+  .super-panel-main .px-6 {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+
 /* ─── Animations ────────────────────────────────────────────────────────────── */
 @keyframes slide-up {
   from { transform: translateY(16px); opacity: 0; }

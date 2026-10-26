@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { getCurrentTableSession } from "@/lib/tableSessions";
 
 export const dynamic = "force-dynamic";
 
@@ -34,10 +35,7 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
     const { restaurantId } = await requireRestaurantUser();
     const table = await db.table.findFirst({ where: { id: params.id, restaurantId, deletedAt: null } });
     if (!table) return Response.json({ error: "Table not found" }, { status: 404 });
-    const openSession = await db.tableSession.findFirst({
-      where: { tableId: table.id, restaurantId, status: "OPEN" },
-      select: { id: true },
-    });
+    const openSession = await getCurrentTableSession(db, table.id, restaurantId);
     if (openSession) return Response.json({ error: "Close the active table session before deleting this table." }, { status: 409 });
     await db.table.update({ where: { id: table.id }, data: { deletedAt: new Date(), status: "OUT_OF_SERVICE" } });
     return Response.json({ success: true });

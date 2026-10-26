@@ -208,11 +208,24 @@ export default function OrdersPage() {
   }, [soundOn]);
 
   useEffect(() => {
-    // Initial fetch
-    load();
-
-    const interval = window.setInterval(load, 10000);
-    return () => window.clearInterval(interval);
+    // Load once, then refresh immediately when the shared lightweight order
+    // notification poll detects an arrival. Keep a slower sync for changes
+    // made by another admin in a different browser.
+    void load();
+    const onIncomingOrders = () => { void load(); };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 60000);
+    window.addEventListener("inforyse:new-orders", onIncomingOrders);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("inforyse:new-orders", onIncomingOrders);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [load]);
 
   // Toast auto-dismiss progress bar timer
@@ -405,7 +418,7 @@ export default function OrdersPage() {
     <div className="flex h-screen overflow-hidden bg-slate-50">
       {/* ── Luxury Order Arrival Toast (Floating Dynamic Island) ─────────────── */}
       {arrivalToastOrder && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[100] w-full max-w-lg px-4 animate-toast-enter">
+        <div className="fixed inset-x-0 top-4 z-[100] mx-auto w-[calc(100vw-1rem)] max-w-lg px-2 animate-toast-enter sm:top-5 sm:px-4">
           <div className="bg-slate-950/95 backdrop-blur-xl text-white rounded-3xl p-4 shadow-2xl border border-white/20 relative overflow-hidden flex flex-col gap-3">
             {/* Progress bar */}
             <div

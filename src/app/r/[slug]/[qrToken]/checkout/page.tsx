@@ -39,7 +39,24 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
   }>({ active: false, percent: 0, name: "" });
 
   useEffect(() => {
-    fetch(`/api/public/menu/${params.slug}/${params.qrToken}`)
+    const cacheKey = `menu_${params.slug}_${params.qrToken}`;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        const data = JSON.parse(cached);
+        if (data.restaurant?.discountActive && (data.restaurant?.discountPercent ?? 0) > 0) {
+          setRestaurantDiscount({
+            active: true,
+            percent: data.restaurant.discountPercent,
+            name: data.restaurant.discountName || "Special Offer",
+          });
+        }
+        return;
+      }
+    } catch { /* fetch fresh restaurant pricing below */ }
+
+    const controller = new AbortController();
+    fetch(`/api/public/menu/${params.slug}/${params.qrToken}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
         if (data.restaurant?.discountActive && (data.restaurant?.discountPercent ?? 0) > 0) {
@@ -51,6 +68,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
         }
       })
       .catch(() => {});
+    return () => controller.abort();
   }, [params.slug, params.qrToken]);
 
   // Clean customer billing without hidden taxes/CGST at checkout (taxes only apply on final bill)

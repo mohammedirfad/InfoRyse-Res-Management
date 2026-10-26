@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { getCurrentTableSession } from "@/lib/tableSessions";
 
 export const dynamic = "force-dynamic";
 
@@ -108,12 +109,54 @@ export async function POST(req: Request) {
       items,
     } = body;
 
-    if (!tableLabel || totalCents === undefined) {
-      return Response.json({ error: "Missing required bill details" }, { status: 400 });
+    if (!tableId || !tableSessionId || !tableLabel) {
+      return Response.json({ error: "A current table session is required to settle this bill" }, { status: 400 });
     }
 
-    // Run in transaction to allocate sequential billNumber and close session & table
-    const createdBill = await db.$transaction(async (tx) => {
+    // Re-read and price the active session on the server while holding the same
+    // table lock used by QR orders. A stale browser tab cannot settle an old tab
+    // or submit a client-edited total.
+    const result = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${tableId}))::text AS "locked"`;
+      const currentSession = await getCurrentTableSession(tx, tableId, restaurantId);
+      if (!currentSession || currentSession.id !== tableSessionId) {
+        return { error: "This table session has expired or was already settled." } as const;
+      }
+
+      const [activeSession, table, restaurant] = await Promise.all([
+        tx.tableSession.findFirst({
+          where: { id: tableSessionId, tableId, restaurantId, status: "OPEN" },
+          include: { orders: { where: { status: { not: "CANCELLED" } }, include: { items: true }, orderBy: { createdAt: "asc" } } },
+        }),
+        tx.table.findFirst({ where: { id: tableId, restaurantId }, select: { label: true } }),
+        tx.restaurant.findUnique({ where: { id: restaurantId }, select: { taxName: true, taxPercent: true, discountActive: true, discountPercent: true, discountName: true } }),
+      ]);
+      if (!activeSession || !table || !restaurant || activeSession.orders.length === 0) {
+        return { error: "There are no active orders to settle for this table." } as const;
+      }
+
+      const itemMap = new Map<string, { name: string; unitPrice: number; quantity: number; subtotal: number }>();
+      for (const order of activeSession.orders) {
+        for (const item of order.items) {
+          const key = `${item.nameSnapshot}:${item.priceCentsSnapshot}`;
+          const line = itemMap.get(key) ?? { name: item.nameSnapshot, unitPrice: item.priceCentsSnapshot, quantity: 0, subtotal: 0 };
+          line.quantity += item.quantity;
+          line.subtotal += item.priceCentsSnapshot * item.quantity;
+          itemMap.set(key, line);
+        }
+      }
+      const items = [...itemMap.values()];
+      const subtotalCents = items.reduce((sum, item) => sum + item.subtotal, 0);
+      const discountPercent = restaurant.discountActive ? restaurant.discountPercent ?? 0 : 0;
+      const discountCents = Math.round(subtotalCents * discountPercent / 100);
+      const discountedSubtotal = Math.max(0, subtotalCents - discountCents);
+      const taxPercent = restaurant.taxPercent ?? 5;
+      const taxCents = Math.round(discountedSubtotal * taxPercent / 100);
+      const packingCents = subtotalCents > 0 ? 2000 : 0;
+      const totalCents = discountedSubtotal + taxCents + packingCents;
+
+      // Serialize bill-number allocation across tables in the same restaurant.
+      await tx.$queryRaw`SELECT id FROM "Restaurant" WHERE id = ${restaurantId} FOR UPDATE`;
       // Get next sequential bill number for this restaurant
       const lastBill = await tx.bill.findFirst({
         where: { restaurantId },
@@ -129,44 +172,36 @@ export async function POST(req: Request) {
           tableId: tableId || null,
           tableSessionId: tableSessionId || null,
           billNumber: nextBillNumber,
-          tableLabel,
+          tableLabel: table.label,
           customerName: customerName || null,
           customerPhone: customerPhone || null,
           customerEmail: customerEmail || null,
-          orderCount: orderCount || 1,
-          subtotalCents: subtotalCents || 0,
-          discountCents: discountCents || 0,
-          discountPercent: discountPercent || 0,
-          discountName: discountName || null,
-          taxCents: taxCents || 0,
-          taxPercent: taxPercent || 5,
-          taxName: taxName || "GST",
-          packingCents: packingCents || 0,
-          totalCents: totalCents || 0,
+          orderCount: activeSession.orders.length,
+          subtotalCents,
+          discountCents,
+          discountPercent,
+          discountName: discountPercent > 0 ? restaurant.discountName ?? "Special Offer" : null,
+          taxCents,
+          taxPercent,
+          taxName: restaurant.taxName ?? "GST",
+          packingCents,
+          totalCents,
           paymentMethod: (paymentMethod || "CASH").toUpperCase(),
           paymentStatus: "PAID",
           paidAt: new Date(),
-          itemsJson: JSON.stringify(items || []),
+          itemsJson: JSON.stringify(items),
         },
       });
 
       // If open session exists, mark as finalized and paid
-      if (tableSessionId) {
-        await tx.tableSession.updateMany({
-          where: { id: tableSessionId, restaurantId },
-          data: {
-            status: "FINALIZED",
-            finalizedAt: new Date(),
-            paidAt: new Date(),
-          },
-        });
-
-        // Mark all confirmed orders in this session as COMPLETED so they are closed
-        await tx.order.updateMany({
-          where: { tableSessionId, restaurantId, status: { not: "CANCELLED" } },
-          data: { status: "COMPLETED" },
-        });
-      }
+      await tx.tableSession.update({
+        where: { id: tableSessionId },
+        data: { status: "FINALIZED", finalizedAt: new Date(), paidAt: new Date() },
+      });
+      await tx.order.updateMany({
+        where: { tableSessionId, restaurantId, status: { not: "CANCELLED" } },
+        data: { status: "COMPLETED" },
+      });
 
       // Mark table Available again and complete any remaining active orders
       if (tableId) {
@@ -175,25 +210,12 @@ export async function POST(req: Request) {
           data: { status: "AVAILABLE" },
         });
 
-        // Mark any remaining active orders for this table as COMPLETED
-        await tx.order.updateMany({
-          where: { tableId, restaurantId, status: { notIn: ["CANCELLED", "COMPLETED"] } },
-          data: { status: "COMPLETED" },
-        });
-
-        // Finalize and close any remaining open sessions for this table
-        await tx.tableSession.updateMany({
-          where: { tableId, restaurantId, status: "OPEN" },
-          data: {
-            status: "FINALIZED",
-            finalizedAt: new Date(),
-            paidAt: new Date(),
-          },
-        });
       }
 
-      return bill;
+      return { bill } as const;
     });
+    if ("error" in result) return Response.json({ error: result.error }, { status: 409 });
+    const createdBill = result.bill;
 
     // Real-time broadcast to admin panel and tables
     const { emitOrderEvent } = await import("@/lib/events");

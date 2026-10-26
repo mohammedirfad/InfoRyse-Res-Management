@@ -11,9 +11,9 @@ export default async function SuperPanelLayout({ children }: { children: React.R
   }
 
   return (
-    <div className="min-h-screen flex bg-gray-50">
+    <div className="super-panel-shell min-h-screen flex bg-gray-50">
       <SuperAdminSidebar />
-      <main className="flex-1 overflow-y-auto min-w-0">{children}</main>
+      <main className="super-panel-main min-w-0 flex-1 overflow-y-auto pt-14 lg:pt-0">{children}</main>
     </div>
   );
 }

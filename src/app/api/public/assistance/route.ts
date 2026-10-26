@@ -2,6 +2,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { emitOrderEvent } from "@/lib/events";
 import { reserveOrderNumber } from "@/lib/orderNumber";
+import { getCurrentTableSession } from "@/lib/tableSessions";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +16,8 @@ const BodySchema = z.object({
 
 /**
  * Customer-facing endpoint — no auth required.
- * Records an assistance request so the admin/staff Orders page can surface it.
- * We store it as a special order note tagged "ASSISTANCE" so the
- * existing polling loop in the admin orders page picks it up automatically.
+ * Bill requests are attached to the table session and shown in billing.
+ * Other assistance requests remain visible to staff as assistance orders.
  */
 export async function POST(req: Request) {
   try {
@@ -33,9 +33,27 @@ export async function POST(req: Request) {
     });
     if (!table) return Response.json({ ok: false }, { status: 404 });
 
+    const requests = body.requests.filter((request) => request !== "pay_bill");
+    if (body.requests.includes("pay_bill")) {
+      const session = await getCurrentTableSession(db, table.id, restaurant.id);
+      if (session && !session.billRequestedAt) {
+        await db.tableSession.update({
+          where: { id: session.id },
+          data: { billRequestedAt: new Date() },
+        });
+        emitOrderEvent({
+          restaurantId: restaurant.id,
+          type: "bill_updated",
+          data: { tableId: table.id, sessionId: session.id, requested: true },
+        });
+      }
+    }
+
+    if (requests.length === 0) return Response.json({ ok: true });
+
     // Build a readable summary of what the customer needs
     const requestSummary = [
-      ...body.requests,
+      ...requests,
       ...(body.custom ? [`Custom: ${body.custom}`] : []),
     ].join(", ");
 

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import AdminSidebar from "@/components/AdminSidebar";
+import AdminOrderNotifications from "@/components/AdminOrderNotifications";
 import { ForcePasswordChangeModal } from "@/components/ForcePasswordChangeModal";
 import { Ban } from "lucide-react";
 
@@ -12,8 +13,14 @@ export default async function AdminPanelLayout({ children }: { children: React.R
   }
 
   const [restaurant, user] = await Promise.all([
-    db.restaurant.findUnique({ where: { id: session.restaurantId } }),
-    db.user.findUnique({ where: { id: session.userId } }),
+    db.restaurant.findUnique({
+      where: { id: session.restaurantId },
+      select: { name: true, openNow: true, slug: true, isActive: true },
+    }),
+    db.user.findUnique({
+      where: { id: session.userId },
+      select: { email: true, mustChangePassword: true },
+    }),
   ]);
 
   if (!restaurant) {
@@ -53,8 +60,9 @@ export default async function AdminPanelLayout({ children }: { children: React.R
   return (
     <div className="min-h-screen flex bg-gray-50 relative">
       <AdminSidebar restaurant={restaurant} userRole={session.role} />
+      <AdminOrderNotifications />
       {/* On mobile: full width (sidebar is overlay). On desktop: sidebar takes 256px */}
-      <main className="flex-1 overflow-y-auto min-w-0 lg:pl-0 pl-0">
+      <main className="admin-panel-main flex-1 overflow-y-auto min-w-0 lg:pl-0 pl-0">
         {/* Mobile top padding so hamburger button doesn't cover content */}
         <div className="lg:hidden h-14" />
         {children}

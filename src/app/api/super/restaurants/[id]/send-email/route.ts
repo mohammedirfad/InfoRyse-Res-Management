@@ -45,7 +45,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       text: `Hello ${targetName},\n\nNotice regarding ${restaurant.name}:\n\n${body.message}\n\nInfoRyse Super Administration`,
     });
 
-    return Response.json({ ok: true, sentTo: targetEmail, success: result.success });
+    if (!result.success) {
+      return Response.json({ error: result.error || "Email provider could not send the message." }, { status: 502 });
+    }
+
+    return Response.json({ ok: true, sentTo: targetEmail, success: true });
   } catch (err: any) {
     if (err instanceof z.ZodError) {
       return Response.json({ error: err.errors[0]?.message || "Invalid input" }, { status: 400 });

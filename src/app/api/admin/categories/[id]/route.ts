@@ -5,12 +5,35 @@ import { invalidatePublicMenu } from "@/lib/publicMenuCache";
 
 export const dynamic = "force-dynamic";
 
-const BodySchema = z.object({ replacementCategoryId: z.string().optional() });
+const RenameSchema = z.object({ name: z.string().trim().min(1, "Category name is required").max(60) });
 
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
     const { restaurantId } = await requireRestaurantUser();
-    const body = BodySchema.parse(await req.json().catch(() => ({})));
+    const { name } = RenameSchema.parse(await req.json());
+    const category = await db.category.findFirst({
+      where: { id: params.id, restaurantId, deletedAt: null },
+      select: { id: true, name: true },
+    });
+    if (!category) return Response.json({ error: "Category not found" }, { status: 404 });
+
+    const duplicate = await db.category.findFirst({
+      where: { restaurantId, deletedAt: null, id: { not: category.id }, name: { equals: name, mode: "insensitive" } },
+      select: { id: true },
+    });
+    if (duplicate) return Response.json({ error: "A category with this name already exists." }, { status: 409 });
+
+    const updated = await db.category.update({ where: { id: category.id }, data: { name } });
+    invalidatePublicMenu(restaurantId);
+    return Response.json({ category: updated });
+  } catch (err) {
+    return tenantErrorResponse(err);
+  }
+}
+
+export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+  try {
+    const { restaurantId } = await requireRestaurantUser();
     const category = await db.category.findFirst({
       where: { id: params.id, restaurantId, deletedAt: null },
     });
@@ -19,27 +42,13 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     const itemCount = await db.menuItem.count({
       where: { restaurantId, categoryId: category.id, deletedAt: null },
     });
-    if (itemCount && !body.replacementCategoryId) {
-      return Response.json({ error: "Move this category's menu items to another category before deleting it." }, { status: 409 });
+    if (itemCount > 0) {
+      return Response.json({ error: "This category still contains menu items. Rename it or move those items individually before deleting it." }, { status: 409 });
     }
 
-    if (body.replacementCategoryId) {
-      const replacement = await db.category.findFirst({
-        where: { id: body.replacementCategoryId, restaurantId, deletedAt: null },
-      });
-      if (!replacement || replacement.id === category.id) {
-        return Response.json({ error: "Choose another active category" }, { status: 400 });
-      }
-    }
-
-    await db.$transaction(async (tx) => {
-      if (body.replacementCategoryId) {
-        await tx.menuItem.updateMany({
-          where: { restaurantId, categoryId: category.id, deletedAt: null },
-          data: { categoryId: body.replacementCategoryId },
-        });
-      }
-      await tx.category.update({ where: { id: category.id }, data: { deletedAt: new Date(), isActive: false } });
+    await db.category.update({
+      where: { id: category.id },
+      data: { deletedAt: new Date(), isActive: false },
     });
     invalidatePublicMenu(restaurantId);
     return Response.json({ success: true });

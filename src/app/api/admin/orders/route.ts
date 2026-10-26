@@ -3,25 +3,50 @@ import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const { restaurantId } = await requireRestaurantUser();
+    const dashboardView = new URL(request.url).searchParams.get("view") === "dashboard";
     const orders = await db.order.findMany({
       where: { restaurantId },
-      include: {
-        items: true,
-        table: true,
-        statusHistory: { orderBy: { createdAt: "asc" } },
+      select: dashboardView ? {
+        id: true,
+        orderNumber: true,
+        status: true,
+        totalCents: true,
+        customerName: true,
+        createdAt: true,
+        items: { select: { nameSnapshot: true, quantity: true } },
+        table: { select: { label: true } },
+      } : {
+        id: true,
+        orderNumber: true,
+        status: true,
+        totalCents: true,
+        customerName: true,
+        customerPhone: true,
+        notes: true,
+        orderType: true,
+        paymentMethod: true,
+        createdAt: true,
+        items: {
+          select: {
+            id: true,
+            nameSnapshot: true,
+            priceCentsSnapshot: true,
+            quantity: true,
+          },
+        },
+        table: { select: { label: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 200,
+      take: 100,
     });
-    // Short cache — 4s is enough to batch rapid re-fetches during polling
-    // without making new orders feel stale (admin polls every 7s anyway)
+
     return new Response(JSON.stringify({ orders }), {
       headers: {
         "Content-Type": "application/json",
-        "Cache-Control": "private, max-age=4, stale-while-revalidate=8",
+        "Cache-Control": "private, no-store",
       },
     });
   } catch (err) {

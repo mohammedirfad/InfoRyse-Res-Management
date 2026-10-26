@@ -39,6 +39,7 @@ export default function MenuManagementPage() {
   const [items, setItems]               = useState<MenuItem[]>([]);
   const [categories, setCategories]     = useState<Category[]>([]);
   const [loading, setLoading]           = useState(true);
+  const [loadError, setLoadError]       = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<string>("all");
   const [search, setSearch]             = useState("");
   const [viewMode, setViewMode]         = useState<"grid" | "list">("grid");
@@ -49,6 +50,9 @@ export default function MenuManagementPage() {
     imageUrl: "",
   });
   const [newCatName, setNewCatName]     = useState("");
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [categoryDraft, setCategoryDraft] = useState("");
+  const [savingCategory, setSavingCategory] = useState(false);
   const [saving, setSaving]             = useState(false);
   const [saveError, setSaveError]       = useState<string | null>(null);
 
@@ -58,17 +62,27 @@ export default function MenuManagementPage() {
         fetch("/api/admin/menu-items", { cache: "no-store" }),
         fetch("/api/admin/categories", { cache: "no-store" }),
       ]);
-      const itemsData = (await ir.json()).items ?? [];
-      const catsData  = (await cr.json()).categories ?? [];
-      setItems(itemsData);
-      setCategories(catsData);
-      try {
-        sessionStorage.setItem("inforyse_admin_items", JSON.stringify(itemsData));
-        sessionStorage.setItem("inforyse_admin_cats", JSON.stringify(catsData));
-      } catch { /* ignore */ }
-      if (!form.categoryId && catsData[0]) setForm((f) => ({ ...f, categoryId: catsData[0].id }));
+      const [itemsPayload, categoriesPayload] = await Promise.all([ir.json(), cr.json()]);
+      const errors: string[] = [];
+      if (ir.ok) {
+        const itemsData = itemsPayload.items ?? [];
+        setItems(itemsData);
+        try { sessionStorage.setItem("inforyse_admin_items", JSON.stringify(itemsData)); } catch { /* ignore */ }
+      } else {
+        errors.push(itemsPayload.error || "Menu items could not be loaded.");
+      }
+      if (cr.ok) {
+        const catsData = categoriesPayload.categories ?? [];
+        setCategories(catsData);
+        try { sessionStorage.setItem("inforyse_admin_cats", JSON.stringify(catsData)); } catch { /* ignore */ }
+        if (!form.categoryId && catsData[0]) setForm((f) => ({ ...f, categoryId: catsData[0].id }));
+      } else {
+        errors.push(categoriesPayload.error || "Categories could not be loaded.");
+      }
+      setLoadError(errors.length ? errors.join(" ") : null);
     } catch (e) {
       console.error(e);
+      setLoadError(e instanceof Error ? e.message : "Menu data could not be loaded. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -135,6 +149,10 @@ export default function MenuManagementPage() {
         description: form.description.trim() || null,
         isAvailable: form.isAvailable,
         imageUrl: form.imageUrl.trim() || null,
+        isBestseller: form.isBestseller,
+        isPopular: form.isPopular,
+        isChefsPick: form.isChefsPick,
+        isTodaySpecial: form.isTodaySpecial,
       };
 
       const url = editItem ? `/api/admin/menu-items/${editItem.id}` : "/api/admin/menu-items";
@@ -205,39 +223,63 @@ export default function MenuManagementPage() {
     }
   }
 
-  async function deleteCategory(category: Category) {
-    const itemCount = items.filter((item) => item.category.id === category.id).length;
-    const alternatives = categories.filter((candidate) => candidate.id !== category.id);
-    if (itemCount && !alternatives.length) {
-      setSaveError("Add another category before deleting the category that contains menu items.");
+  async function renameCategory(category: Category) {
+    const name = categoryDraft.trim();
+    if (!name) {
+      setSaveError("Category name is required.");
       return;
     }
-    let replacementCategoryId: string | undefined;
-    if (itemCount) {
-      const choices = alternatives.map((candidate, index) => `${index + 1}. ${candidate.name}`).join("\n");
-      const choice = window.prompt(`Move ${itemCount} menu item(s) to which category?\n${choices}`, "1");
-      if (choice === null) return;
-      const index = Number(choice) - 1;
-      if (!Number.isInteger(index) || !alternatives[index]) {
-        setSaveError("Enter a valid replacement category number.");
+    setSavingCategory(true);
+    setSaveError(null);
+    try {
+      const res = await fetch(`/api/admin/categories/${category.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSaveError(data.error || "Could not rename category.");
         return;
       }
-      replacementCategoryId = alternatives[index].id;
+      setCategories((current) => current.map((entry) => entry.id === category.id ? data.category : entry));
+      setItems((current) => current.map((item) => item.category.id === category.id
+        ? { ...item, category: data.category }
+        : item));
+      setEditingCategoryId(null);
+      setCategoryDraft("");
+      try {
+        sessionStorage.removeItem("inforyse_admin_items");
+        sessionStorage.removeItem("inforyse_admin_cats");
+      } catch { /* ignore */ }
+      await load();
+    } catch {
+      setSaveError("Could not rename category. Please try again.");
+    } finally {
+      setSavingCategory(false);
     }
-    if (!window.confirm(`Delete category “${category.name}”?${itemCount ? ` Its ${itemCount} item(s) will be moved.` : ""}`)) return;
-    const res = await fetch(`/api/admin/categories/${category.id}`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ replacementCategoryId }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setSaveError(data.error || "Could not delete category");
+  }
+
+  async function deleteCategory(category: Category) {
+    const itemCount = items.filter((item) => item.category.id === category.id).length;
+    if (itemCount > 0) {
+      setSaveError(`This category still has ${itemCount} menu item${itemCount === 1 ? "" : "s"}. Rename it to keep those items together, or move items individually before deleting it.`);
       return;
     }
-    if (activeFilter === category.id) setActiveFilter("all");
-    if (form.categoryId === category.id) setForm((current) => ({ ...current, categoryId: replacementCategoryId ?? "" }));
-    await load();
+    if (!window.confirm(`Delete the empty category “${category.name}”?`)) return;
+    try {
+      const res = await fetch(`/api/admin/categories/${category.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        setSaveError(data.error || "Could not delete category");
+        return;
+      }
+      if (activeFilter === category.id) setActiveFilter("all");
+      if (form.categoryId === category.id) setForm((current) => ({ ...current, categoryId: categories.find((entry) => entry.id !== category.id)?.id ?? "" }));
+      await load();
+    } catch {
+      setSaveError("Could not delete category. Please try again.");
+    }
   }
 
   const filtered = items.filter((i) => {
@@ -249,24 +291,31 @@ export default function MenuManagementPage() {
   const panelOpen = !!editItem || showAdd;
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-[calc(100dvh-3.5rem)] overflow-hidden lg:h-screen">
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Hero banner */}
-        <div className="relative overflow-hidden bg-gradient-to-r from-[#132A1E] to-[#2D5A3D] text-white px-6 py-5">
+        <div className="relative overflow-hidden bg-gradient-to-r from-[#132A1E] to-[#2D5A3D] text-white px-4 py-4 sm:px-6 sm:py-5">
           <div className="absolute -top-4 -right-4 h-24 w-24 rounded-full bg-white/5" />
           <div className="relative flex items-center justify-between">
             <div>
               <h1 className="text-xl font-display">Menu Management 🌿</h1>
               <p className="text-white/60 text-sm mt-0.5">Create, update and organize your menu easily.</p>
             </div>
-            <button onClick={openAdd} className="btn-primary bg-white text-[#132A1E] text-sm px-4 py-2 font-semibold">
+            <button onClick={openAdd} className="btn-primary bg-white text-[#132A1E] text-xs sm:text-sm px-3 sm:px-4 py-2 font-semibold whitespace-nowrap">
               <Plus className="h-4 w-4" /> Add New Item
             </button>
           </div>
         </div>
 
-        <div className="p-5 flex flex-col gap-3 flex-1 overflow-hidden">
+        <div className="p-3 sm:p-5 flex flex-col gap-3 flex-1 overflow-hidden">
+          {loadError && (
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              <p className="font-semibold">{items.length ? "Menu refresh failed" : "Menu could not be loaded"}</p>
+              <p className="mt-1 break-words">{loadError}</p>
+              <button type="button" onClick={() => { setLoading(true); void load(); }} className="mt-2 font-semibold underline">Retry</button>
+            </div>
+          )}
           {/* Category chips */}
           <div className="flex gap-2 overflow-x-auto pb-1">
             <button
@@ -363,8 +412,8 @@ export default function MenuManagementPage() {
                 ))}
               </div>
             ) : (
-              <div className="card overflow-hidden">
-                <table className="w-full data-table">
+              <div className="card overflow-x-auto">
+                <table className="w-full min-w-[620px] data-table">
                   <thead>
                     <tr>
                       <th>Item</th><th>Category</th><th>Price</th><th>Status</th><th>Actions</th>
@@ -414,11 +463,13 @@ export default function MenuManagementPage() {
 
       {/* Edit / Add side panel */}
       {panelOpen && (
-        <div className="w-80 flex-shrink-0 border-l border-black/5 bg-white flex flex-col overflow-hidden animate-slide-in-right">
-          <div className="flex items-center justify-between p-5 border-b border-black/5">
-            <h2 className="font-semibold text-gray-900">{editItem ? "Edit Menu Item" : "Add Menu Item"}</h2>
-            <button onClick={() => { setEditItem(null); setShowAdd(false); }} className="p-1.5 rounded-xl hover:bg-gray-100 text-gray-400">
-              <X className="h-4 w-4" />
+        <div className="fixed inset-0 z-[100] flex justify-end bg-slate-950/45 lg:static lg:inset-auto lg:z-auto lg:bg-transparent">
+          <button type="button" aria-label="Close menu editor" onClick={() => { setEditItem(null); setShowAdd(false); }} className="absolute inset-0 lg:hidden" />
+          <section role="dialog" aria-modal="true" aria-labelledby="menu-editor-title" className="relative z-10 flex h-full w-full max-w-[min(100%,28rem)] flex-shrink-0 flex-col overflow-hidden border-l border-black/5 bg-white shadow-2xl animate-slide-in-right lg:w-[24rem] lg:max-w-none lg:shadow-none">
+          <div className="flex min-h-16 items-center justify-between gap-3 border-b border-black/5 px-4 py-3 sm:p-5">
+            <h2 id="menu-editor-title" className="font-semibold text-gray-900">{editItem ? "Edit Menu Item" : "Add Menu Item"}</h2>
+            <button type="button" onClick={() => { setEditItem(null); setShowAdd(false); }} className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+              <X className="h-4 w-4" /> <span>Cancel</span>
             </button>
           </div>
 
@@ -484,8 +535,8 @@ export default function MenuManagementPage() {
                     { key: "isChefsPick", label: "Chef's Pick", icon: "👨‍🍳", color: "blue" },
                     { key: "isTodaySpecial", label: "Today's Special", icon: "✨", color: "green" },
                   ].map(({ key, label, icon, color }) => (
-                    <label key={key} className={`flex items-center gap-2 rounded-xl p-2.5 border cursor-pointer transition-all ${(form as any)[key] ? `border-${color}-300 bg-${color}-50` : "border-black/8"}`}>
-                      <input type="checkbox" checked={(form as any)[key]} onChange={(e) => setForm({ ...form, [key]: e.target.checked })} className="sr-only" />
+                    <label key={key} className={`flex items-center gap-2 rounded-xl p-2.5 border cursor-pointer transition-all ${(form as any)[key] ? ({ amber: "border-amber-300 bg-amber-50", red: "border-red-300 bg-red-50", blue: "border-blue-300 bg-blue-50", green: "border-green-300 bg-green-50" } as Record<string, string>)[color] : "border-black/10"}`}>
+                      <input type="checkbox" checked={(form as any)[key]} onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.checked }))} className="sr-only" />
                       <span>{icon}</span>
                       <span className="text-xs font-medium text-gray-700">{label}</span>
                     </label>
@@ -495,17 +546,36 @@ export default function MenuManagementPage() {
 
               {/* Add category */}
               <div className="bg-gray-50 rounded-2xl p-3 space-y-2">
-                <p className="text-xs font-semibold text-gray-700">Add or Quick-Pick Category</p>
-                <div className="flex flex-wrap gap-1">
-                  {categories.map((category) => (
-                    <span key={category.id} className="inline-flex items-center gap-1 rounded-md bg-white border border-gray-200 px-2 py-1 text-[10px] text-gray-600">
-                      {category.name}
-                      <button type="button" aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)} className="text-gray-400 hover:text-red-600">
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  ))}
+                <div>
+                  <p className="text-xs font-semibold text-gray-700">Categories</p>
+                  <p className="mt-0.5 text-[10px] text-gray-500">Rename keeps every item in its current category. Delete is only available when it is empty.</p>
                 </div>
+                <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                  {categories.map((category) => {
+                    const count = items.filter((item) => item.category.id === category.id).length;
+                    return (
+                      <div key={category.id} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-2">
+                        {editingCategoryId === category.id ? (
+                          <>
+                            <input autoFocus aria-label="New category name" className="input min-w-0 flex-1 text-xs py-2" value={categoryDraft} onChange={(event) => setCategoryDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void renameCategory(category); if (event.key === "Escape") setEditingCategoryId(null); }} />
+                            <button type="button" disabled={savingCategory} onClick={() => void renameCategory(category)} className="rounded-lg bg-[#132A1E] px-2.5 py-2 text-[11px] font-semibold text-white disabled:opacity-50">Save</button>
+                            <button type="button" onClick={() => { setEditingCategoryId(null); setCategoryDraft(""); }} aria-label="Cancel category rename" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+                          </>
+                        ) : (
+                          <>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-semibold text-slate-800">{category.name}</p>
+                              <p className="text-[10px] text-slate-500">{count} item{count === 1 ? "" : "s"}</p>
+                            </div>
+                            <button type="button" aria-label={`Rename ${category.name}`} onClick={() => { setEditingCategoryId(category.id); setCategoryDraft(category.name); setSaveError(null); }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"><Pencil className="h-4 w-4" /></button>
+                            <button type="button" aria-label={`Delete ${category.name}`} onClick={() => void deleteCategory(category)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-xs font-semibold text-gray-700">Add a category</p>
                 <div className="flex gap-2">
                   <input className="input flex-1 text-xs py-2 bg-white" placeholder="Type custom category name..." value={newCatName} onChange={(e) => setNewCatName(e.target.value)} />
                   <button type="button" onClick={() => addCategory()} className="btn-primary bg-[#132A1E] text-white text-xs px-3 py-2 rounded-xl font-bold">Add</button>
@@ -543,6 +613,7 @@ export default function MenuManagementPage() {
               {saving ? "Saving..." : editItem ? "Update Item" : "Save Item"}
             </button>
           </div>
+          </section>
         </div>
       )}
     </div>

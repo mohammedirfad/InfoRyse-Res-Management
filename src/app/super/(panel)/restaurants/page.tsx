@@ -219,7 +219,11 @@ export default function RestaurantsPage() {
         setEmailError(data.error || "Failed to dispatch email");
         return;
       }
-      setEmailSuccess(`Official email dispatched successfully to ${data.sentTo}`);
+      if (data.success !== true) {
+        setEmailError(data.error || "The email provider did not confirm delivery.");
+        return;
+      }
+      setEmailSuccess(`Email provider accepted the message for ${data.sentTo}`);
       setTimeout(() => {
         setEmailModalResto(null);
         setEmailSuccess(null);

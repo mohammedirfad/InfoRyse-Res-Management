@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { getPublicMenuCategories } from "@/lib/publicMenuCache";
+import { getCurrentTableSession } from "@/lib/tableSessions";
 
 export const dynamic = "force-dynamic";
 
@@ -50,11 +51,7 @@ export async function GET(
     }
 
     const [activeSession, categories] = await Promise.all([
-      db.tableSession.findFirst({
-        where:   { tableId: table.id, restaurantId: restaurant.id, status: "OPEN" },
-        select:  { id: true },
-        orderBy: { createdAt: "desc" },
-      }),
+      getCurrentTableSession(db, table.id, restaurant.id),
       getPublicMenuCategories(restaurant.id),
     ]);
 

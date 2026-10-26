@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { getCurrentTableSession } from "@/lib/tableSessions";
 
 export const dynamic = "force-dynamic";
 
@@ -38,9 +39,9 @@ export async function GET(
     if (!table) return Response.json({ error: "Table not found" }, { status: 404 });
 
     // 1) Get the currently open session
-    let session = await db.tableSession.findFirst({
-      where:   { tableId: params.tableId, restaurantId, status: "OPEN" },
-      orderBy: { createdAt: "desc" },
+    const currentSession = await getCurrentTableSession(db, params.tableId, restaurantId);
+    let session = currentSession ? await db.tableSession.findUnique({
+      where: { id: currentSession.id },
       include: {
         orders: {
           where:   { status: { not: "CANCELLED" } },
@@ -48,7 +49,7 @@ export async function GET(
           orderBy: { createdAt: "asc" },
         },
       },
-    });
+    }) : null;
 
     // 2) Resilient fallback: Only check if there are active unlinked orders placed for this table
     // (e.g. guest ordered directly before session was created). NEVER resurrect completed or cancelled orders!
@@ -162,6 +163,7 @@ export async function GET(
           id:           session.id,
           status:       session.status,
           createdAt:    session.createdAt,
+          billRequestedAt: session.billRequestedAt,
           orderCount:   session.orders.length,
           orders:       session.orders.map((o) => ({
             id:           o.id,

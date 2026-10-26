@@ -1,13 +1,12 @@
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 
-const smtpUser = process.env.SMTP_USER || "testerqa852@gmail.com";
+const smtpUser = process.env.SMTP_USER || "";
 const smtpPass = process.env.SMTP_PASS || "";
 const resendApiKey = process.env.RESEND_API_KEY || "";
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
-// Default From address requested: testerqa852@gmail.com
-export const DEFAULT_FROM = process.env.EMAIL_FROM || `InfoRyse Operating System <${smtpUser}>`;
+export const DEFAULT_FROM = process.env.EMAIL_FROM || (smtpUser ? `InfoRyse Operating System <${smtpUser}>` : "");
 
 export type SendEmailOptions = {
   to: string;
@@ -47,84 +46,36 @@ export async function sendEmail({
 }: SendEmailOptions): Promise<{ success: boolean; error?: string }> {
   try {
     const plainText = text || htmlToPlainText(html);
-
-    // 1. Primary: Gmail SMTP transport (required for sending directly from testerqa852@gmail.com)
-    if (smtpPass) {
-      const transporter = nodemailer.createTransport({
-        service: "gmail",
-        host: "smtp.gmail.com",
-        port: 465,
-        secure: true,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass.replace(/\s+/g, ""), // strip any spaces in Google App Passwords
-        },
-      });
-
-      const info = await transporter.sendMail({
-        from: DEFAULT_FROM,
-        to,
-        subject,
-        html,
-        text: plainText,
-        headers: {
-          "X-Priority": "1",
-          "X-MSMail-Priority": "High",
-          "Importance": "high",
-          "Auto-Submitted": "auto-generated",
-          "X-Auto-Response-Suppress": "All",
-        },
-      });
-
-      console.log(`\n✅ [Email:Gmail SMTP] REAL EMAIL DISPATCHED TO INBOX!`);
-      console.log(`   Message ID: ${info.messageId}`);
-      console.log(`   From:       ${DEFAULT_FROM}`);
-      console.log(`   To:         ${to}`);
-      console.log(`   Subject:    ${subject}\n`);
-
-      return { success: true };
-    }
-
-    // 2. Secondary: Resend (if configured with custom domain)
-    if (resend) {
-      const response = await resend.emails.send({
-        from: DEFAULT_FROM,
-        to,
-        subject,
-        html,
-        text: text || subject,
-      });
+    const resendFrom = process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM;
+    if (resend && resendFrom) {
+      const from = resendFrom;
+      const response = await resend.emails.send({ from, to, subject, html, text: plainText });
       if (response.error) {
-        console.error("[Email:Resend] Error sending email:", response.error);
+        console.error("[Email:Resend] Delivery failed:", response.error);
         return { success: false, error: response.error.message };
       }
-      console.log(`[Email:Resend] Dispatched successfully to ${to} (${subject})`);
+      if (!response.data?.id) return { success: false, error: "Resend did not confirm the message." };
+      console.info(`[Email:Resend] Accepted message ${response.data.id} for ${to}`);
+      return { success: true };
+    }
+    if (smtpUser && smtpPass) {
+      const transporter = nodemailer.createTransport({
+        service: "gmail", host: "smtp.gmail.com", port: 465, secure: true,
+        connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 20000,
+        auth: { user: smtpUser, pass: smtpPass.replace(/\s+/g, "") },
+      });
+      const info = await transporter.sendMail({ from: DEFAULT_FROM, to, subject, html, text: plainText });
+      console.info(`[Email:SMTP] Accepted message ${info.messageId} for ${to}`);
       return { success: true };
     }
 
-    // 3. Fallback: Log why the real email was not delivered and print simulated details
-    console.warn("\n⚠️ ─────────────────────────────────────────────────────────────");
-    console.warn("⚠️ [EMAIL NOT SENT TO REAL INBOX - MISSING GMAIL APP PASSWORD]");
-    console.warn(`   Sender:  ${DEFAULT_FROM}`);
-    console.warn(`   To:      ${to}`);
-    console.warn(`   Subject: ${subject}`);
-    console.warn("   REASON:  SMTP_PASS is not configured in .env.");
-    console.warn("   FIX:     To send real emails from testerqa852@gmail.com to real inboxes:");
-    console.warn("            1. Go to Google Account Security: https://myaccount.google.com/apppasswords");
-    console.warn("            2. Generate a 16-character App Password for 'Mail'.");
-    console.warn("            3. Put SMTP_PASS=\"xxxx xxxx xxxx xxxx\" in your .env file.");
-    console.warn("─────────────────────────────────────────────────────────────\n");
-
-    return {
-      success: false,
-      error: "SMTP_PASS not configured in .env. Real email delivery requires a Gmail App Password.",
-    };
+    if (resend && !resendFrom) return { success: false, error: "Set RESEND_FROM_EMAIL to a sender verified with Resend." };
+    return { success: false, error: "Email is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL, or SMTP_USER and SMTP_PASS." };
   } catch (err: any) {
     console.error("[Email] Send exception:", err);
     return { success: false, error: err?.message || "Failed to deliver email" };
   }
 }
-
 /**
  * Generates an onboarding email with the shared admin URL and password-reset instructions.
  */

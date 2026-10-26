@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -27,6 +27,11 @@ type FoodItem = {
   priceCents: number;
   imageUrl?: string | null;
   isVeg: boolean;
+  categoryName?: string;
+  isBestseller?: boolean;
+  isPopular?: boolean;
+  isChefsPick?: boolean;
+  isTodaySpecial?: boolean;
 };
 
 interface LandingProps {
@@ -48,45 +53,6 @@ interface LandingProps {
   onEnterMenu:     () => void;
   onOpenAssist?:   () => void;
 }
-
-const HERO_BG_IMAGES = [
-  "https://images.unsplash.com/photo-1544025162-d76694265947?w=1200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=1200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1668236543090-82eba5ee5976?w=1200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1604382355076-af4b0eb60143?w=1200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&auto=format&fit=crop&q=80",
-];
-
-const SIGNATURE_PREVIEWS = [
-  {
-    name: "Masala Dosa",
-    category: "South Indian",
-    image: "https://images.unsplash.com/photo-1668236543090-82eba5ee5976?w=600&auto=format&fit=crop&q=80",
-    badge: "Crispy & Hot",
-    isVeg: true,
-  },
-  {
-    name: "Royal Dum Biryani",
-    category: "Special",
-    image: "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=600&auto=format&fit=crop&q=80",
-    badge: "Chef's Secret",
-    isVeg: false,
-  },
-  {
-    name: "Paneer Butter Masala",
-    category: "Curries",
-    image: "https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=600&auto=format&fit=crop&q=80",
-    badge: "Rich Gravy",
-    isVeg: true,
-  },
-  {
-    name: "South Filter Coffee",
-    category: "Beverages",
-    image: "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=600&auto=format&fit=crop&q=80",
-    badge: "Aromatic Brew",
-    isVeg: true,
-  },
-];
 
 function formatRupees(c: number) {
   return `₹${(c / 100).toFixed(0)}`;
@@ -113,19 +79,19 @@ export function LandingPage({
 }: LandingProps) {
   const { t, tDish } = useLanguage();
   const [activeSlide, setActiveSlide] = useState(0);
-  const [bgIndex, setBgIndex]         = useState(0);
   const [likedDishes, setLikedDishes] = useState<Record<string, boolean>>({});
 
-  // Background food photography cinematic slideshow
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setBgIndex((prev) => (prev + 1) % HERO_BG_IMAGES.length);
-    }, 4800);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Display items from menu or curated fallback
+  const heroImages = useMemo(
+    () => featuredItems.slice(0, 5).map((item) => getDishImageUrl(item.name, item.categoryName, item.imageUrl)),
+    [featuredItems]
+  );
   const displayItems = featuredItems.length > 0 ? featuredItems.slice(0, 6) : [];
+  const highlightItems = featuredItems.slice(0, 4);
+  const itemBadge = (item: FoodItem) =>
+    item.isBestseller ? "Bestseller" :
+    item.isPopular ? "Popular" :
+    item.isChefsPick ? "Chef's Pick" :
+    item.isTodaySpecial ? "Today's Special" : "Guest favourite";
 
   useEffect(() => {
     if (displayItems.length <= 1) return;
@@ -149,13 +115,13 @@ export function LandingPage({
         <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
           <AnimatePresence initial={false}>
             <motion.div
-              key={bgIndex}
+              key={heroImages[0] ?? "menu-background"}
               initial={{ opacity: 0, scale: 1.15 }}
               animate={{ opacity: 0.42, scale: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 1.8, ease: "easeInOut" }}
               className="absolute inset-0 bg-cover bg-center"
-              style={{ backgroundImage: `url(${HERO_BG_IMAGES[bgIndex]})` }}
+              style={heroImages[0] ? { backgroundImage: `url(${heroImages[0]})` } : undefined}
             />
           </AnimatePresence>
 
@@ -295,7 +261,7 @@ export function LandingPage({
                     initial={{ opacity: 0, scale: 1.1 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.4 }}
-                    src={currentItem.imageUrl || getDishImageUrl(currentItem.name, "main course")}
+                    src={getDishImageUrl(currentItem.name, currentItem.categoryName, currentItem.imageUrl)}
                     alt={currentItem.name}
                     className="w-full h-full object-cover group-hover:scale-115 transition-transform duration-500"
                   />
@@ -478,7 +444,7 @@ export function LandingPage({
 
           {/* Animated 2x2 Visual Cards Grid with Ken Burns Image Transitions */}
           <div className="grid grid-cols-2 gap-3.5">
-            {SIGNATURE_PREVIEWS.map((item, idx) => (
+            {highlightItems.map((item, idx) => (
               <motion.div
                 key={idx}
                 initial={{ opacity: 0, y: 25 }}
@@ -491,15 +457,17 @@ export function LandingPage({
                 {/* Image Container with Zoom effect */}
                 <div className="relative aspect-square w-full rounded-2xl overflow-hidden bg-black/60 mb-2.5">
                   <img
-                    src={item.image}
+                    src={getDishImageUrl(item.name, item.categoryName, item.imageUrl)}
                     alt={item.name}
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover group-hover:scale-115 transition-transform duration-700 ease-out"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
 
                   {/* Top Badge */}
                   <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-full text-[9px] font-bold text-amber-300 border border-white/10">
-                    {item.badge}
+                    {itemBadge(item)}
                   </div>
 
                   {/* Veg Indicator */}
@@ -524,7 +492,7 @@ export function LandingPage({
                     {tDish(item.name)}
                   </h4>
                   <p className="text-white/40 text-[10px] mt-0.5 font-medium">
-                    {item.category}
+                    {item.categoryName ?? "Menu highlight"}
                   </p>
                 </div>
               </motion.div>

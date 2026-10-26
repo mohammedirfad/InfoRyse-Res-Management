@@ -16,7 +16,7 @@ export async function GET() {
     const restaurants = await db.restaurant.findMany({
       orderBy: { createdAt: "desc" },
       include: {
-        _count: { select: { orders: true, tables: true } },
+        _count: { select: { orders: { where: { NOT: { idempotencyKey: { startsWith: "assist_" } } } }, tables: { where: { deletedAt: null } } } },
         users: { where: { role: "OWNER" }, select: { id: true, email: true, name: true, phone: true } },
       },
     });

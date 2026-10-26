@@ -10,6 +10,11 @@ export type MenuItem = {
   imageUrl?: string | null;
   isVeg: boolean;
   isAvailable: boolean;
+  isBestseller?: boolean;
+  isPopular?: boolean;
+  isChefsPick?: boolean;
+  isTodaySpecial?: boolean;
+  categoryName?: string;
 };
 
 export type CartLine = { item: MenuItem; quantity: number };

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { checkOrderRateLimit } from "@/lib/rateLimit";
 import { emitOrderEvent } from "@/lib/events";
 import { reserveOrderNumber } from "@/lib/orderNumber";
+import { getOrCreateCurrentTableSession } from "@/lib/tableSessions";
 
 export const dynamic = "force-dynamic";
 
@@ -50,15 +51,28 @@ export async function POST(req: Request) {
 
     // 1) Resolve restaurant + table from the QR token — never trust a
     //    restaurantId/tableId sent directly by the client.
-    const restaurant = await db.restaurant.findUnique({ where: { slug: body.slug } });
-    if (!restaurant || !restaurant.isActive) {
-      return Response.json({ error: "Restaurant unavailable" }, { status: 404 });
-    }
-
     const table = await db.table.findFirst({
-      where: { qrToken: body.qrToken, restaurantId: restaurant.id, deletedAt: null },
+      where: { qrToken: body.qrToken, deletedAt: null, restaurant: { slug: body.slug } },
+      select: {
+        id: true,
+        label: true,
+        status: true,
+        restaurant: {
+          select: {
+            id: true,
+            isActive: true,
+            openNow: true,
+            discountActive: true,
+            discountPercent: true,
+          },
+        },
+      },
     });
     if (!table) return Response.json({ error: "Invalid QR code" }, { status: 404 });
+    const restaurant = table.restaurant;
+    if (!restaurant.isActive) {
+      return Response.json({ error: "Restaurant unavailable" }, { status: 404 });
+    }
 
     // 2) Gate: restaurant must be open.
     if (!restaurant.openNow) {
@@ -83,7 +97,12 @@ export async function POST(req: Request) {
     // 5) Idempotency — if this exact submission already landed, return the
     //    existing order instead of creating a duplicate (covers double-taps
     //    and network retries).
-    const existing = await db.order.findUnique({ where: { idempotencyKey: body.idempotencyKey } });
+    const [existing, dbItems] = await Promise.all([
+      db.order.findUnique({ where: { idempotencyKey: body.idempotencyKey } }),
+      db.menuItem.findMany({
+        where: { id: { in: body.items.map((item) => item.menuItemId) }, restaurantId: restaurant.id, deletedAt: null },
+      }),
+    ]);
     if (existing) {
       return Response.json({ order: existing, duplicate: true }, { status: 200 });
     }
@@ -91,10 +110,6 @@ export async function POST(req: Request) {
     // 6) Re-price every item from the DATABASE — never trust a price the
     //    client sends. Reject anything unavailable, deleted, or from a
     //    different restaurant than the one resolved above.
-    const menuItemIds = body.items.map((i) => i.menuItemId);
-    const dbItems = await db.menuItem.findMany({
-      where: { id: { in: menuItemIds }, restaurantId: restaurant.id, deletedAt: null },
-    });
     const dbItemById = new Map(dbItems.map((i) => [i.id, i]));
 
     for (const line of body.items) {
@@ -121,25 +136,9 @@ export async function POST(req: Request) {
           // keep accepting orders concurrently.
           await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${table.id}))::text AS "locked"`;
           // Find an open session for this table
-          let tableSession = await tx.tableSession.findFirst({
-            where: {
-              tableId:      table.id,
-              restaurantId: restaurant.id,
-              status:       "OPEN",
-            },
-            orderBy: { createdAt: "desc" },
-          });
+          const tableSession = await getOrCreateCurrentTableSession(tx, table.id, restaurant.id);
 
           // No open session → create one
-          if (!tableSession) {
-            tableSession = await tx.tableSession.create({
-              data: {
-                restaurantId: restaurant.id,
-                tableId:      table.id,
-                status:       "OPEN",
-              },
-            });
-          }
 
           const created = await tx.order.create({
             data: {

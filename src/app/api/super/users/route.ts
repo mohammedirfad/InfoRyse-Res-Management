@@ -8,7 +8,14 @@ export async function GET() {
     await requireSuperAdmin();
     const users = await db.user.findMany({
       orderBy: { createdAt: "desc" },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        restaurantId: true,
+        createdAt: true,
         restaurant: {
           select: { id: true, name: true, slug: true, isActive: true },
         },

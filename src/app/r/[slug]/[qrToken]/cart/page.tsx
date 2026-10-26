@@ -3,11 +3,10 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, RefreshCw, Sparkles, CheckCircle2, Clock, ChefHat, PartyPopper } from "lucide-react";
+import { ArrowLeft, RefreshCw, Sparkles, CheckCircle2, Clock, ChefHat, PartyPopper, Download, Receipt } from "lucide-react";
 import {
   useCart,
   formatRupees,
-  getStoredOrders,
   saveStoredOrders,
   clearStoredOrders,
   type StoredPastOrder,
@@ -17,10 +16,19 @@ import { LanguageSelector } from "@/components/LanguageSelector";
 
 interface TableSessionData {
   table: { id: string; label: string; status: string };
+  bill?: {
+    billNumber: number; tableLabel: string; customerName: string | null;
+    subtotalCents: number; discountCents: number; discountPercent: number;
+    discountName: string | null; taxCents: number; taxPercent: number; taxName: string;
+    packingCents: number; totalCents: number; paymentMethod: string; paymentStatus: string;
+    itemsJson: string; createdAt: string;
+    restaurant: { name: string; contactPhone: string | null; contactEmail: string | null };
+  } | null;
   session: {
     id: string;
     status: string;
     createdAt: string;
+    billRequestedAt?: string | null;
     orderCount: number;
     orders: {
       id: string;
@@ -42,6 +50,28 @@ interface TableSessionData {
     packingCents: number;
     totalCents: number;
   } | null;
+}
+
+function downloadBill(bill: NonNullable<TableSessionData["bill"]>) {
+  const win = window.open("", "_blank", "width=520,height=760");
+  if (!win) return;
+  const esc = (value: unknown) => String(value ?? "").replace(/[&<>\"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char]!));
+  let items: { name: string; quantity: number; unitPrice: number; subtotal: number }[] = [];
+  try { items = JSON.parse(bill.itemsJson); } catch { items = []; }
+  const money = (cents: number) => `₹${(cents / 100).toFixed(2)}`;
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Bill #${bill.billNumber}</title><style>
+    *{box-sizing:border-box}body{font:14px Arial,sans-serif;color:#17251d;max-width:620px;margin:32px auto;padding:28px;background:#fff;border:1px solid #e5e7eb}
+    header{text-align:center;border-bottom:1px dashed #9ca3af;padding-bottom:18px}h1{font-size:24px;margin:0 0 8px}header p{margin:4px;color:#58645d}.meta{display:flex;justify-content:space-between;margin:18px 0;color:#374151}
+    table{width:100%;border-collapse:collapse}th,td{padding:10px 4px;border-bottom:1px solid #e5e7eb;text-align:right}th:first-child,td:first-child{text-align:left}tfoot td{border:0;padding:6px 4px}.total td{border-top:2px solid #17251d;font-size:18px;font-weight:bold;padding-top:12px}
+    .discount{color:#047857}.foot{text-align:center;color:#6b7280;border-top:1px dashed #9ca3af;margin-top:20px;padding-top:14px;font-size:12px}
+    @media print{body{margin:0 auto;border:0;padding:18px}}
+  </style></head><body><header><h1>${esc(bill.restaurant.name)}</h1>${bill.restaurant.contactPhone ? `<p>${esc(bill.restaurant.contactPhone)}</p>` : ""}${bill.restaurant.contactEmail ? `<p>${esc(bill.restaurant.contactEmail)}</p>` : ""}<p>TABLE ${esc(bill.tableLabel)}</p></header>
+    <div class="meta"><span><b>Bill #${bill.billNumber}</b><br>${new Date(bill.createdAt).toLocaleString("en-IN")}</span><span>${esc(bill.paymentStatus)} · ${esc(bill.paymentMethod)}</span></div>
+    <table><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${items.map((item) => `<tr><td>${esc(item.name)}</td><td>${item.quantity}</td><td>${money(item.unitPrice)}</td><td>${money(item.subtotal)}</td></tr>`).join("")}</tbody><tfoot>
+    <tr><td colspan="3">Subtotal</td><td>${money(bill.subtotalCents)}</td></tr>${bill.discountCents > 0 ? `<tr class="discount"><td colspan="3">${esc(bill.discountName || "Discount")} (${bill.discountPercent}%)</td><td>−${money(bill.discountCents)}</td></tr>` : ""}
+    <tr><td colspan="3">${esc(bill.taxName)} (${bill.taxPercent}%)</td><td>${money(bill.taxCents)}</td></tr>${bill.packingCents ? `<tr><td colspan="3">Packing / service</td><td>${money(bill.packingCents)}</td></tr>` : ""}<tr class="total"><td colspan="3">Grand total</td><td>${money(bill.totalCents)}</td></tr></tfoot></table><div class="foot">Thank you for dining with ${esc(bill.restaurant.name)}.</div>
+    <script>window.onload=()=>window.print()</script></body></html>`);
+  win.document.close();
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string; bg: string; icon: any }> = {
@@ -99,17 +129,15 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
           saveStoredOrders(params.qrToken, mapped, data.session.id);
           syncSession(data.session.id, data.table.status);
         } else if (data.session === null) {
-          // No open session on server. If table status is AVAILABLE, wipe stale past orders
-          if (data.table.status === "AVAILABLE") {
-            clearStoredOrders(params.qrToken);
-            setPastOrders([]);
-          }
+          // Server session is authoritative; never show stale browser-cached rounds.
+          clearStoredOrders(params.qrToken);
+          setPastOrders([]);
           syncSession(null, data.table.status);
         }
       }
     } catch {
-      // Offline fallback: load from localStorage
-      setPastOrders(getStoredOrders(params.qrToken));
+      // Never substitute a possibly stale previous session for the live bill.
+      setPastOrders([]);
     } finally {
       setIsFetchingSession(false);
     }
@@ -117,7 +145,6 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
 
   useEffect(() => {
     // Initial fetch on mount
-    setPastOrders(getStoredOrders(params.qrToken));
     refreshTableOrders();
   }, [params.qrToken, refreshTableOrders]);
 
@@ -128,13 +155,21 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
     }
   }, [tab, refreshTableOrders]);
 
+  useEffect(() => {
+    if (tab !== "confirmed") return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") refreshTableOrders();
+    }, 15000);
+    return () => window.clearInterval(interval);
+  }, [tab, refreshTableOrders]);
+
   const subtotal   = totalCents;
   const grandTotal = subtotal;
 
   // Running total calculation
   const liveTableTotal = sessionData?.session
     ? Math.max(0, sessionData.session.subtotalCents - (sessionData.session as any).discountCents || sessionData.session.subtotalCents)
-    : pastOrders.filter((o) => o.status !== "CANCELLED").reduce((s, o) => s + o.totalCents, 0);
+    : 0;
 
   function fmtTime(d: string) {
     try {
@@ -211,7 +246,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               <h3 className="font-bold text-gray-800 text-lg">Nothing added yet</h3>
               <p className="text-gray-400 text-sm mt-1.5">Go back to the menu and add your favourite dishes</p>
               <Link
-                href={base}
+                href={`${base}?view=menu`}
                 className="mt-5 bg-gray-900 text-white px-8 py-3 rounded-2xl font-semibold text-sm active:scale-95 transition-all shadow-md"
               >
                 Browse menu
@@ -223,7 +258,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                 <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">
                   {lines.length} item{lines.length > 1 ? "s" : ""} in your cart
                 </p>
-                <Link href={base} className="text-xs text-emerald-700 font-bold hover:underline">
+                <Link href={`${base}?view=menu`} className="text-xs text-emerald-700 font-bold hover:underline">
                   + Add more
                 </Link>
               </div>
@@ -349,7 +384,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                 </p>
               </div>
               <Link
-                href={base}
+                href={`${base}?view=menu`}
                 className="inline-flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 text-gray-950 px-4 py-2 rounded-xl text-xs font-bold active:scale-95 transition-all shadow-sm"
               >
                 <span>+ Order More</span>
@@ -360,6 +395,34 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
             </p>
           </div>
 
+          {sessionData?.session?.billRequestedAt && !sessionData.bill && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-bold">Bill requested</p>
+              <p className="mt-1 text-xs">A staff member is preparing your final bill. It will appear here when ready.</p>
+            </div>
+          )}
+
+          {sessionData?.bill && (
+            <section className="overflow-hidden rounded-3xl border border-emerald-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between gap-4 bg-emerald-950 px-5 py-4 text-white">
+                <div className="flex items-center gap-3"><Receipt className="h-5 w-5 text-emerald-300" /><div><p className="font-bold">Your final bill</p><p className="text-xs text-emerald-100/75">Bill #{sessionData.bill.billNumber} · Table {sessionData.bill.tableLabel}</p></div></div>
+                <button onClick={() => downloadBill(sessionData.bill!)} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-bold text-emerald-950 hover:bg-emerald-50"><Download className="h-4 w-4" /> Download</button>
+              </div>
+              <div className="space-y-2 p-5">
+                <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-gray-100 pb-2 text-[11px] font-bold uppercase tracking-wide text-gray-400"><span>Items</span><span>Qty</span><span>Amount</span></div>
+                {(() => { try { return JSON.parse(sessionData.bill.itemsJson).map((item: {name:string;quantity:number;subtotal:number}, idx:number) => <div key={`${item.name}-${idx}`} className="grid grid-cols-[1fr_auto_auto] gap-3 py-1 text-sm"><span className="font-medium text-gray-800">{tDish(item.name)}</span><span className="text-gray-500">{item.quantity}</span><span className="font-semibold text-gray-900">{formatRupees(item.subtotal)}</span></div>); } catch { return <p className="text-sm text-gray-500">Bill items unavailable.</p>; } })()}
+                <div className="space-y-2 border-t border-dashed border-gray-200 pt-3 text-sm">
+                  <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{formatRupees(sessionData.bill.subtotalCents)}</span></div>
+                  {sessionData.bill.discountCents > 0 && <div className="flex justify-between font-semibold text-emerald-700"><span>{sessionData.bill.discountName || "Discount"} ({sessionData.bill.discountPercent}%)</span><span>−{formatRupees(sessionData.bill.discountCents)}</span></div>}
+                  <div className="flex justify-between text-gray-600"><span>{sessionData.bill.taxName} ({sessionData.bill.taxPercent}%)</span><span>{formatRupees(sessionData.bill.taxCents)}</span></div>
+                  {sessionData.bill.packingCents > 0 && <div className="flex justify-between text-gray-600"><span>Packing / service</span><span>{formatRupees(sessionData.bill.packingCents)}</span></div>}
+                  <div className="flex justify-between border-t border-gray-200 pt-3 text-base font-black text-gray-950"><span>Grand total</span><span>{formatRupees(sessionData.bill.totalCents)}</span></div>
+                  <p className="text-right text-xs text-gray-400">{sessionData.bill.paymentStatus} · {sessionData.bill.paymentMethod}</p>
+                </div>
+              </div>
+            </section>
+          )}
+
           {confirmedCount === 0 ? (
             <div className="bg-white rounded-3xl p-8 text-center border border-gray-100 shadow-xs">
               <div className="text-6xl mb-3">🍽️</div>
@@ -369,7 +432,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               </p>
               <div className="mt-6 flex flex-col gap-2.5 max-w-xs mx-auto">
                 <Link
-                  href={base}
+                  href={`${base}?view=menu`}
                   className="bg-gray-900 text-white px-6 py-3 rounded-2xl font-bold text-sm active:scale-95 transition-all shadow-sm"
                 >
                   Browse Menu & Order
@@ -522,7 +585,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               {/* Action Buttons */}
               <div className="space-y-2 pt-2">
                 <Link
-                  href={base}
+                  href={`${base}?view=menu`}
                   className="flex items-center justify-center w-full bg-gray-900 text-white py-3.5 rounded-2xl font-bold text-sm active:scale-[0.98] transition-all shadow-sm"
                 >
                   + Add more dishes to Table {tableLabel}

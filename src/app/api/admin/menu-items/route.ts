@@ -27,6 +27,10 @@ const BodySchema = z.object({
   isVeg:       z.boolean().default(true),
   isAvailable: z.boolean().default(true).optional(),
   imageUrl:    z.string().nullable().optional(),
+  isBestseller: z.boolean().optional(),
+  isPopular: z.boolean().optional(),
+  isChefsPick: z.boolean().optional(),
+  isTodaySpecial: z.boolean().optional(),
 });
 
 export async function POST(req: Request) {

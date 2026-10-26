@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { emitOrderEvent } from "@/lib/events";
 import { reserveOrderNumber } from "@/lib/orderNumber";
+import { getOrCreateCurrentTableSession } from "@/lib/tableSessions";
 
 export const dynamic = "force-dynamic";
 
@@ -56,14 +57,7 @@ export async function POST(req: Request) {
       let tableSessionId: string | null = null;
       if (body.tableId) {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${body.tableId}))::text AS "locked"`;
-        let session = await tx.tableSession.findFirst({
-          where: { tableId: body.tableId, restaurantId, status: "OPEN" },
-        });
-        if (!session) {
-          session = await tx.tableSession.create({
-            data: { tableId: body.tableId, restaurantId, status: "OPEN" },
-          });
-        }
+        const session = await getOrCreateCurrentTableSession(tx, body.tableId, restaurantId);
         tableSessionId = session.id;
         // ensure table is marked OCCUPIED
         await tx.table.update({ where: { id: body.tableId }, data: { status: "OCCUPIED" } });

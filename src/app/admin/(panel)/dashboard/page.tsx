@@ -31,6 +31,8 @@ const QUICK_ACTIONS = [
   { href: "/admin/analytics", label: "View Reports",  icon: BarChart2,   color: "bg-indigo-50 text-indigo-700 border-indigo-200", ownerOnly: true },
 ];
 
+const DASHBOARD_CACHE_KEY = "inforyse_admin_dashboard_v1";
+
 function buildHourlySales(orders: Order[]) {
   const map: Record<number, number> = {};
   for (let h = 8; h <= 22; h++) map[h] = 0;
@@ -52,16 +54,47 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+    try {
+      const cached = sessionStorage.getItem(DASHBOARD_CACHE_KEY);
+      if (cached) {
+        const snapshot = JSON.parse(cached);
+        if (Array.isArray(snapshot.orders)) setOrders(snapshot.orders);
+        if (typeof snapshot.restaurantName === "string") setRestaurantName(snapshot.restaurantName);
+        if (typeof snapshot.userRole === "string") setUserRole(snapshot.userRole);
+        setLoading(false);
+      }
+    } catch { /* a stale or unavailable browser cache should not block the dashboard */ }
+
+    // Refresh a lightweight dashboard payload in parallel with the profile request.
     Promise.all([
-      fetch("/api/admin/orders").then((r) => r.json()).catch(() => ({ orders: [] })),
-      fetch("/api/admin/me").then((r) => r.json()).catch(() => ({})),
+      fetch("/api/admin/orders?view=dashboard", { cache: "no-store" }).then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Could not load dashboard orders");
+        return payload;
+      }),
+      fetch("/api/admin/me", { cache: "no-store" }).then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Could not load restaurant profile");
+        return payload;
+      }),
     ])
       .then(([ordersData, meData]) => {
-        setOrders(ordersData.orders ?? []);
-        if (meData.restaurant?.name) setRestaurantName(meData.restaurant.name);
-        if (meData.role) setUserRole(meData.role);
+        if (cancelled) return;
+        const nextOrders = ordersData.orders ?? [];
+        const nextName = meData.restaurant?.name || "Your Restaurant";
+        const nextRole = meData.role || "OWNER";
+        setOrders(nextOrders);
+        setRestaurantName(nextName);
+        setUserRole(nextRole);
+        try {
+          sessionStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify({ orders: nextOrders, restaurantName: nextName, userRole: nextRole }));
+        } catch { /* storage can be disabled or full */ }
       })
-      .finally(() => setLoading(false));
+      .catch((error) => console.error("Dashboard refresh failed:", error))
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
   }, []);
 
   const today = orders.filter(
@@ -96,6 +129,10 @@ export default function DashboardPage() {
         <div className="absolute -top-6 -right-6 h-32 w-32 rounded-full bg-white/5" />
         <div className="absolute top-3 right-20 h-16 w-16 rounded-full bg-[#D4A94C]/10" />
         <div className="relative">
+          <div className="mb-1 flex items-center gap-2 text-xs text-white/65" aria-live="polite">
+            <span className={`h-2 w-2 rounded-full ${loading ? "bg-amber-300 animate-pulse" : "bg-emerald-300"}`} />
+            {loading ? "Refreshing dashboard" : "Dashboard up to date"}
+          </div>
           <p className="text-white/60 text-sm">Tuesday · {new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</p>
           <h1 className="text-2xl font-display mt-0.5">{greeting}! 👋</h1>
           <p className="text-white/70 text-sm mt-1">Here's what's happening at {restaurantName} today.</p>

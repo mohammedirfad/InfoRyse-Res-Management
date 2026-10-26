@@ -39,6 +39,7 @@ type Session = {
   id: string;
   status: string;
   createdAt: string;
+  billRequestedAt?: string | null;
   orderCount: number;
   orders: OrderSummary[];
   aggregatedItems: AggregatedItem[];
@@ -123,6 +124,7 @@ export default function BillPage() {
   const [customerNameInput, setCustomerNameInput]         = useState("");
   const [customerPhoneInput, setCustomerPhoneInput]       = useState("");
   const [isSubmittingBill, setIsSubmittingBill]           = useState(false);
+  const [billSubmitError, setBillSubmitError]             = useState("");
 
   // ── Bills & Payment History State ──
   const [bills, setBills]                   = useState<StoredBill[]>([]);
@@ -241,6 +243,7 @@ export default function BillPage() {
   // Trigger Settle Payment modal
   function openPaymentModal() {
     if (!session || !selectedTable) return;
+    setBillSubmitError("");
     const firstOrderCustomer = session.orders.find((o) => o.customerName)?.customerName ?? "";
     setCustomerNameInput(firstOrderCustomer);
     setSelectedPaymentMethod("CASH");
@@ -285,6 +288,10 @@ export default function BillPage() {
       });
 
       const data = await res.json();
+      if (!res.ok || !data.bill) {
+        setBillSubmitError(data.error ?? "Could not settle this table session. Refresh and try again.");
+        return;
+      }
       if (data.bill) {
         printBill(data.bill.billNumber);
       }
@@ -306,6 +313,7 @@ export default function BillPage() {
       fetchBills(1);
     } catch (err) {
       console.error("Failed to store bill:", err);
+      setBillSubmitError("Could not settle this table session. Check your connection and refresh before retrying.");
     } finally {
       setIsSubmittingBill(false);
     }
@@ -694,13 +702,18 @@ export default function BillPage() {
                           </span>
                         )}
                       </div>
-                      <p className="text-white/60 text-xs mt-1">
+                          <p className="text-white/60 text-xs mt-1">
                         {loading
                           ? "Refreshing bill data…"
                           : session && session.orderCount > 0
                           ? `Running tab consolidated across all table guests`
                           : "No orders placed for this table yet"}
                       </p>
+                          {session?.billRequestedAt && (
+                            <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-300 px-3 py-1 text-xs font-black text-amber-950">
+                              <Receipt className="h-3.5 w-3.5" /> Guest requested the bill
+                            </span>
+                          )}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -753,7 +766,7 @@ export default function BillPage() {
                         <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
                           Individual Orders ({session.orders.length} Rounds)
                         </p>
-                        <span className="text-[11px] text-gray-500">Started: {formatTime(session.createdAt)}</span>
+                        <span className="text-[11px] text-gray-500">Started: {formatDate(session.createdAt)} · {formatTime(session.createdAt)}</span>
                       </div>
 
                       {session.orders.map((o, idx) => (
@@ -766,7 +779,7 @@ export default function BillPage() {
                               <span className="font-bold text-gray-900 text-xs">Round {idx + 1} · #{o.orderNumber}</span>
                               {o.customerName && <span className="text-[11px] text-gray-500">· {o.customerName}</span>}
                             </div>
-                            <span className="text-[10px] font-bold text-gray-500">{formatTime(o.createdAt)}</span>
+                            <span className="text-[10px] font-bold text-gray-500">{formatDate(o.createdAt)} · {formatTime(o.createdAt)}</span>
                           </div>
 
                           <div className="p-3.5 space-y-1.5">
@@ -1096,6 +1109,11 @@ export default function BillPage() {
 
             {/* Body */}
             <div className="p-5 space-y-4">
+              {billSubmitError && (
+                <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                  {billSubmitError}
+                </div>
+              )}
               {/* Amount Box */}
               <div className="bg-emerald-50 rounded-2xl p-4 border border-emerald-100 flex items-center justify-between">
                 <div>

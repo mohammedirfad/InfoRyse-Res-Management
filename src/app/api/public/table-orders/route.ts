@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { getCurrentTableSession } from "@/lib/tableSessions";
 
 export const dynamic = "force-dynamic";
 
@@ -23,42 +24,62 @@ export async function GET(req: Request) {
       return Response.json({ error: "Missing required parameters" }, { status: 400 });
     }
 
-    const restaurant = await db.restaurant.findUnique({
-      where: { slug },
+    const table = await db.table.findFirst({
+      where: { qrToken, restaurant: { slug }, deletedAt: null },
       select: {
         id: true,
-        name: true,
-        taxPercent: true,
-        taxName: true,
-        discountActive: true,
-        discountPercent: true,
-        discountName: true,
+        label: true,
+        status: true,
+        restaurant: {
+          select: {
+            id: true,
+            name: true,
+            taxPercent: true,
+            taxName: true,
+            discountActive: true,
+            discountPercent: true,
+            discountName: true,
+          },
+        },
       },
-    });
-    if (!restaurant) {
-      return Response.json({ error: "Restaurant not found" }, { status: 404 });
-    }
-
-    const table = await db.table.findFirst({
-      where: { qrToken, restaurantId: restaurant.id, deletedAt: null },
-      select: { id: true, label: true, status: true },
     });
     if (!table) {
       return Response.json({ error: "Table not found" }, { status: 404 });
     }
+    const restaurant = table.restaurant;
+    const publicTable = { id: table.id, label: table.label, status: table.status };
 
     // Find the currently open TableSession for this table
-    let session = await db.tableSession.findFirst({
-      where:   { tableId: table.id, restaurantId: restaurant.id, status: "OPEN" },
-      orderBy: { createdAt: "desc" },
-      include: {
+    const currentSession = await getCurrentTableSession(db, table.id, restaurant.id);
+    let session = currentSession ? await db.tableSession.findUnique({
+      where: { id: currentSession.id },
+      select: {
+        id: true,
+        status: true,
+        createdAt: true,
+        billRequestedAt: true,
         orders: {
           where:   { status: { not: "CANCELLED" } },
-          include: { items: true },
+          select: {
+            id: true,
+            orderNumber: true,
+            customerName: true,
+            status: true,
+            createdAt: true,
+            subtotalCents: true,
+            items: {
+              select: {
+                id: true,
+                nameSnapshot: true,
+                priceCentsSnapshot: true,
+                quantity: true,
+              },
+            },
+          },
           orderBy: { createdAt: "asc" },
         },
       },
-    });
+    }) : null;
 
     // Resilient fallback: If no open session exists yet, check if there are recent unlinked active orders for this table
     if (!session) {
@@ -91,8 +112,9 @@ export async function GET(req: Request) {
 
     if (!session) {
       return Response.json({
-        table,
+        table: publicTable,
         session: null,
+        bill: null,
       });
     }
 
@@ -129,11 +151,12 @@ export async function GET(req: Request) {
 
     return new Response(
       JSON.stringify({
-        table,
+        table: publicTable,
         session: {
           id:           session.id,
           status:       session.status,
           createdAt:    session.createdAt,
+          billRequestedAt: session.billRequestedAt,
           orderCount:   session.orders.length,
           orders:       session.orders.map((o) => ({
             id:           o.id,

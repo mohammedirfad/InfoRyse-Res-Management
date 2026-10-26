@@ -365,6 +365,12 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
   const { t, tDish, tCategory } = useLanguage();
 
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("view") === "menu") {
+      setPhase("menu");
+    }
+  }, []);
+
+  useEffect(() => {
     setVisibleLimit(16);
   }, [activeCat, search, vegFilter]);
 
@@ -447,6 +453,19 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
 
   /* hero auto-advance — stable, won't re-trigger on every render */
   const allItems = useMemo(() => data?.categories.flatMap(c=>c.menuItems).filter(i=>i.isAvailable) ?? [], [data]);
+  const featuredItems = useMemo(() => {
+    const withCategories = (data?.categories ?? []).flatMap((category) =>
+      category.menuItems
+        .filter((item) => item.isAvailable)
+        .map((item) => ({ ...item, categoryName: category.name }))
+    );
+    const badgeScore = (item: MenuItem) =>
+      Number(Boolean(item.isBestseller)) * 4 +
+      Number(Boolean(item.isPopular)) * 3 +
+      Number(Boolean(item.isChefsPick)) * 2 +
+      Number(Boolean(item.isTodaySpecial));
+    return withCategories.sort((a, b) => badgeScore(b) - badgeScore(a)).slice(0, 8);
+  }, [data]);
   const heroTotal = Math.min(allItems.length, 8);
 
   useEffect(() => {
@@ -507,7 +526,6 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
 
   const d = data!;
   const isOccupied = d.table.status === "OCCUPIED";
-  const featuredItems = allItems.slice(0, 8);
 
   /* ── LANDING SPLASH PAGE ──────────────────────────────────────────────────── */
   if (phase === "landing") return (
@@ -571,9 +589,18 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
               <button onClick={()=>setPhase("landing")} className="p-1.5 flex-shrink-0">
                 <ArrowLeft className="h-5 w-5 text-gray-600"/>
               </button>
-              <div className="flex-1 text-center">
-                <p className="font-bold text-gray-900 text-base leading-tight">{d.restaurant.name}</p>
-                <p className="text-[10px] text-gray-400">{t("table", "Table")} {d.table.label}</p>
+              <div className="flex min-w-0 flex-1 items-center justify-center gap-2 px-1">
+                {d.restaurant.logoUrl && (
+                  <img
+                    src={d.restaurant.logoUrl}
+                    alt=""
+                    className="h-9 w-9 shrink-0 rounded-xl border border-gray-100 bg-white object-contain p-0.5"
+                  />
+                )}
+                <div className="min-w-0 text-center">
+                  <p className="mx-auto line-clamp-2 max-w-full break-words font-bold text-gray-900 text-sm leading-snug sm:text-base">{d.restaurant.name}</p>
+                  <p className="text-[10px] text-gray-400">{t("table", "Table")} {d.table.label}</p>
+                </div>
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
                 <LanguageSelector variant="compact" />
