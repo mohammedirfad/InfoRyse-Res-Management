@@ -23,6 +23,7 @@ import {
   FileText,
 } from "lucide-react";
 import { formatRupees, formatTime, formatDate } from "@/lib/utils";
+import QRCode from "qrcode";
 
 type AggregatedItem = { name: string; unitPrice: number; quantity: number; subtotal: number };
 type OrderSummary = {
@@ -31,6 +32,8 @@ type OrderSummary = {
   status: string;
   createdAt: string;
   customerName: string | null;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
   subtotal: number;
   items: { nameSnapshot: string; priceCentsSnapshot: number; quantity: number }[];
 };
@@ -40,6 +43,8 @@ type Session = {
   status: string;
   createdAt: string;
   billRequestedAt?: string | null;
+  billCustomerPhone?: string | null;
+  billCustomerEmail?: string | null;
   orderCount: number;
   orders: OrderSummary[];
   aggregatedItems: AggregatedItem[];
@@ -84,6 +89,7 @@ type StoredBill = {
   paymentStatus: string;
   paidAt: string | null;
   itemsJson: string;
+  shareToken?: string | null;
   createdAt: string;
 };
 
@@ -123,6 +129,9 @@ export default function BillPage() {
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<"CASH" | "UPI" | "CARD" | "OTHER">("CASH");
   const [customerNameInput, setCustomerNameInput]         = useState("");
   const [customerPhoneInput, setCustomerPhoneInput]       = useState("");
+  const [customerEmailInput, setCustomerEmailInput]       = useState("");
+  const [prepareStatus, setPrepareStatus]                   = useState("");
+  const [digitalBillUrl, setDigitalBillUrl]                 = useState("");
   const [isSubmittingBill, setIsSubmittingBill]           = useState(false);
   const [billSubmitError, setBillSubmitError]             = useState("");
 
@@ -139,6 +148,10 @@ export default function BillPage() {
 
   const selectedTableRef = useRef<Table | null>(null);
   selectedTableRef.current = selectedTable;
+  const requestedTableIdRef = useRef<string | null>(null);
+  if (!requestedTableIdRef.current && typeof window !== "undefined") {
+    requestedTableIdRef.current = new URLSearchParams(window.location.search).get("tableId");
+  }
 
   // Fetch tables and restaurant config
   const fetchTablesAndRestaurant = useCallback(async (isInitial = false) => {
@@ -164,9 +177,10 @@ export default function BillPage() {
       }
 
       if (isInitial && !selectedTableRef.current) {
-        const firstActive = loadedTables.find(
+        const firstActive = loadedTables.find((table) => table.id === requestedTableIdRef.current)
+          ?? loadedTables.find(
           (t) => (t.activeOrderCount ?? 0) > 0 || t.status === "OCCUPIED"
-        );
+          );
         if (firstActive) {
           loadBill(firstActive);
         } else if (loadedTables.length > 0) {
@@ -230,14 +244,35 @@ export default function BillPage() {
     fetchBills(1);
   }, [fetchTablesAndRestaurant, fetchBills]);
 
-  // Polling is reliable across Vercel serverless instances, which do not share
-  // the process-local event emitter used by the development server.
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      fetchTablesAndRestaurant(false);
-      if (selectedTableRef.current) loadBill(selectedTableRef.current, true);
-    }, 15000);
-    return () => window.clearInterval(interval);
+    const onRestaurantEvent = (event: Event) => {
+      const payload = (event as CustomEvent).detail;
+      if (payload?.type === "resync") {
+        void fetchTablesAndRestaurant(false);
+        const selected = selectedTableRef.current;
+        if (selected) void loadBill(selected, true);
+        return;
+      }
+      const data = payload?.data ?? {};
+      const order = data.order ?? data;
+      const tableId = data.tableId ?? order.tableId ?? order.table?.id;
+      if (!tableId) return;
+      void fetchTablesAndRestaurant(false);
+      const selected = selectedTableRef.current;
+      if (selected && selected.id === tableId) void loadBill(selected, true);
+    };
+    window.addEventListener("inforyse:restaurant-event", onRestaurantEvent);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void fetchTablesAndRestaurant(false);
+        if (selectedTableRef.current) void loadBill(selectedTableRef.current, true);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("inforyse:restaurant-event", onRestaurantEvent);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [fetchTablesAndRestaurant, loadBill]);
 
   // Trigger Settle Payment modal
@@ -245,9 +280,39 @@ export default function BillPage() {
     if (!session || !selectedTable) return;
     setBillSubmitError("");
     const firstOrderCustomer = session.orders.find((o) => o.customerName)?.customerName ?? "";
+    const firstOrderPhone = session.billCustomerPhone ?? session.orders.find((o) => o.customerPhone)?.customerPhone ?? "";
     setCustomerNameInput(firstOrderCustomer);
+    setCustomerPhoneInput(firstOrderPhone);
+    const firstOrderEmail = session.billCustomerEmail ?? session.orders.find((o) => o.customerEmail)?.customerEmail ?? "";
+    setCustomerEmailInput(firstOrderEmail);
+    setPrepareStatus("");
+    setDigitalBillUrl("");
     setSelectedPaymentMethod("CASH");
     setSettlingPayment(true);
+  }
+
+  async function prepareDigitalBill() {
+    if (!session || !selectedTable) return;
+    setIsSubmittingBill(true);
+    setPrepareStatus("");
+    try {
+      const response = await fetch(`/api/admin/table-bill/${selectedTable.id}/prepare`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tableSessionId: session.id,
+          customerName: customerNameInput.trim() || undefined,
+          customerPhone: customerPhoneInput.trim() || undefined,
+          customerEmail: customerEmailInput.trim() || undefined,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not generate the digital bill");
+      setDigitalBillUrl(data.billUrl || "");
+      setPrepareStatus("Digital bill is ready. Share the link with the customer or print it.");
+    } catch (error) {
+      setPrepareStatus(error instanceof Error ? error.message : "Could not generate the digital bill");
+    } finally { setIsSubmittingBill(false); }
   }
 
   // Confirm payment, store bill in database, and print
@@ -272,6 +337,7 @@ export default function BillPage() {
           tableLabel: selectedTable.label,
           customerName: customerNameInput.trim() || undefined,
           customerPhone: customerPhoneInput.trim() || undefined,
+          customerEmail: customerEmailInput.trim() || undefined,
           orderCount: session.orderCount,
           subtotalCents: subtotal,
           discountCents: discount,
@@ -293,7 +359,7 @@ export default function BillPage() {
         return;
       }
       if (data.bill) {
-        printBill(data.bill.billNumber);
+        await printBill(data.bill.billNumber, data.bill.shareToken);
       }
 
       setSettlingPayment(false);
@@ -320,7 +386,7 @@ export default function BillPage() {
   }
 
   // Print thermal bill
-  function printBill(billNumOverride?: number) {
+  async function printBill(billNumOverride?: number, billToken?: string) {
     if (!session || !selectedTable) return;
     const subtotal = session.subtotalCents;
     const discount = session.discountCents ?? 0;
@@ -331,6 +397,11 @@ export default function BillPage() {
 
     const win = window.open("", "_blank", "width=400,height=700");
     if (!win) return;
+    let billQr = "";
+    if (billToken) {
+      try { billQr = await QRCode.toDataURL(`${window.location.origin}/bill/${encodeURIComponent(billToken)}`, { width: 160, margin: 1 }); }
+      catch { /* Paper receipt still prints if QR generation fails. */ }
+    }
     win.document.write(`<!DOCTYPE html><html><head>
       <title>Official Bill — Table ${selectedTable.label}</title>
       <style>
@@ -342,6 +413,7 @@ export default function BillPage() {
         .r  { display:flex; justify-content:space-between; margin:4px 0; }
         .t  { display:flex; justify-content:space-between; font-size:15px; font-weight:bold; border-top:2px solid #000; padding-top:6px; margin-top:6px; }
         .f  { text-align:center; margin-top:14px; font-size:11px; color:#555; }
+        .qr { width:96px; height:96px; display:block; margin:8px auto 4px; }
         .disc { color:#0a6b36; font-weight:bold; }
       </style></head><body>
       <h1>${restaurantName || "Restaurant"}</h1>
@@ -362,7 +434,7 @@ export default function BillPage() {
       <div class="r"><span>${session.taxName || taxName} (${session.taxPercent ?? taxPercent}%):</span><span>₹${(tax/100).toFixed(0)}</span></div>
       <div class="r"><span>Packing & Service:</span><span>₹${(packing/100).toFixed(0)}</span></div>
       <div class="t"><span>FINAL TOTAL:</span><span>₹${(total/100).toFixed(0)}</span></div>
-      <div class="f"><div class="d"></div><p>Thank you for dining with us!</p><p style="margin-top:4px">Powered by InfoRyse</p></div>
+      <div class="f"><div class="d"></div>${billQr ? `<img class="qr" src="${billQr}" alt="Digital bill QR"/><p>Scan to open and save your digital bill</p>` : ""}<p style="margin-top:4px">Thank you for dining with us!</p><p style="margin-top:4px">Powered by InfoRyse</p></div>
       </body></html>`);
     win.document.close();
     setTimeout(() => { win.print(); win.close(); }, 400);
@@ -1092,7 +1164,7 @@ export default function BillPage() {
       {/* ── MODAL: SETTLE PAYMENT & CLOSE TABLE ──────────────────────────────── */}
       {settlingPayment && session && selectedTable && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl overflow-hidden border border-gray-100 animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full max-h-[90dvh] shadow-2xl overflow-hidden border border-gray-100 animate-in zoom-in-95 duration-200 flex flex-col">
             {/* Header */}
             <div className="bg-[#132A1E] text-white p-5 flex items-center justify-between">
               <div>
@@ -1108,7 +1180,8 @@ export default function BillPage() {
             </div>
 
             {/* Body */}
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4 overflow-y-auto">
+              {prepareStatus && <div role="status" className={`rounded-xl border p-3 text-xs ${digitalBillUrl ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>{prepareStatus}{digitalBillUrl && <a className="ml-2 font-bold underline" href={digitalBillUrl} target="_blank" rel="noreferrer">Open digital bill</a>}</div>}
               {billSubmitError && (
                 <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
                   {billSubmitError}
@@ -1173,6 +1246,12 @@ export default function BillPage() {
                   className="w-full bg-gray-50 text-xs px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-600"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Phone (optional)</label>
+                <input type="tel" inputMode="tel" placeholder="Customer mobile number" value={customerPhoneInput} onChange={(e) => setCustomerPhoneInput(e.target.value)} className="w-full bg-gray-50 text-xs px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-600" />
+                <label className="mt-3 block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Email (optional)</label>
+                <input type="email" placeholder="customer@example.com" value={customerEmailInput} onChange={(e) => setCustomerEmailInput(e.target.value)} className="w-full bg-gray-50 text-xs px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-600" />
+              </div>
             </div>
 
             {/* Actions */}
@@ -1183,14 +1262,24 @@ export default function BillPage() {
               >
                 Cancel
               </button>
-              <button
-                onClick={confirmPaymentAndStoreBill}
-                disabled={isSubmittingBill}
-                className="flex-1 bg-[#132A1E] hover:bg-[#1a3828] text-white py-3 rounded-xl text-xs font-black transition-all shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60"
-              >
-                <CheckCircle className="w-4 h-4 text-emerald-400" />
-                {isSubmittingBill ? "Settling…" : "Confirm Paid & Print Bill"}
-              </button>
+              {!digitalBillUrl ? (
+                <button
+                  onClick={prepareDigitalBill}
+                  disabled={isSubmittingBill}
+                  className="flex-1 bg-[#132A1E] hover:bg-[#1a3828] text-white py-3 rounded-xl text-xs font-black transition-all shadow-md disabled:opacity-60"
+                >
+                  {isSubmittingBill ? "Preparing bill?" : "Generate bill for customer"}
+                </button>
+              ) : (
+                <button
+                  onClick={confirmPaymentAndStoreBill}
+                  disabled={isSubmittingBill}
+                  className="flex-1 bg-[#132A1E] hover:bg-[#1a3828] text-white py-3 rounded-xl text-xs font-black transition-all shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60"
+                >
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  {isSubmittingBill ? "Closing table?" : "Payment received ? Close table & print"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1244,6 +1333,11 @@ export default function BillPage() {
                   <span>Payment Method:</span>
                   <span className="font-semibold text-gray-900">{selectedBillDetail.paymentMethod}</span>
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 p-3 text-xs">
+                <p className="font-bold text-gray-900">Digital delivery</p>
+                {selectedBillDetail.shareToken && <a className="mt-2 inline-block font-bold text-emerald-800 underline" href={`/bill/${selectedBillDetail.shareToken}`} target="_blank" rel="noreferrer">Open customer bill link</a>}
               </div>
 
               {/* Items Breakdown */}

@@ -104,11 +104,18 @@ export default function PaymentsPage() {
     fetchBills(1);
   }, [fetchBills]);
 
-  // Polling works across separate serverless instances in production.
   useEffect(() => {
-    const interval = window.setInterval(() => fetchBills(page), 15000);
-    return () => window.clearInterval(interval);
-  }, [fetchBills]);
+    const onRestaurantEvent = (event: Event) => {
+      if (["resync", "bill_updated"].includes((event as CustomEvent).detail?.type)) void fetchBills(page);
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") void fetchBills(page); };
+    window.addEventListener("inforyse:restaurant-event", onRestaurantEvent);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("inforyse:restaurant-event", onRestaurantEvent);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [fetchBills, page]);
 
   // Thermal Print Receipt
   function printBill(b: StoredBill) {

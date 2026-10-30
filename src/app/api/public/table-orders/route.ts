@@ -73,6 +73,7 @@ export async function GET(req: Request) {
                 nameSnapshot: true,
                 priceCentsSnapshot: true,
                 quantity: true,
+                servedQuantity: true,
               },
             },
           },
@@ -111,12 +112,34 @@ export async function GET(req: Request) {
     }
 
     if (!session) {
-      return Response.json({
-        table: publicTable,
-        session: null,
-        bill: null,
-      });
+      return Response.json({ table: publicTable, session: null, bill: null });
     }
+
+    const activeBill = await db.bill.findFirst({
+      where: { restaurantId: restaurant.id, tableId: table.id, tableSessionId: session.id },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        shareToken: true,
+        billNumber: true,
+        tableLabel: true,
+        customerName: true,
+        subtotalCents: true,
+        discountCents: true,
+        discountPercent: true,
+        discountName: true,
+        taxCents: true,
+        taxPercent: true,
+        taxName: true,
+        packingCents: true,
+        totalCents: true,
+        paymentMethod: true,
+        paymentStatus: true,
+        itemsJson: true,
+        createdAt: true,
+        restaurant: { select: { name: true, contactPhone: true, contactEmail: true } },
+      },
+    });
 
     // Aggregate items across all rounds of orders placed at this table
     const allItems: Record<string, {
@@ -125,16 +148,18 @@ export async function GET(req: Request) {
 
     for (const order of session.orders) {
       for (const item of order.items) {
+        const servedQuantity = Math.max(0, Math.min(item.quantity, item.servedQuantity));
+        if (servedQuantity < 1) continue;
         const key = `${item.nameSnapshot}:${item.priceCentsSnapshot}`;
         if (allItems[key]) {
-          allItems[key].quantity += item.quantity;
-          allItems[key].subtotal += item.priceCentsSnapshot * item.quantity;
+          allItems[key].quantity += servedQuantity;
+          allItems[key].subtotal += item.priceCentsSnapshot * servedQuantity;
         } else {
           allItems[key] = {
             name:      item.nameSnapshot,
             unitPrice: item.priceCentsSnapshot,
-            quantity:  item.quantity,
-            subtotal:  item.priceCentsSnapshot * item.quantity,
+            quantity:  servedQuantity,
+            subtotal:  item.priceCentsSnapshot * servedQuantity,
           };
         }
       }
@@ -180,11 +205,12 @@ export async function GET(req: Request) {
           packingCents: subtotalCents > 0 ? PACKING_CENTS : 0,
           totalCents,
         },
+        bill: activeBill,
       }),
       {
         headers: {
           "Content-Type": "application/json",
-          "Cache-Control": "public, max-age=3, stale-while-revalidate=6",
+          "Cache-Control": "private, no-store",
         },
       }
     );

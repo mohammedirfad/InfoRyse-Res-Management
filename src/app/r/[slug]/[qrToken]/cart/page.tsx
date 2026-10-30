@@ -17,6 +17,7 @@ import { LanguageSelector } from "@/components/LanguageSelector";
 interface TableSessionData {
   table: { id: string; label: string; status: string };
   bill?: {
+    id?: string; shareToken?: string | null;
     billNumber: number; tableLabel: string; customerName: string | null;
     subtotalCents: number; discountCents: number; discountPercent: number;
     discountName: string | null; taxCents: number; taxPercent: number; taxName: string;
@@ -92,11 +93,20 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
   const [tab, setTab]                     = useState<"new" | "confirmed">(initialTab);
   const [viewMode, setViewMode]           = useState<"rounds" | "aggregated">("rounds");
   const [sessionData, setSessionData]     = useState<TableSessionData | null>(null);
+  const [lastDigitalBill, setLastDigitalBill] = useState<{ token: string; sessionId: string } | null>(null);
   const [pastOrders, setPastOrders]       = useState<StoredPastOrder[]>([]);
   const [isFetchingSession, setIsFetchingSession] = useState(false);
   const [note, setNote]                   = useState("");
 
   const base = `/r/${params.slug}/${params.qrToken}`;
+  const billStorageKey = `digital-bill:${params.qrToken}`;
+
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(billStorageKey);
+      if (saved) setLastDigitalBill(JSON.parse(saved));
+    } catch { /* Ignore stale or malformed browser state. */ }
+  }, [billStorageKey]);
 
   // Poll server for active TableSession (all orders placed by anyone at this table)
   const refreshTableOrders = useCallback(async () => {
@@ -109,6 +119,21 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       if (res.ok) {
         const data: TableSessionData = await res.json();
         setSessionData(data);
+
+        if (data.session?.id) {
+          // A new table session invalidates the previous guest's bill link on this device.
+          const previous = sessionStorage.getItem(billStorageKey);
+          const parsed = previous ? JSON.parse(previous) as { token?: string; sessionId?: string } : null;
+          if (parsed?.sessionId && parsed.sessionId !== data.session.id) {
+            sessionStorage.removeItem(billStorageKey);
+            setLastDigitalBill(null);
+          }
+          if (data.bill?.shareToken) {
+            const savedBill = { token: data.bill.shareToken, sessionId: data.session.id };
+            sessionStorage.setItem(billStorageKey, JSON.stringify(savedBill));
+            setLastDigitalBill(savedBill);
+          }
+        }
 
         if (data.session && data.session.orders.length > 0) {
           // Convert server orders to StoredPastOrder format
@@ -133,6 +158,10 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
           clearStoredOrders(params.qrToken);
           setPastOrders([]);
           syncSession(null, data.table.status);
+          const saved = sessionStorage.getItem(billStorageKey);
+          if (saved) {
+            try { setLastDigitalBill(JSON.parse(saved)); } catch { sessionStorage.removeItem(billStorageKey); }
+          }
         }
       }
     } catch {
@@ -141,7 +170,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
     } finally {
       setIsFetchingSession(false);
     }
-  }, [params.slug, params.qrToken, syncSession]);
+  }, [params.slug, params.qrToken, syncSession, billStorageKey]);
 
   useEffect(() => {
     // Initial fetch on mount
@@ -157,11 +186,47 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
 
   useEffect(() => {
     if (tab !== "confirmed") return;
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") refreshTableOrders();
-    }, 15000);
-    return () => window.clearInterval(interval);
-  }, [tab, refreshTableOrders]);
+    const url = `/api/public/order-events?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}`;
+    const source = new EventSource(url);
+    const onTableChange = (rawEvent: MessageEvent) => {
+      try {
+        const event = JSON.parse(rawEvent.data);
+        const shareToken = event?.data?.shareToken;
+        const sessionId = event?.data?.sessionId;
+        if (event?.type === "bill_updated" && shareToken && sessionId) {
+          const billLink = { token: shareToken as string, sessionId: sessionId as string };
+          sessionStorage.setItem(billStorageKey, JSON.stringify(billLink));
+          setLastDigitalBill(billLink);
+        }
+      } catch { /* The session snapshot will still refresh when possible. */ }
+      void refreshTableOrders();
+    };
+    let connectedBefore = false;
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+    source.addEventListener("connected", () => {
+      if (fallbackTimer) clearInterval(fallbackTimer);
+      fallbackTimer = null;
+      if (connectedBefore) void refreshTableOrders();
+      connectedBefore = true;
+    });
+    source.onerror = () => {
+      if (!fallbackTimer) {
+        void refreshTableOrders();
+        fallbackTimer = setInterval(() => {
+          if (document.visibilityState === "visible") void refreshTableOrders();
+      }, 10000);
+      }
+    };
+    source.addEventListener("realtime_unavailable", () => source.onerror?.(new Event("error")));
+    source.addEventListener("restaurant_event", onTableChange);
+    const onVisible = () => { if (document.visibilityState === "visible") void refreshTableOrders(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      source.close();
+      if (fallbackTimer) clearInterval(fallbackTimer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [tab, params.slug, params.qrToken, refreshTableOrders]);
 
   const subtotal   = totalCents;
   const grandTotal = subtotal;
@@ -406,7 +471,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
             <section className="overflow-hidden rounded-3xl border border-emerald-200 bg-white shadow-sm">
               <div className="flex items-center justify-between gap-4 bg-emerald-950 px-5 py-4 text-white">
                 <div className="flex items-center gap-3"><Receipt className="h-5 w-5 text-emerald-300" /><div><p className="font-bold">Your final bill</p><p className="text-xs text-emerald-100/75">Bill #{sessionData.bill.billNumber} · Table {sessionData.bill.tableLabel}</p></div></div>
-                <button onClick={() => downloadBill(sessionData.bill!)} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-bold text-emerald-950 hover:bg-emerald-50"><Download className="h-4 w-4" /> Download</button>
+                {sessionData.bill.shareToken ? <Link href={`/bill/${sessionData.bill.shareToken}`} target="_blank" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-bold text-emerald-950 hover:bg-emerald-50"><Download className="h-4 w-4" /> View / Download</Link> : <button onClick={() => downloadBill(sessionData.bill!)} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-bold text-emerald-950 hover:bg-emerald-50"><Download className="h-4 w-4" /> Download</button>}
               </div>
               <div className="space-y-2 p-5">
                 <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-gray-100 pb-2 text-[11px] font-bold uppercase tracking-wide text-gray-400"><span>Items</span><span>Qty</span><span>Amount</span></div>
@@ -418,8 +483,16 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                   {sessionData.bill.packingCents > 0 && <div className="flex justify-between text-gray-600"><span>Packing / service</span><span>{formatRupees(sessionData.bill.packingCents)}</span></div>}
                   <div className="flex justify-between border-t border-gray-200 pt-3 text-base font-black text-gray-950"><span>Grand total</span><span>{formatRupees(sessionData.bill.totalCents)}</span></div>
                   <p className="text-right text-xs text-gray-400">{sessionData.bill.paymentStatus} · {sessionData.bill.paymentMethod}</p>
+                  {sessionData.bill.paymentStatus !== "PAID" && <p className="text-right text-xs font-semibold text-amber-700">Please settle with staff to close this bill.</p>}
                 </div>
               </div>
+            </section>
+          )}
+
+          {!sessionData?.session && lastDigitalBill?.token && (
+            <section className="flex items-center justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <div><p className="font-bold text-emerald-950">Your digital bill is ready</p><p className="mt-1 text-xs text-emerald-800">View, download, or share your bill.</p></div>
+              <Link href={`/bill/${lastDigitalBill.token}`} target="_blank" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-emerald-950 px-3 py-2 text-xs font-bold text-white"><Download className="h-4 w-4" /> View bill</Link>
             </section>
           )}
 
@@ -583,25 +656,13 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               )}
 
               {/* Action Buttons */}
-              <div className="space-y-2 pt-2">
+              <div className="pt-2">
                 <Link
                   href={`${base}?view=menu`}
                   className="flex items-center justify-center w-full bg-gray-900 text-white py-3.5 rounded-2xl font-bold text-sm active:scale-[0.98] transition-all shadow-sm"
                 >
                   + Add more dishes to Table {tableLabel}
                 </Link>
-
-                <button
-                  onClick={() => {
-                    if (window.confirm("Clear completed orders for this table session from your screen?")) {
-                      clearStoredOrders(params.qrToken);
-                      setPastOrders([]);
-                    }
-                  }}
-                  className="w-full text-center text-xs text-gray-400 hover:text-red-500 py-2 transition-colors"
-                >
-                  Clear my local cache for this table
-                </button>
               </div>
             </>
           )}

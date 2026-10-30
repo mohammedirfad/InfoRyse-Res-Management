@@ -15,7 +15,9 @@ export async function GET() {
     await requireSuperAdmin();
     const restaurants = await db.restaurant.findMany({
       orderBy: { createdAt: "desc" },
-      include: {
+      select: {
+        id: true, name: true, slug: true, ownerName: true, contactEmail: true, contactPhone: true,
+        location: true, plan: true, isActive: true, createdAt: true,
         _count: { select: { orders: { where: { NOT: { idempotencyKey: { startsWith: "assist_" } } } }, tables: { where: { deletedAt: null } } } },
         users: { where: { role: "OWNER" }, select: { id: true, email: true, name: true, phone: true } },
       },

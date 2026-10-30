@@ -37,7 +37,7 @@ export async function POST(
       }),
     ]);
 
-    emitOrderEvent({
+    await emitOrderEvent({
       restaurantId,
       type: "bill_updated",
       data: { sessionId: session.id, tableId: session.tableId },

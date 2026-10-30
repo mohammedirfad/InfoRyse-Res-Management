@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { formatRupees, formatTime } from "@/lib/utils";
 
-type OrderItem = { id: string; nameSnapshot: string; priceCentsSnapshot: number; quantity: number };
+type OrderItem = { id: string; nameSnapshot: string; priceCentsSnapshot: number; quantity: number; servedQuantity: number; cancelledQuantity: number };
 type Order = {
   id: string;
   orderNumber: number;
@@ -173,8 +173,8 @@ export default function OrdersPage() {
     }
   }
 
-  // Serverless instances do not share the in-memory EventEmitter. Polling
-  // gives every Vercel instance the same reliable source of truth.
+  // Serverless instances do not share memory. The shared Realtime stream
+  // signals changes; fetch the order snapshot only at entry or after a signal.
   const load = useCallback(async () => {
     if (isFetching.current) return;
     isFetching.current = true;
@@ -208,22 +208,19 @@ export default function OrdersPage() {
   }, [soundOn]);
 
   useEffect(() => {
-    // Load once, then refresh immediately when the shared lightweight order
-    // notification poll detects an arrival. Keep a slower sync for changes
-    // made by another admin in a different browser.
+    // Load once, then refresh only when the realtime stream reports a change.
     void load();
-    const onIncomingOrders = () => { void load(); };
+    const onRestaurantEvent = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.type === "resync" || detail?.type === "order_created" || detail?.type === "order_updated" || detail?.type === "bill_updated") void load();
+    };
     const onVisible = () => {
       if (document.visibilityState === "visible") void load();
     };
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load();
-    }, 60000);
-    window.addEventListener("inforyse:new-orders", onIncomingOrders);
+    window.addEventListener("inforyse:restaurant-event", onRestaurantEvent);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("inforyse:new-orders", onIncomingOrders);
+      window.removeEventListener("inforyse:restaurant-event", onRestaurantEvent);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [load]);
@@ -322,6 +319,22 @@ export default function OrdersPage() {
       setUpdatingId(null);
       load();
     }
+  }
+
+  async function updateItemFulfillment(order: Order, item: OrderItem, kind: "served" | "cancelled", delta: number) {
+    const servedQuantity = item.servedQuantity + (kind === "served" ? delta : 0);
+    const cancelledQuantity = item.cancelledQuantity + (kind === "cancelled" ? delta : 0);
+    if (servedQuantity < 0 || cancelledQuantity < 0 || servedQuantity + cancelledQuantity > item.quantity) return;
+    setUpdatingId(item.id);
+    try {
+      const response = await fetch(`/api/admin/orders/${order.id}/items/${item.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ servedQuantity, cancelledQuantity }),
+      });
+      const data = await response.json();
+      if (!response.ok) { alert(data.error || "Could not update served quantity."); return; }
+      await load();
+    } finally { setUpdatingId(null); }
   }
 
   function printBill(order: Order) {
@@ -962,17 +975,20 @@ export default function OrdersPage() {
                 {selected.items.map((item) => (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl p-3 text-xs"
+                    className="flex flex-col gap-2 bg-slate-50 border border-slate-100 rounded-xl p-3 text-xs"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="h-6 w-6 rounded-lg bg-slate-900 text-white font-bold flex items-center justify-center text-xs">
-                        {item.quantity}
-                      </span>
-                      <span className="font-semibold text-slate-800">{item.nameSnapshot}</span>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2"><span className="h-6 w-6 rounded-lg bg-slate-900 text-white font-bold flex items-center justify-center text-xs">{item.quantity}</span><span className="font-semibold text-slate-800">{item.nameSnapshot}</span></div>
+                      <span className="font-bold text-slate-900 font-mono">{formatRupees(item.priceCentsSnapshot * item.quantity)}</span>
                     </div>
-                    <span className="font-bold text-slate-900 font-mono">
-                      {formatRupees(item.priceCentsSnapshot * item.quantity)}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                      <span>Served {item.servedQuantity}/{item.quantity}</span>
+                      <button type="button" disabled={selected.status !== "READY" || updatingId === item.id || item.servedQuantity + item.cancelledQuantity >= item.quantity} onClick={() => void updateItemFulfillment(selected, item, "served", 1)} className="rounded-lg border px-2 py-1 disabled:opacity-40">+ Served</button>
+                      <button type="button" disabled={selected.status !== "READY" || updatingId === item.id || item.servedQuantity === 0} onClick={() => void updateItemFulfillment(selected, item, "served", -1)} className="rounded-lg border px-2 py-1 disabled:opacity-40">− Served</button>
+                      <span>Cancelled {item.cancelledQuantity}/{item.quantity}</span>
+                      <button type="button" disabled={selected.status !== "READY" || updatingId === item.id || item.servedQuantity + item.cancelledQuantity >= item.quantity} onClick={() => void updateItemFulfillment(selected, item, "cancelled", 1)} className="rounded-lg border px-2 py-1 disabled:opacity-40">+ Cancelled</button>
+                      <button type="button" disabled={selected.status !== "READY" || updatingId === item.id || item.cancelledQuantity === 0} onClick={() => void updateItemFulfillment(selected, item, "cancelled", -1)} className="rounded-lg border px-2 py-1 disabled:opacity-40">− Cancelled</button>
+                    </div>
                   </div>
                 ))}
               </div>

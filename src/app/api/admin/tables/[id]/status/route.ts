@@ -32,7 +32,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     });
 
     const { emitOrderEvent } = await import("@/lib/events");
-    emitOrderEvent({
+    await emitOrderEvent({
       restaurantId,
       type: "order_updated",
       data: { tableId: table.id, status },

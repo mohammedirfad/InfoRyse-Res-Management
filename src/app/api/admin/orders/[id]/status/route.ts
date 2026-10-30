@@ -35,18 +35,30 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       );
     }
 
-    await db.$transaction([
-      db.order.update({ where: { id: order.id }, data: { status: nextStatus } }),
-      db.orderStatusHistory.create({
-        data: { orderId: order.id, status: nextStatus, changedBy: userId },
-      }),
-    ]);
+    const didUpdate = await db.$transaction(async (tx) => {
+      if (order.tableId) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${order.tableId}))::text AS "locked"`;
+      }
+      const claimed = await tx.order.updateMany({
+        where: { id: order.id, restaurantId, status: order.status },
+        data: { status: nextStatus },
+      });
+      if (claimed.count !== 1) return false;
+      if (nextStatus === "COMPLETED") {
+        await tx.$executeRaw`UPDATE "OrderItem" SET "servedQuantity" = GREATEST(0, "quantity" - "cancelledQuantity") WHERE "orderId" = ${order.id}`;
+      } else if (nextStatus === "CANCELLED") {
+        await tx.$executeRaw`UPDATE "OrderItem" SET "servedQuantity" = 0, "cancelledQuantity" = "quantity" WHERE "orderId" = ${order.id}`;
+      }
+      await tx.orderStatusHistory.create({ data: { orderId: order.id, status: nextStatus, changedBy: userId } });
+      return true;
+    });
+    if (!didUpdate) return Response.json({ error: "Order status changed while processing. Refresh and try again." }, { status: 409 });
     const updated = await db.order.findUnique({ where: { id: order.id } });
 
-    emitOrderEvent({
+    void emitOrderEvent({
       restaurantId,
       type: "order_updated",
-      data: { orderId: order.id, orderNumber: order.orderNumber, status: nextStatus },
+      data: { orderId: order.id, orderNumber: order.orderNumber, tableId: order.tableId, status: nextStatus },
     });
 
     return Response.json({ order: updated });

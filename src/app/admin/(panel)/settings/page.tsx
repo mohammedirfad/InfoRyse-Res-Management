@@ -53,6 +53,7 @@ export default function SettingsPage() {
   const [openNow, setOpenNow]         = useState(true);
   const [taxName, setTaxName]         = useState("GST");
   const [taxPercent, setTaxPercent]   = useState("5");
+  const [upiPaymentId, setUpiPaymentId] = useState("");
 
   const [sessionTimeout, setSessionTimeout] = useState("30");
   const [passwordExpiry, setPasswordExpiry] = useState("90");
@@ -76,6 +77,7 @@ export default function SettingsPage() {
         setOpenNow(d.restaurant.openNow ?? true);
         setTaxName(d.restaurant.taxName ?? "GST");
         setTaxPercent(String(d.restaurant.taxPercent ?? 5));
+        setUpiPaymentId(d.restaurant.upiPaymentId ?? "");
       }
     });
   }, []);
@@ -87,7 +89,7 @@ export default function SettingsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: restName, openNow,
-        taxName, taxPercent: Number(taxPercent),
+        taxName, taxPercent: Number(taxPercent), upiPaymentId,
       }),
     });
     setSaving(false);
@@ -202,6 +204,12 @@ export default function SettingsPage() {
                 </div>
               </div>
 
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Optional UPI ID for bill payment QR</label>
+                <input className="input" value={upiPaymentId} onChange={(e) => setUpiPaymentId(e.target.value)} placeholder="restaurant@upi" />
+                <p className="text-xs text-gray-400 mt-1">Leave blank to omit the QR. Staff must confirm payment manually.</p>
+              </div>
+
               {/* Preview */}
               <div className="bg-gray-50 rounded-2xl p-4 border border-black/5">
                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Bill Preview</p>
@@ -219,6 +227,7 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
+
 
           {tab === "notifications" && (
             <div className="card p-6 space-y-4 max-w-2xl">

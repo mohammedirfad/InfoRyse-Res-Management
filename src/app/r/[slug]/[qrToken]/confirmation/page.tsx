@@ -17,17 +17,6 @@ const STEPS: { label: string; subLabel: string; key: string }[] = [
 const STATUS_ORDER = ["NEW", "ACCEPTED", "PREPARING", "READY", "COMPLETED"];
 const CANCELLABLE  = ["NEW", "ACCEPTED"];
 
-async function fetchStatus(slug: string, orderNumber: string) {
-  try {
-    const res = await fetch(
-      `/api/public/order-status?slug=${encodeURIComponent(slug)}&orderNumber=${encodeURIComponent(orderNumber)}`,
-      { cache: "no-store" }
-    );
-    if (!res.ok) return null;
-    return (await res.json()).status as string ?? null;
-  } catch { return null; }
-}
-
 export default function ConfirmationPage({ params }: { params: { slug: string; qrToken: string } }) {
   const sp          = useSearchParams();
   const orderNumber = sp.get("orderNumber") ?? "";
@@ -38,7 +27,6 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
 
   const [status, setStatus]           = useState("NEW");
   const [lastUpdated, setLastUpdated] = useState(new Date());
-  const [isPolling, setIsPolling]     = useState(false);
   const [showNudge, setShowNudge]     = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelling, setCancelling]   = useState(false);
@@ -46,31 +34,82 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   const [cancelled, setCancelled]     = useState(false);
 
   const nudgeTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const isDone      = status === "COMPLETED" || status === "CANCELLED";
   const canCancel   = CANCELLABLE.includes(status) && !cancelled;
   const currentIdx  = STATUS_ORDER.indexOf(status);
 
-  // Poll the persisted order state: process-local events are not shared across
-  // Vercel serverless instances, so an EventSource can otherwise stay stale.
+  // The SSE response carries the initial status snapshot and then only pushes
+  // changes. Reopening the stream on resume gets one fresh snapshot.
   useEffect(() => {
     if (!orderNumber) return;
     let stopped = false;
-    const refresh = () => fetchStatus(params.slug, orderNumber).then((s) => {
-      if (s && !stopped) {
-        setStatus(s);
-        setLastUpdated(new Date());
-        if (s === "CANCELLED") setCancelled(true);
+    let source: EventSource | null = null;
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+    let streamConnected = false;
+    const applyStatus = (nextStatus: string | null) => {
+      if (!nextStatus || stopped) return;
+      statusRef.current = nextStatus;
+      setStatus(nextStatus);
+      setLastUpdated(new Date());
+      if (nextStatus === "CANCELLED") setCancelled(true);
+      if (nextStatus === "COMPLETED" || nextStatus === "CANCELLED") {
+        source?.close();
+        if (fallbackTimer) clearInterval(fallbackTimer);
+        fallbackTimer = null;
       }
-    });
-    refresh();
-    const interval = window.setInterval(refresh, 8000);
+    };
+    const openStream = () => {
+      source?.close();
+      streamConnected = false;
+      source = new EventSource(`/api/public/order-events?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}&orderNumber=${encodeURIComponent(orderNumber)}`);
+      source.addEventListener("connected", () => {
+        streamConnected = true;
+        if (fallbackTimer) clearInterval(fallbackTimer);
+        fallbackTimer = null;
+      });
+      source.onerror = () => {
+        streamConnected = false;
+        const pollStatus = () => {
+          if (stopped || streamConnected || document.visibilityState === "hidden" || ["COMPLETED", "CANCELLED"].includes(statusRef.current)) return;
+          void fetch(`/api/public/order-status?slug=${encodeURIComponent(params.slug)}&orderNumber=${encodeURIComponent(orderNumber)}`, { cache: "no-store" })
+            .then((response) => response.ok ? response.json() : null)
+            .then((data) => { if (data?.status) applyStatus(data.status); })
+            .catch(() => {});
+        };
+        if (!fallbackTimer) {
+          pollStatus();
+          fallbackTimer = setInterval(pollStatus, 5000);
+        }
+      };
+      source.addEventListener("realtime_unavailable", () => source?.onerror?.(new Event("error")));
+      source.addEventListener("snapshot", (rawEvent) => {
+        try { applyStatus(JSON.parse((rawEvent as MessageEvent).data).status); } catch { /* Ignore malformed snapshot. */ }
+      });
+      source.addEventListener("restaurant_event", (rawEvent) => {
+      try {
+        const event = JSON.parse((rawEvent as MessageEvent).data);
+        if (event.type !== "order_updated") return;
+        const data = event.data ?? {};
+        if (String(data.orderNumber) === String(orderNumber)) applyStatus(data.status);
+      } catch { /* Ignore malformed realtime events. */ }
+      });
+    };
+    openStream();
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && !["COMPLETED", "CANCELLED"].includes(statusRef.current)) openStream();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     // Show "order more" nudge after 30s idle
     nudgeTimer.current = setTimeout(() => setShowNudge(true), 30000);
 
     return () => {
       stopped = true;
-      window.clearInterval(interval);
+      source?.close();
+      if (fallbackTimer) clearInterval(fallbackTimer);
+      document.removeEventListener("visibilitychange", onVisible);
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -184,7 +223,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
             <div className={`flex items-center gap-1.5 text-xs ${isDone ? "text-green-600" : "text-gray-400"}`}>
               {isDone
                 ? <span className="font-semibold">{cancelled ? "Cancelled" : "Completed ✓"}</span>
-                : <><RefreshCw className={`h-3 w-3 ${isPolling ? "animate-spin" : ""}`} />
+                : <><RefreshCw className="h-3 w-3" />
                    <span>Live · {fmt(lastUpdated)}</span></>
               }
             </div>

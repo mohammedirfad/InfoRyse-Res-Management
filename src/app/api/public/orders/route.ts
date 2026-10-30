@@ -193,12 +193,15 @@ export async function POST(req: Request) {
       throw err;
     }
 
-    emitOrderEvent({
+    await emitOrderEvent({
       restaurantId: restaurant.id,
       type: "order_created",
       data: {
         orderId: session.order.id,
         orderNumber: session.order.orderNumber,
+        customerName: session.order.customerName,
+        createdAt: session.order.createdAt,
+        tableLabel: table.label,
         tableId: table.id,
         totalCents: session.order.totalCents,
       },

@@ -101,7 +101,7 @@ export async function POST(req: Request) {
       });
     });
 
-    emitOrderEvent({
+    await emitOrderEvent({
       restaurantId,
       type: "order_created",
       data: order,

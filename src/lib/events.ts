@@ -1,6 +1,11 @@
-import { EventEmitter } from "events";
+import { broadcastOrderEvent } from "@/lib/supabaseRealtime";
 
-export type OrderEventType = "order_created" | "order_updated" | "bill_updated";
+export type OrderEventType =
+  | "order_created"
+  | "order_updated"
+  | "bill_updated"
+  | "service_request_created"
+  | "service_request_updated";
 
 export type OrderEventPayload = {
   restaurantId: string;
@@ -8,25 +13,8 @@ export type OrderEventPayload = {
   data?: any;
 };
 
-// Global singleton event emitter across dev reloads
-declare global {
-  // eslint-disable-next-line no-var
-  var __restaurantEventEmitter: EventEmitter | undefined;
-}
-
-export const orderEvents: EventEmitter =
-  global.__restaurantEventEmitter ?? new EventEmitter();
-
-orderEvents.setMaxListeners(100);
-
-if (process.env.NODE_ENV !== "production") {
-  global.__restaurantEventEmitter = orderEvents;
-}
-
-export function emitOrderEvent(payload: OrderEventPayload) {
-  try {
-    orderEvents.emit("restaurant_event", payload);
-  } catch (err) {
-    console.error("Failed to emit order event", err);
-  }
+export function emitOrderEvent(payload: OrderEventPayload): void {
+  void broadcastOrderEvent(payload).catch((err) => {
+    console.error("Failed to broadcast restaurant event", err);
+  });
 }

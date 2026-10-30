@@ -30,6 +30,13 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum ServiceRequestStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
 model Restaurant {
   id         String   @id @default(uuid())
   slug       String   @unique
@@ -47,6 +54,7 @@ model Restaurant {
   ownerName        String?
   contactEmail     String?
   contactPhone     String?
+  upiPaymentId String?
   location         String?
   plan             String?  @default("Pro")
   nextOrderNumber  Int      @default(1)
@@ -60,6 +68,7 @@ model Restaurant {
   orders        Order[]
   tableSessions TableSession[]
   bills         Bill[]
+  serviceRequests ServiceRequest[]
 
   @@index([slug])
 }
@@ -146,6 +155,7 @@ model Table {
   orders       Order[]
   sessions     TableSession[]
   bills        Bill[]
+  serviceRequests ServiceRequest[]
 
   @@index([restaurantId])
   @@unique([restaurantId, label])
@@ -167,8 +177,30 @@ model TableSession {
   createdAt      DateTime  @default(now())
 
   orders         Order[]
+  serviceRequests ServiceRequest[]
 
   @@index([restaurantId, tableId, status])
+}
+
+model ServiceRequest {
+  id             String               @id @default(uuid())
+  restaurantId   String
+  restaurant     Restaurant           @relation(fields: [restaurantId], references: [id])
+  tableId        String
+  table          Table                @relation(fields: [tableId], references: [id])
+  tableSessionId String?
+  tableSession   TableSession?        @relation(fields: [tableSessionId], references: [id])
+  tableLabel     String
+  requests       String[]
+  custom         String?
+  status         ServiceRequestStatus @default(PENDING)
+  handledBy      String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([restaurantId, status, createdAt])
+  @@index([tableId, createdAt])
+  @@index([tableSessionId])
 }
 
 model Order {
@@ -209,6 +241,8 @@ model OrderItem {
   nameSnapshot  String // frozen at order time — never follows later menu edits
   priceCentsSnapshot Int
   quantity   Int
+  servedQuantity Int @default(0)
+  cancelledQuantity Int @default(0)
 
   @@index([orderId])
 }
@@ -250,9 +284,12 @@ model Bill {
   paymentStatus   String      @default("PAID") // PAID, PENDING
   paidAt          DateTime?
   itemsJson       String      // JSON string of [{ name, quantity, unitPrice, subtotal }]
+  shareToken      String?     @unique
   createdAt       DateTime    @default(now())
 
   @@index([restaurantId, createdAt])
+  @@index([restaurantId, tableSessionId])
   @@unique([restaurantId, billNumber])
 }
+
 

@@ -38,7 +38,7 @@ export async function POST(
 
     const order = await db.order.findFirst({
       where: { restaurantId: restaurant.id, orderNumber, tableId: table.id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, tableId: true },
     });
 
     if (!order) return Response.json({ error: "Order not found" }, { status: 404 });
@@ -60,10 +60,10 @@ export async function POST(
       }),
     ]);
 
-    emitOrderEvent({
+    await emitOrderEvent({
       restaurantId: restaurant.id,
       type: "order_updated",
-      data: { orderId: order.id, orderNumber, status: "CANCELLED" },
+      data: { orderId: order.id, orderNumber, tableId: order.tableId, status: "CANCELLED" },
     });
 
     return Response.json({ ok: true, message: "Order cancelled successfully." });

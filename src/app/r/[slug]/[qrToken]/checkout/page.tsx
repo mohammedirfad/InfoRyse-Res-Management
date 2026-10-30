@@ -236,13 +236,14 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
             )}
           </div>
 
+
           {/* Phone */}
           <div>
             <input
               className={`w-full bg-gray-50 rounded-xl px-4 py-3 text-sm border focus:outline-none focus:ring-1 focus:ring-emerald-700 ${
                 fieldErrors.phone ? "border-red-400 ring-1 ring-red-400" : "border-gray-200"
               }`}
-              placeholder={t("mobileNumber", "Phone number * (10 digits)")}
+              placeholder={t("mobileNumber", "Phone number (optional if email is provided)")}
               type="tel"
               inputMode="numeric"
               maxLength={10}

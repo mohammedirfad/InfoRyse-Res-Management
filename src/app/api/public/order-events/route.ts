@@ -1,97 +1,59 @@
 import { db } from "@/lib/db";
-import { orderEvents } from "@/lib/events";
+import { createRealtimeEventStream } from "@/lib/supabaseRealtime";
 
 export const dynamic = "force-dynamic";
-
-const restaurantSlugCache = new Map<string, { id: string; ts: number }>();
-const SLUG_CACHE_TTL = 5 * 60 * 1000;
+export const runtime = "nodejs";
+export const maxDuration = 300;
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const slug = url.searchParams.get("slug")?.trim();
-  const rawOrderNumber = url.searchParams.get("orderNumber") || "";
-  const orderNumber = parseInt(rawOrderNumber.replace(/\D/g, ""), 10);
-
-  if (!slug || isNaN(orderNumber)) {
-    return new Response(JSON.stringify({ error: "Invalid parameters" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+  const qrToken = url.searchParams.get("qrToken");
+  const rawOrderNumber = url.searchParams.get("orderNumber");
+  const orderNumber = rawOrderNumber ? Number.parseInt(rawOrderNumber, 10) : null;
+  if (!slug || (!qrToken && (!orderNumber || !Number.isFinite(orderNumber)))) {
+    return Response.json({ error: "Invalid event stream parameters" }, { status: 400 });
   }
 
   try {
+    let tableId: string | null = null;
     let restaurantId: string | null = null;
-    const now = Date.now();
-    const cached = restaurantSlugCache.get(slug);
-
-    if (cached && now - cached.ts < SLUG_CACHE_TTL) {
-      restaurantId = cached.id;
-    } else {
-      const restaurant = await db.restaurant.findUnique({
-        where:  { slug },
-        select: { id: true },
+    let snapshot: { orderNumber: number; status: string } | undefined;
+    if (qrToken) {
+      const table = await db.table.findFirst({
+        where: { qrToken, deletedAt: null, restaurant: { slug, isActive: true } },
+        select: {
+          id: true,
+          restaurantId: true,
+          ...(orderNumber ? {
+            orders: {
+              where: { orderNumber },
+              select: { orderNumber: true, status: true },
+              take: 1,
+            },
+          } : {}),
+        },
       });
-      if (restaurant) {
-        restaurantId = restaurant.id;
-        restaurantSlugCache.set(slug, { id: restaurant.id, ts: now });
+      tableId = table?.id ?? null;
+      restaurantId = table?.restaurantId ?? null;
+      if (orderNumber && table && "orders" in table && table.orders[0]) {
+        snapshot = { orderNumber: table.orders[0].orderNumber, status: table.orders[0].status };
       }
+      if (orderNumber && table && !snapshot) return Response.json({ error: "Order not found at this table" }, { status: 404 });
+    } else if (orderNumber) {
+      const order = await db.order.findFirst({
+        where: { orderNumber, restaurant: { slug, isActive: true } },
+        select: { tableId: true, restaurantId: true, orderNumber: true, status: true },
+      });
+      tableId = order?.tableId ?? null;
+      restaurantId = order?.restaurantId ?? null;
+      if (order) snapshot = { orderNumber: order.orderNumber, status: order.status };
     }
 
-    if (!restaurantId) {
-      return new Response(JSON.stringify({ error: "Restaurant not found" }), {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const responseStream = new TransformStream();
-    const writer = responseStream.writable.getWriter();
-    const encoder = new TextEncoder();
-
-    // Initial greeting
-    writer.write(encoder.encode(`event: connected\ndata: ${JSON.stringify({ ok: true, orderNumber })}\n\n`));
-
-    const onEvent = (payload: { restaurantId: string; type: string; data?: any }) => {
-      if (
-        payload.restaurantId === restaurantId &&
-        payload.type === "order_updated" &&
-        payload.data &&
-        (payload.data.orderNumber === orderNumber || Number(payload.data.orderNumber) === orderNumber)
-      ) {
-        writer.write(
-          encoder.encode(`event: order_status\ndata: ${JSON.stringify({ status: payload.data.status })}\n\n`)
-        );
-      }
-    };
-
-    orderEvents.on("restaurant_event", onEvent);
-
-    const heartbeat = setInterval(() => {
-      try {
-        writer.write(encoder.encode(": ping\n\n"));
-      } catch {
-        clearInterval(heartbeat);
-      }
-    }, 25000);
-
-    req.signal.addEventListener("abort", () => {
-      clearInterval(heartbeat);
-      orderEvents.off("restaurant_event", onEvent);
-      writer.close().catch(() => {});
-    });
-
-    return new Response(responseStream.readable, {
-      headers: {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-      },
-    });
-  } catch (err) {
-    console.error("[order-events:stream]", err);
-    return new Response(JSON.stringify({ error: "Stream error" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    if (!tableId || !restaurantId) return Response.json({ error: "Table or order not found" }, { status: 404 });
+    return createRealtimeEventStream(req, `table:${restaurantId}:${tableId}`, true, snapshot);
+  } catch (error) {
+    console.error("[public:order-events]", error);
+    return Response.json({ error: "Could not open order event stream" }, { status: 503 });
   }
 }

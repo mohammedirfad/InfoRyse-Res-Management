@@ -175,6 +175,7 @@ export default function RestaurantsPage() {
     load();
   }
 
+
   async function sendAccessReset(r: Restaurant) {
     const res = await fetch(`/api/super/restaurants/${r.id}/reset-access`, { method: "POST" });
     const data = await res.json();

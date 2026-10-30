@@ -122,6 +122,12 @@ export async function GET(
       );
     }
 
+    const preparedBill = await db.bill.findFirst({
+      where: { restaurantId, tableId: params.tableId, tableSessionId: session.id },
+      orderBy: { createdAt: "desc" },
+      select: { customerPhone: true, customerEmail: true },
+    });
+
     // Aggregate all items across all orders in this session
     const allItems: Record<string, {
       name: string; unitPrice: number; quantity: number; subtotal: number;
@@ -129,16 +135,18 @@ export async function GET(
 
     for (const order of session.orders) {
       for (const item of order.items) {
+        const servedQuantity = Math.max(0, Math.min(item.quantity, item.servedQuantity));
+        if (servedQuantity < 1) continue;
         const key = item.nameSnapshot + ":" + item.priceCentsSnapshot;
         if (allItems[key]) {
-          allItems[key].quantity += item.quantity;
-          allItems[key].subtotal += item.priceCentsSnapshot * item.quantity;
+          allItems[key].quantity += servedQuantity;
+          allItems[key].subtotal += item.priceCentsSnapshot * servedQuantity;
         } else {
           allItems[key] = {
             name:      item.nameSnapshot,
             unitPrice: item.priceCentsSnapshot,
-            quantity:  item.quantity,
-            subtotal:  item.priceCentsSnapshot * item.quantity,
+            quantity:  servedQuantity,
+            subtotal:  item.priceCentsSnapshot * servedQuantity,
           };
         }
       }
@@ -164,6 +172,8 @@ export async function GET(
           status:       session.status,
           createdAt:    session.createdAt,
           billRequestedAt: session.billRequestedAt,
+          billCustomerPhone: preparedBill?.customerPhone ?? null,
+          billCustomerEmail: preparedBill?.customerEmail ?? null,
           orderCount:   session.orders.length,
           orders:       session.orders.map((o) => ({
             id:           o.id,
@@ -171,6 +181,8 @@ export async function GET(
             status:       o.status,
             createdAt:    o.createdAt,
             customerName: o.customerName,
+            customerPhone: o.customerPhone,
+            customerEmail: o.customerEmail,
             subtotal:     o.subtotalCents,
             items:        o.items,
           })),

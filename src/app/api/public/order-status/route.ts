@@ -62,7 +62,7 @@ export async function GET(req: Request) {
     return new Response(JSON.stringify({ status: order.status, updatedAt: order.createdAt }), {
       headers: {
         "Content-Type": "application/json",
-        "Cache-Control": "public, max-age=4, stale-while-revalidate=8",
+        "Cache-Control": "private, no-store",
       },
     });
   } catch (err) {

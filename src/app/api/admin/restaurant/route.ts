@@ -18,6 +18,7 @@ const PatchSchema = z.object({
   discountActive:  z.boolean().optional(),
   discountPercent: z.number().min(0).max(100).optional(),
   discountName:    z.string().max(100).optional(),
+  upiPaymentId: z.string().trim().max(150).regex(/^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+$/).or(z.literal("")).optional(),
 });
 
 export async function GET() {

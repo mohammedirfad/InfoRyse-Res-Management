@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import Link from "next/link";
-import { Search, X, ShoppingCart, Wifi, ChevronUp, ArrowLeft } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Search, X, ShoppingCart, Wifi, ChevronUp, ArrowLeft, ReceiptText } from "lucide-react";
 import { LandingPage } from "./landing";
 import { useCart, formatRupees, type MenuItem } from "@/components/CartContext";
 import { getDishImageUrl } from "@/lib/dishImages";
@@ -60,7 +61,7 @@ function VegDot({ isVeg, size="md" }:{ isVeg:boolean; size?:"sm"|"md" }) {
 
 /* ── ASSISTANCE SERVICES ─────────────────────────────────────────────────────── */
 const SERVICES = [
-  { id:"pay_bill",   icon:"🧾", label:"Pay Bill",          section:"table"    },
+  { id:"pay_bill",   icon:"🧾", label:"Request Bill",      section:"table"    },
   { id:"wifi",       icon:"📶", label:"Wi-Fi Password",    section:"assist"   },
   { id:"water",      icon:"💧", label:"Water Bottle",      section:"assist"   },
   { id:"waiter",     icon:"🔔", label:"Call Waiter",       section:"assist"   },
@@ -84,17 +85,24 @@ function AssistanceSheet({
   const [sent, setSent]       = useState<string[]>([]);
   const [custom, setCustom]   = useState("");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
 
   async function send(ids: string[], customText?: string) {
+    setSendError("");
     setSending(true);
-    // Notify the restaurant via the assistance API
     try {
-      await fetch("/api/public/assistance", {
+      const response = await fetch("/api/public/assistance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ slug, qrToken, tableLabel, requests: ids, custom: customText }),
       });
-    } catch { /* silent — best effort */ }
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error ?? "Could not send your request.");
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "Could not send your request.");
+      setSending(false);
+      return;
+    }
     setSent(ids);
     setSending(false);
     setTimeout(onClose, 2000);
@@ -137,6 +145,7 @@ function AssistanceSheet({
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {sendError && <p role="alert" className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{sendError}</p>}
           {/* Your table */}
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Your Table</p>
@@ -347,6 +356,7 @@ function ItemCard({
 
 /* ── MAIN PAGE ──────────────────────────────────────────────────────────────── */
 export default function MenuPage({ params }:{ params:{ slug:string; qrToken:string } }) {
+  const router = useRouter();
   const [data, setData]         = useState<MenuData|null>(null);
   const [error, setError]       = useState<string|null>(null);
   const [activeCat, setActiveCat]   = useState<string|null>(null);
@@ -355,6 +365,8 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
   const [justAdded, setJustAdded]   = useState<string|null>(null);
   const [selectedItem, setSelectedItem] = useState<MenuItem|null>(null);
   const [showAssist, setShowAssist] = useState(false);
+  const [billRequestState, setBillRequestState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [billRequestMessage, setBillRequestMessage] = useState("");
   const [vegFilter, setVegFilter]   = useState<"all"|"veg"|"nonveg">("all");
   const [heroIdx, setHeroIdx]   = useState(0);
   const [heroFrozen, setHeroFrozen] = useState(false); // stop auto-advance on interaction
@@ -401,6 +413,31 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
     } else {
       setQuantity(item.id, current - 1);
     }
+  }
+
+  async function requestBill() {
+    if (!data || billRequestState === "sending") return;
+    setBillRequestState("sending");
+    setBillRequestMessage("");
+    try {
+      const response = await fetch("/api/public/assistance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: params.slug, qrToken: params.qrToken, requests: ["pay_bill"] }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error ?? "Could not notify staff. Please try again.");
+      setBillRequestState("sent");
+      setBillRequestMessage(result?.duplicate ? "Staff already have your bill request." : "Bill request sent. Staff has been notified.");
+      router.push(`/r/${params.slug}/${params.qrToken}/cart?tab=confirmed`);
+    } catch (error) {
+      setBillRequestState("error");
+      setBillRequestMessage(error instanceof Error ? error.message : "Could not notify staff. Please try again.");
+    }
+    window.setTimeout(() => {
+      setBillRequestState("idle");
+      setBillRequestMessage("");
+    }, 4500);
   }
 
   /* fetch + cache in sessionStorage */
@@ -962,7 +999,8 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
       )}
 
       {/* ── Bottom nav bar ────────────────────────────────────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-gray-100 px-6 py-2.5 flex items-center justify-around">
+      {billRequestMessage && <div role="status" className={`fixed bottom-[76px] left-1/2 z-40 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-xl px-4 py-3 text-center text-sm font-semibold shadow-lg ${billRequestState === "error" ? "bg-rose-700 text-white" : "bg-gray-900 text-white"}`}>{billRequestMessage}</div>}
+      <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-gray-100 px-3 py-2.5 flex items-center justify-around">
         <button className="flex flex-col items-center gap-0.5 text-gray-900">
           <span className="text-xl">🏠</span>
           <span className="text-[10px] font-bold">{t("menu", "Menu")}</span>
@@ -977,10 +1015,10 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
           )}
           <span className="text-[10px] font-medium">{t("cart", "Cart")}</span>
         </Link>
-        <button onClick={()=>setShowAssist(true)}
-          className="flex flex-col items-center gap-0.5 text-gray-400 active:scale-90 transition-transform">
-          <span className="text-xl">💧</span>
-          <span className="text-[10px] font-medium">{t("waterBottle", "Water")}</span>
+        <button type="button" aria-label="Request bill" onClick={() => void requestBill()} disabled={billRequestState === "sending"}
+          className={`flex flex-col items-center gap-0.5 transition-transform active:scale-90 disabled:opacity-60 ${billRequestState === "sent" ? "text-emerald-700" : "text-gray-400"}`}>
+          <ReceiptText className="h-5 w-5" />
+          <span className="text-[10px] font-medium">{billRequestState === "sending" ? "Sending" : "Bill"}</span>
         </button>
         <button onClick={()=>setShowAssist(true)}
           className="flex flex-col items-center gap-0.5 text-gray-400 active:scale-90 transition-transform">

@@ -8,7 +8,9 @@ export async function GET(request: Request) {
     const { restaurantId } = await requireRestaurantUser();
     const dashboardView = new URL(request.url).searchParams.get("view") === "dashboard";
     const orders = await db.order.findMany({
-      where: { restaurantId },
+      // Legacy assistance tickets were stored as zero-value placeholder orders.
+      // Keep them out of the Orders tab; new assistance now uses ServiceRequest.
+      where: { restaurantId, NOT: { idempotencyKey: { startsWith: "assist_" } } },
       select: dashboardView ? {
         id: true,
         orderNumber: true,
@@ -35,6 +37,8 @@ export async function GET(request: Request) {
             nameSnapshot: true,
             priceCentsSnapshot: true,
             quantity: true,
+            servedQuantity: true,
+            cancelledQuantity: true,
           },
         },
         table: { select: { label: true } },
