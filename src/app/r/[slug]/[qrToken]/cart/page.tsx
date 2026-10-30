@@ -96,6 +96,8 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
   const [lastDigitalBill, setLastDigitalBill] = useState<{ token: string; sessionId: string } | null>(null);
   const [pastOrders, setPastOrders]       = useState<StoredPastOrder[]>([]);
   const [isFetchingSession, setIsFetchingSession] = useState(false);
+  const [billRequestState, setBillRequestState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [billRequestMessage, setBillRequestMessage] = useState("");
   const [note, setNote]                   = useState("");
 
   const base = `/r/${params.slug}/${params.qrToken}`;
@@ -246,6 +248,27 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
 
   const tableLabel = sessionData?.table?.label ?? "Your Table";
   const confirmedCount = sessionData?.session?.orders.length ?? pastOrders.length;
+  const billAlreadyRequested = billRequestState === "sent" || Boolean(sessionData?.session?.billRequestedAt);
+
+  async function requestTableBill() {
+    if (!sessionData?.session || billAlreadyRequested || billRequestState === "sending") return;
+    setBillRequestState("sending");
+    setBillRequestMessage("");
+    try {
+      const response = await fetch("/api/public/assistance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: params.slug, qrToken: params.qrToken, requests: ["pay_bill"] }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || "Could not notify staff. Please try again.");
+      setBillRequestState("sent");
+      setBillRequestMessage(result?.duplicate ? "Staff already have your bill request." : "Staff have been notified. Your bill will appear here when it is ready.");
+    } catch (error) {
+      setBillRequestState("error");
+      setBillRequestMessage(error instanceof Error ? error.message : "Could not notify staff. Please try again.");
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#FAFAF8]">
@@ -448,16 +471,35 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                   {formatRupees(liveTableTotal)}
                 </p>
               </div>
-              <Link
-                href={`${base}?view=menu`}
-                className="inline-flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 text-gray-950 px-4 py-2 rounded-xl text-xs font-bold active:scale-95 transition-all shadow-sm"
-              >
-                <span>+ Order More</span>
-              </Link>
             </div>
             <p className="text-[11px] text-zinc-400 mt-2">
               All dishes ordered by anyone at Table {tableLabel} are united into this single table bill. Settle at the counter when you finish dining.
             </p>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Link
+                href={`${base}?view=menu`}
+                className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/15 active:scale-[0.98]"
+              >
+                + Order More
+              </Link>
+              {!sessionData?.bill && sessionData?.session && (
+                <button
+                  type="button"
+                  onClick={() => void requestTableBill()}
+                  disabled={billAlreadyRequested || billRequestState === "sending"}
+                  aria-live="polite"
+                  className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition active:scale-[0.98] disabled:cursor-default disabled:opacity-90 ${billAlreadyRequested ? "bg-emerald-500/15 text-emerald-200" : billRequestState === "error" ? "bg-rose-500/15 text-rose-200" : "bg-emerald-500 text-gray-950 hover:bg-emerald-400"}`}
+                >
+                  <Receipt className="h-4 w-4" />
+                  {billRequestState === "sending" ? "Sending…" : billAlreadyRequested ? "Staff notified" : billRequestState === "error" ? "Retry bill request" : "Request bill"}
+                </button>
+              )}
+            </div>
+            {billRequestMessage && (
+              <p role={billRequestState === "error" ? "alert" : "status"} className={`mt-2 text-xs ${billRequestState === "error" ? "text-rose-200" : "text-emerald-200"}`}>
+                {billRequestMessage}
+              </p>
+            )}
           </div>
 
           {sessionData?.session?.billRequestedAt && !sessionData.bill && (
