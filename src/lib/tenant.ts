@@ -1,4 +1,12 @@
 import { getSession } from "./auth";
+import { db } from "./db";
+
+const restaurantActiveCache = new Map<string, { active: boolean; expiresAt: number }>();
+const RESTAURANT_ACTIVE_TTL_MS = 8_000;
+
+export function invalidateRestaurantActiveCache(restaurantId: string) {
+  restaurantActiveCache.delete(restaurantId);
+}
 
 /**
  * TENANT ISOLATION — read this before touching any /api/admin/* route.
@@ -22,6 +30,14 @@ export async function requireRestaurantUser() {
     throw new ForbiddenError("Not a restaurant user");
   }
   if (!session.restaurantId) throw new ForbiddenError("No restaurant on session");
+  const now = Date.now();
+  let cached = restaurantActiveCache.get(session.restaurantId);
+  if (!cached || cached.expiresAt <= now) {
+    const restaurant = await db.restaurant.findUnique({ where: { id: session.restaurantId }, select: { isActive: true } });
+    cached = { active: restaurant?.isActive === true, expiresAt: now + RESTAURANT_ACTIVE_TTL_MS };
+    restaurantActiveCache.set(session.restaurantId, cached);
+  }
+  if (!cached.active) throw new ForbiddenError("Restaurant account is inactive");
   return { userId: session.userId, role: session.role, restaurantId: session.restaurantId };
 }
 

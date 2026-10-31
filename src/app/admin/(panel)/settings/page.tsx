@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, Bell, Shield, Trash2, AlertTriangle, Key, Percent, Plus } from "lucide-react";
+import { Save, Bell, Shield, Trash2, AlertTriangle, Key, Percent, Plus, X } from "lucide-react";
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -66,6 +66,10 @@ export default function SettingsPage() {
   });
 
   const [accessDenied, setAccessDenied] = useState(false);
+  const [showDeactivateModal, setShowDeactivateModal] = useState(false);
+  const [deactivationName, setDeactivationName] = useState("");
+  const [deactivationError, setDeactivationError] = useState("");
+  const [deactivating, setDeactivating] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin/me").then(r => r.json()).then(d => {
@@ -97,6 +101,24 @@ export default function SettingsPage() {
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
+  }
+
+  async function deactivateAccount() {
+    setDeactivating(true);
+    setDeactivationError("");
+    try {
+      const response = await fetch("/api/admin/restaurant", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmationName: deactivationName.trim() }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Could not deactivate this account.");
+      window.location.assign("/admin/login?accountDeactivated=1");
+    } catch (error) {
+      setDeactivationError(error instanceof Error ? error.message : "Could not deactivate this account.");
+      setDeactivating(false);
+    }
   }
 
   const TABS = [
@@ -324,7 +346,7 @@ export default function SettingsPage() {
                 <AlertTriangle className="h-5 w-5 text-red-500" />
                 <h2 className="font-semibold text-red-600">Danger Zone</h2>
               </div>
-              <p className="text-sm text-gray-500 mb-5">These actions are permanent and cannot be undone.</p>
+              <p className="text-sm text-gray-500 mb-5">Review each action carefully before confirming it.</p>
               <div className="space-y-4">
                 <div className="flex items-center justify-between p-4 rounded-2xl border border-red-100 bg-red-50/50">
                   <div>
@@ -335,11 +357,11 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex items-center justify-between p-4 rounded-2xl border border-red-100 bg-red-50/50">
                   <div>
-                    <p className="text-sm font-semibold text-gray-900">Delete Restaurant Account</p>
-                    <p className="text-xs text-gray-400">Permanently delete this restaurant and all associated data.</p>
+                    <p className="text-sm font-semibold text-gray-900">Deactivate Restaurant Account</p>
+                    <p className="text-xs text-gray-400">Hide the restaurant from customers and block new logins. Existing records are retained and a Super Admin can reactivate it.</p>
                   </div>
-                  <button className="btn-primary bg-red-500 text-white text-sm px-4 py-2">
-                    <Trash2 className="h-4 w-4" /> Delete Account
+                  <button type="button" onClick={() => { setDeactivationName(""); setDeactivationError(""); setShowDeactivateModal(true); }} className="btn-primary bg-red-500 text-white text-sm px-4 py-2">
+                    <Trash2 className="h-4 w-4" /> Deactivate Account
                   </button>
                 </div>
               </div>
@@ -351,6 +373,29 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+      {showDeactivateModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !deactivating) setShowDeactivateModal(false); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="deactivate-title" className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600"><AlertTriangle className="h-5 w-5" /></span>
+                <div>
+                  <h2 id="deactivate-title" className="text-lg font-bold text-gray-900">Deactivate this restaurant?</h2>
+                  <p className="mt-1 text-sm text-gray-600">The customer menu will be disabled and you will be signed out. Order and billing history will be kept.</p>
+                </div>
+              </div>
+              <button type="button" aria-label="Close confirmation" disabled={deactivating} onClick={() => setShowDeactivateModal(false)} className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 disabled:opacity-50"><X className="h-5 w-5" /></button>
+            </div>
+            <label htmlFor="confirm-restaurant-name" className="mt-5 block text-sm font-semibold text-gray-800">Type <span className="select-all">{restName}</span> to confirm</label>
+            <input id="confirm-restaurant-name" autoFocus autoComplete="off" value={deactivationName} onChange={(event) => setDeactivationName(event.target.value)} className="input mt-2 w-full" placeholder={restName} />
+            {deactivationError && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{deactivationError}</p>}
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" disabled={deactivating} onClick={() => setShowDeactivateModal(false)} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+              <button type="button" disabled={deactivating || deactivationName.trim().toLocaleLowerCase() !== restName.trim().toLocaleLowerCase()} onClick={() => void deactivateAccount()} className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">{deactivating ? "Deactivating…" : "Confirm deactivation"}</button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
