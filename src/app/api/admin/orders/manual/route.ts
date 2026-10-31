@@ -2,7 +2,6 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { emitOrderEvent } from "@/lib/events";
-import { reserveOrderNumber } from "@/lib/orderNumber";
 import { getOrCreateCurrentTableSession } from "@/lib/tableSessions";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +51,6 @@ export async function POST(req: Request) {
       return s + item.priceCents * l.quantity;
     }, 0);
 
-    const orderNumber = await reserveOrderNumber(restaurantId);
     const order = await db.$transaction(async tx => {
       let tableSessionId: string | null = null;
       if (body.tableId) {
@@ -68,7 +66,6 @@ export async function POST(req: Request) {
           restaurantId,
           tableId:       body.tableId,
           tableSessionId,
-          orderNumber,
           customerName:  body.customerName,
           customerPhone: body.customerPhone,
           notes:         body.notes,

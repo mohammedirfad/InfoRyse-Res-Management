@@ -13,14 +13,17 @@ import {
 } from "@/components/CartContext";
 import { useLanguage } from "@/lib/i18n";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { getGuestTableSession, saveGuestTableSession } from "@/lib/guestTableSession";
+import { capitalizeInitials } from "@/lib/nameFormat";
 
 interface TableSessionData {
   table: { id: string; label: string; status: string };
   bill?: {
-    id?: string; shareToken?: string | null;
+    id?: string; tableSessionId?: string; shareToken?: string | null;
     billNumber: number; tableLabel: string; customerName: string | null;
     subtotalCents: number; discountCents: number; discountPercent: number;
     discountName: string | null; taxCents: number; taxPercent: number; taxName: string;
+    taxBreakdown?: Array<{ name: string; percent: number; amountCents: number }> | null;
     packingCents: number; totalCents: number; paymentMethod: string; paymentStatus: string;
     itemsJson: string; createdAt: string;
     restaurant: { name: string; contactPhone: string | null; contactEmail: string | null };
@@ -66,11 +69,11 @@ function downloadBill(bill: NonNullable<TableSessionData["bill"]>) {
     table{width:100%;border-collapse:collapse}th,td{padding:10px 4px;border-bottom:1px solid #e5e7eb;text-align:right}th:first-child,td:first-child{text-align:left}tfoot td{border:0;padding:6px 4px}.total td{border-top:2px solid #17251d;font-size:18px;font-weight:bold;padding-top:12px}
     .discount{color:#047857}.foot{text-align:center;color:#6b7280;border-top:1px dashed #9ca3af;margin-top:20px;padding-top:14px;font-size:12px}
     @media print{body{margin:0 auto;border:0;padding:18px}}
-  </style></head><body><header><h1>${esc(bill.restaurant.name)}</h1>${bill.restaurant.contactPhone ? `<p>${esc(bill.restaurant.contactPhone)}</p>` : ""}${bill.restaurant.contactEmail ? `<p>${esc(bill.restaurant.contactEmail)}</p>` : ""}<p>TABLE ${esc(bill.tableLabel)}</p></header>
-    <div class="meta"><span><b>Bill #${bill.billNumber}</b><br>${new Date(bill.createdAt).toLocaleString("en-IN")}</span><span>${esc(bill.paymentStatus)} · ${esc(bill.paymentMethod)}</span></div>
+  </style></head><body><header><h1>${esc(capitalizeInitials(bill.restaurant.name))}</h1>${bill.restaurant.contactPhone ? `<p>${esc(bill.restaurant.contactPhone)}</p>` : ""}${bill.restaurant.contactEmail ? `<p>${esc(bill.restaurant.contactEmail)}</p>` : ""}<p>TABLE ${esc(bill.tableLabel)}</p></header>
+    <div class="meta"><span><b>Bill #${bill.billNumber}</b><br>${new Date(bill.createdAt).toLocaleString("en-IN")}${bill.customerName ? `<br>Customer: ${esc(capitalizeInitials(bill.customerName))}` : ""}</span><span>${esc(bill.paymentStatus)} · ${esc(bill.paymentMethod)}</span></div>
     <table><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${items.map((item) => `<tr><td>${esc(item.name)}</td><td>${item.quantity}</td><td>${money(item.unitPrice)}</td><td>${money(item.subtotal)}</td></tr>`).join("")}</tbody><tfoot>
     <tr><td colspan="3">Subtotal</td><td>${money(bill.subtotalCents)}</td></tr>${bill.discountCents > 0 ? `<tr class="discount"><td colspan="3">${esc(bill.discountName || "Discount")} (${bill.discountPercent}%)</td><td>−${money(bill.discountCents)}</td></tr>` : ""}
-    <tr><td colspan="3">${esc(bill.taxName)} (${bill.taxPercent}%)</td><td>${money(bill.taxCents)}</td></tr>${bill.packingCents ? `<tr><td colspan="3">Packing / service</td><td>${money(bill.packingCents)}</td></tr>` : ""}<tr class="total"><td colspan="3">Grand total</td><td>${money(bill.totalCents)}</td></tr></tfoot></table><div class="foot">Thank you for dining with ${esc(bill.restaurant.name)}.</div>
+    ${(bill.taxBreakdown?.length ? bill.taxBreakdown : [{ name: bill.taxName, percent: bill.taxPercent, amountCents: bill.taxCents }]).filter(line => line.amountCents > 0).map(line => `<tr><td colspan="3">${esc(line.name)} (${line.percent}%)</td><td>${money(line.amountCents)}</td></tr>`).join("")}${bill.packingCents ? `<tr><td colspan="3">Packing / service</td><td>${money(bill.packingCents)}</td></tr>` : ""}<tr class="total"><td colspan="3">Grand total</td><td>${money(bill.totalCents)}</td></tr></tfoot></table><div class="foot">Thank you for dining with ${esc(bill.restaurant.name)}.</div>
     <script>window.onload=()=>window.print()</script></body></html>`);
   win.document.close();
 }
@@ -105,7 +108,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
 
   useEffect(() => {
     try {
-      const saved = sessionStorage.getItem(billStorageKey);
+      const saved = localStorage.getItem(billStorageKey);
       if (saved) setLastDigitalBill(JSON.parse(saved));
     } catch { /* Ignore stale or malformed browser state. */ }
   }, [billStorageKey]);
@@ -114,8 +117,10 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
   const refreshTableOrders = useCallback(async () => {
     setIsFetchingSession(true);
     try {
+      const savedSessionId = getGuestTableSession(params.qrToken);
+      const sessionQuery = savedSessionId ? `&sessionId=${encodeURIComponent(savedSessionId)}` : "";
       const res = await fetch(
-        `/api/public/table-orders?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}`,
+        `/api/public/table-orders?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}${sessionQuery}`,
         { cache: "no-store" }
       );
       if (res.ok) {
@@ -123,16 +128,17 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
         setSessionData(data);
 
         if (data.session?.id) {
+          saveGuestTableSession(params.qrToken, data.session.id);
           // A new table session invalidates the previous guest's bill link on this device.
-          const previous = sessionStorage.getItem(billStorageKey);
+          const previous = localStorage.getItem(billStorageKey);
           const parsed = previous ? JSON.parse(previous) as { token?: string; sessionId?: string } : null;
           if (parsed?.sessionId && parsed.sessionId !== data.session.id) {
-            sessionStorage.removeItem(billStorageKey);
+            localStorage.removeItem(billStorageKey);
             setLastDigitalBill(null);
           }
           if (data.bill?.shareToken) {
-            const savedBill = { token: data.bill.shareToken, sessionId: data.session.id };
-            sessionStorage.setItem(billStorageKey, JSON.stringify(savedBill));
+            const savedBill = { token: data.bill.shareToken, sessionId: data.bill.tableSessionId || data.session.id };
+            localStorage.setItem(billStorageKey, JSON.stringify(savedBill));
             setLastDigitalBill(savedBill);
           }
         }
@@ -160,9 +166,9 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
           clearStoredOrders(params.qrToken);
           setPastOrders([]);
           syncSession(null, data.table.status);
-          const saved = sessionStorage.getItem(billStorageKey);
+          const saved = localStorage.getItem(billStorageKey);
           if (saved) {
-            try { setLastDigitalBill(JSON.parse(saved)); } catch { sessionStorage.removeItem(billStorageKey); }
+            try { setLastDigitalBill(JSON.parse(saved)); } catch { localStorage.removeItem(billStorageKey); }
           }
         }
       }
@@ -197,7 +203,8 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
         const sessionId = event?.data?.sessionId;
         if (event?.type === "bill_updated" && shareToken && sessionId) {
           const billLink = { token: shareToken as string, sessionId: sessionId as string };
-          sessionStorage.setItem(billStorageKey, JSON.stringify(billLink));
+          localStorage.setItem(billStorageKey, JSON.stringify(billLink));
+          saveGuestTableSession(params.qrToken, sessionId as string);
           setLastDigitalBill(billLink);
         }
       } catch { /* The session snapshot will still refresh when possible. */ }
@@ -521,7 +528,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                 <div className="space-y-2 border-t border-dashed border-gray-200 pt-3 text-sm">
                   <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{formatRupees(sessionData.bill.subtotalCents)}</span></div>
                   {sessionData.bill.discountCents > 0 && <div className="flex justify-between font-semibold text-emerald-700"><span>{sessionData.bill.discountName || "Discount"} ({sessionData.bill.discountPercent}%)</span><span>−{formatRupees(sessionData.bill.discountCents)}</span></div>}
-                  <div className="flex justify-between text-gray-600"><span>{sessionData.bill.taxName} ({sessionData.bill.taxPercent}%)</span><span>{formatRupees(sessionData.bill.taxCents)}</span></div>
+                  {(sessionData.bill.taxBreakdown?.length ? sessionData.bill.taxBreakdown : [{ name: sessionData.bill.taxName, percent: sessionData.bill.taxPercent, amountCents: sessionData.bill.taxCents }]).filter((line) => line.amountCents > 0).map((line, index) => <div key={`${line.name}-${index}`} className="flex justify-between text-gray-600"><span>{line.name} ({line.percent}%)</span><span>{formatRupees(line.amountCents)}</span></div>)}
                   {sessionData.bill.packingCents > 0 && <div className="flex justify-between text-gray-600"><span>Packing / service</span><span>{formatRupees(sessionData.bill.packingCents)}</span></div>}
                   <div className="flex justify-between border-t border-gray-200 pt-3 text-base font-black text-gray-950"><span>Grand total</span><span>{formatRupees(sessionData.bill.totalCents)}</span></div>
                   <p className="text-right text-xs text-gray-400">{sessionData.bill.paymentStatus} · {sessionData.bill.paymentMethod}</p>

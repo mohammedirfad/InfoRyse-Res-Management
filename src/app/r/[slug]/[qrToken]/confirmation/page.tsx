@@ -80,7 +80,9 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
         };
         if (!fallbackTimer) {
           pollStatus();
-          fallbackTimer = setInterval(pollStatus, 5000);
+          // Keep the fallback useful when realtime is down without polling
+          // every few seconds from every guest device.
+          fallbackTimer = setInterval(pollStatus, 15000);
         }
       };
       source.addEventListener("realtime_unavailable", () => source?.onerror?.(new Event("error")));

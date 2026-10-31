@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { getCurrentTableSession } from "@/lib/tableSessions";
+import { calculateTaxBreakdown, getTaxRates, taxSummary } from "@/lib/taxes";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ export async function GET(req: Request) {
     const url     = new URL(req.url);
     const slug    = url.searchParams.get("slug");
     const qrToken = url.searchParams.get("qrToken");
+    const requestedSessionId = url.searchParams.get("sessionId");
 
     if (!slug || !qrToken) {
       return Response.json({ error: "Missing required parameters" }, { status: 400 });
@@ -36,6 +38,7 @@ export async function GET(req: Request) {
             name: true,
             taxPercent: true,
             taxName: true,
+            additionalTaxes: true,
             discountActive: true,
             discountPercent: true,
             discountName: true,
@@ -50,7 +53,9 @@ export async function GET(req: Request) {
     const publicTable = { id: table.id, label: table.label, status: table.status };
 
     // Find the currently open TableSession for this table
-    const currentSession = await getCurrentTableSession(db, table.id, restaurant.id);
+    const currentSession = requestedSessionId
+      ? await db.tableSession.findFirst({ where: { id: requestedSessionId, tableId: table.id, restaurantId: restaurant.id } })
+      : await getCurrentTableSession(db, table.id, restaurant.id);
     let session = currentSession ? await db.tableSession.findUnique({
       where: { id: currentSession.id },
       select: {
@@ -83,7 +88,7 @@ export async function GET(req: Request) {
     }) : null;
 
     // Resilient fallback: If no open session exists yet, check if there are recent unlinked active orders for this table
-    if (!session) {
+    if (!session && !requestedSessionId) {
       const recentOrders = await db.order.findMany({
         where: {
           tableId: table.id,
@@ -120,6 +125,7 @@ export async function GET(req: Request) {
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
+        tableSessionId: true,
         shareToken: true,
         billNumber: true,
         tableLabel: true,
@@ -131,6 +137,7 @@ export async function GET(req: Request) {
         taxCents: true,
         taxPercent: true,
         taxName: true,
+        taxBreakdown: true,
         packingCents: true,
         totalCents: true,
         paymentMethod: true,
@@ -170,8 +177,8 @@ export async function GET(req: Request) {
     const discountPercent = hasDiscount ? (restaurant.discountPercent ?? 0) : 0;
     const discountCents = hasDiscount ? Math.round(subtotalCents * (discountPercent / 100)) : 0;
     const discountedSubtotal = Math.max(0, subtotalCents - discountCents);
-    const taxRate = (restaurant.taxPercent ?? 5) / 100;
-    const taxCents = Math.round(discountedSubtotal * taxRate);
+    const taxBreakdown = calculateTaxBreakdown(discountedSubtotal, getTaxRates(restaurant.taxName, restaurant.taxPercent, restaurant.additionalTaxes));
+    const { taxCents, taxName, taxPercent } = taxSummary(taxBreakdown);
     const totalCents = discountedSubtotal > 0 ? (discountedSubtotal + taxCents + PACKING_CENTS) : 0;
 
     return new Response(
@@ -202,6 +209,9 @@ export async function GET(req: Request) {
           discountPercent,
           discountName: hasDiscount ? (restaurant.discountName ?? "Special Offer") : null,
           taxCents,
+          taxName,
+          taxPercent,
+          taxBreakdown,
           packingCents: subtotalCents > 0 ? PACKING_CENTS : 0,
           totalCents,
         },

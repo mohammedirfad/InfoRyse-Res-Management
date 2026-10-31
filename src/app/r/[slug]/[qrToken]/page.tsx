@@ -9,6 +9,7 @@ import { useCart, formatRupees, type MenuItem } from "@/components/CartContext";
 import { getDishImageUrl } from "@/lib/dishImages";
 import { useLanguage } from "@/lib/i18n";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { clearGuestTableSession, saveGuestTableSession } from "@/lib/guestTableSession";
 
 /* ── types ──────────────────────────────────────────────────────────────────── */
 type Category  = { id: string; name: string; menuItems: MenuItem[] };
@@ -451,7 +452,9 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
         const j: MenuData = JSON.parse(cached);
         hasCachedMenu = true;
         setData(j);
-        setActiveCat(j.categories[0]?.id ?? null);
+        setActiveCat((current) => j.categories.some((category) => category.id === current)
+          ? current
+          : j.categories[0]?.id ?? null);
         syncSession(j.table.activeSessionId, j.table.status);
         // still refresh in background
       } catch { /* ignore */ }
@@ -470,7 +473,11 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
             if (cancelled) return;
             const menu = json as MenuData;
             setData(menu);
-            setActiveCat(menu.categories[0]?.id ?? null);
+            setActiveCat((current) => menu.categories.some((category) => category.id === current)
+              ? current
+              : menu.categories[0]?.id ?? null);
+            if (menu.table.activeSessionId) saveGuestTableSession(params.qrToken, menu.table.activeSessionId);
+            else clearGuestTableSession(params.qrToken);
             syncSession(menu.table.activeSessionId, menu.table.status);
             sessionStorage.setItem(cacheKey, JSON.stringify(menu));
             return;

@@ -4,6 +4,7 @@ import { getCurrentTableSession } from "@/lib/tableSessions";
 import { randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { getPublicAppUrl } from "@/lib/appUrl";
+import { calculateTaxBreakdown, getTaxRates, taxSummary } from "@/lib/taxes";
 
 export const dynamic = "force-dynamic";
 
@@ -131,7 +132,7 @@ export async function POST(req: Request) {
           include: { orders: { where: { status: { not: "CANCELLED" } }, include: { items: true }, orderBy: { createdAt: "asc" } } },
         }),
         tx.table.findFirst({ where: { id: tableId, restaurantId }, select: { label: true } }),
-          tx.restaurant.findUnique({ where: { id: restaurantId }, select: { taxName: true, taxPercent: true, discountActive: true, discountPercent: true, discountName: true } }),
+        tx.restaurant.findUnique({ where: { id: restaurantId }, select: { taxName: true, taxPercent: true, additionalTaxes: true, discountActive: true, discountPercent: true, discountName: true } }),
       ]);
       if (!activeSession || !table || !restaurant || activeSession.orders.length === 0) {
         return { error: "There are no active orders to settle for this table." } as const;
@@ -154,8 +155,8 @@ export async function POST(req: Request) {
       const discountPercent = restaurant.discountActive ? restaurant.discountPercent ?? 0 : 0;
       const discountCents = Math.round(subtotalCents * discountPercent / 100);
       const discountedSubtotal = Math.max(0, subtotalCents - discountCents);
-      const taxPercent = restaurant.taxPercent ?? 5;
-      const taxCents = Math.round(discountedSubtotal * taxPercent / 100);
+      const taxBreakdown = calculateTaxBreakdown(discountedSubtotal, getTaxRates(restaurant.taxName, restaurant.taxPercent, restaurant.additionalTaxes));
+      const { taxPercent, taxName, taxCents } = taxSummary(taxBreakdown);
       const packingCents = subtotalCents > 0 ? 2000 : 0;
       const totalCents = discountedSubtotal + taxCents + packingCents;
 
@@ -185,7 +186,8 @@ export async function POST(req: Request) {
         discountName: discountPercent > 0 ? restaurant.discountName ?? "Special Offer" : null,
         taxCents,
         taxPercent,
-        taxName: restaurant.taxName ?? "GST",
+        taxName,
+        taxBreakdown,
         packingCents,
         totalCents,
         paymentMethod: (paymentMethod || "CASH").toUpperCase(),

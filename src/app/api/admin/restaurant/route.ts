@@ -15,6 +15,7 @@ const PatchSchema = z.object({
   openNow:         z.boolean().optional(),
   taxName:         z.string().max(30).optional(),
   taxPercent:      z.number().min(0).max(30).optional(),
+  additionalTaxes: z.array(z.object({ name: z.string().trim().min(1).max(30), percent: z.number().min(0).max(30) })).max(5).optional(),
   discountActive:  z.boolean().optional(),
   discountPercent: z.number().min(0).max(100).optional(),
   discountName:    z.string().max(100).optional(),

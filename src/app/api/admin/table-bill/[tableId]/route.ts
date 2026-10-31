@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { getCurrentTableSession } from "@/lib/tableSessions";
+import { calculateTaxBreakdown, getTaxRates, taxSummary } from "@/lib/taxes";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,7 @@ export async function GET(
           name: true,
           taxName: true,
           taxPercent: true,
+          additionalTaxes: true,
           discountActive: true,
           discountPercent: true,
           discountName: true,
@@ -159,9 +161,8 @@ export async function GET(
     const discountCents = hasDiscount ? Math.round(subtotalCents * (discountPercent / 100)) : 0;
     const discountedSubtotal = Math.max(0, subtotalCents - discountCents);
 
-    const taxPercent = restaurant?.taxPercent ?? 5;
-    const taxName = restaurant?.taxName ?? "GST";
-    const taxCents = Math.round(discountedSubtotal * (taxPercent / 100));
+    const taxBreakdown = calculateTaxBreakdown(discountedSubtotal, getTaxRates(restaurant?.taxName, restaurant?.taxPercent, restaurant?.additionalTaxes));
+    const { taxPercent, taxName, taxCents } = taxSummary(taxBreakdown);
     const packingCents = subtotalCents > 0 ? PACKING_CENTS : 0;
     const totalCents = discountedSubtotal + taxCents + packingCents;
 
@@ -194,6 +195,7 @@ export async function GET(
           taxPercent,
           taxName,
           taxCents,
+          taxBreakdown,
           packingCents,
           totalCents,
         },

@@ -47,6 +47,7 @@ model Restaurant {
   longitude  Float?
   taxName    String?  @default("GST")
   taxPercent Float?   @default(5.0)
+  additionalTaxes Json?
   logoUrl          String?
   discountActive   Boolean  @default(false)
   discountPercent  Float?   @default(0.0)
@@ -211,7 +212,7 @@ model Order {
   table          Table?      @relation(fields: [tableId], references: [id])
   tableSessionId String?
   tableSession   TableSession? @relation(fields: [tableSessionId], references: [id])
-  orderNumber    Int
+  orderNumber    Int      @default(dbgenerated("nextval('\"GlobalOrderNumberSequence\"'::regclass)"))
   customerName   String?
   customerPhone  String?
   status         OrderStatus @default(NEW)
@@ -278,6 +279,7 @@ model Bill {
   taxCents        Int         @default(0)
   taxPercent      Float       @default(5.0)
   taxName         String      @default("GST")
+  taxBreakdown    Json?
   packingCents    Int         @default(0)
   totalCents      Int
   paymentMethod   String      @default("CASH") // CASH, UPI, CARD, OTHER

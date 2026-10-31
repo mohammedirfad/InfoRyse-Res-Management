@@ -2,8 +2,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { checkOrderRateLimit } from "@/lib/rateLimit";
 import { emitOrderEvent } from "@/lib/events";
-import { reserveOrderNumber } from "@/lib/orderNumber";
 import { getOrCreateCurrentTableSession } from "@/lib/tableSessions";
+import { capitalizeInitials } from "@/lib/nameFormat";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +33,10 @@ const BodySchema = z.object({
  * 6. Transaction wrapping
  */
 export async function POST(req: Request) {
+  const requestStartedAt = performance.now();
+  let tableLookupMs = 0;
+  let itemValidationMs = 0;
+  let writeTransactionMs = 0;
   try {
     const body = BodySchema.parse(await req.json());
 
@@ -51,6 +55,7 @@ export async function POST(req: Request) {
 
     // 1) Resolve restaurant + table from the QR token — never trust a
     //    restaurantId/tableId sent directly by the client.
+    const tableLookupStartedAt = performance.now();
     const table = await db.table.findFirst({
       where: { qrToken: body.qrToken, deletedAt: null, restaurant: { slug: body.slug } },
       select: {
@@ -68,6 +73,7 @@ export async function POST(req: Request) {
         },
       },
     });
+    tableLookupMs = performance.now() - tableLookupStartedAt;
     if (!table) return Response.json({ error: "Invalid QR code" }, { status: 404 });
     const restaurant = table.restaurant;
     if (!restaurant.isActive) {
@@ -97,6 +103,7 @@ export async function POST(req: Request) {
     // 5) Idempotency — if this exact submission already landed, return the
     //    existing order instead of creating a duplicate (covers double-taps
     //    and network retries).
+    const validationStartedAt = performance.now();
     const [existing, dbItems] = await Promise.all([
       db.order.findUnique({ where: { idempotencyKey: body.idempotencyKey } }),
       db.menuItem.findMany({
@@ -126,11 +133,13 @@ export async function POST(req: Request) {
       const dbItem = dbItemById.get(line.menuItemId)!;
       return sum + dbItem.priceCents * line.quantity;
     }, 0);
+    itemValidationMs = performance.now() - validationStartedAt;
 
-    // 7) Reserve a tenant-local order number atomically across Vercel instances.
-    const orderNumber = await reserveOrderNumber(restaurant.id);
+    // 7) The database sequence supplies orderNumber as part of the INSERT,
+    // avoiding a separate round trip and remaining safe across Vercel instances.
     let session: { order: any; tableSessionId: string };
     try {
+      const writeStartedAt = performance.now();
       session = await db.$transaction(async (tx: any) => {
           // Only serialize first-session creation for this table. Other tables
           // keep accepting orders concurrently.
@@ -145,8 +154,7 @@ export async function POST(req: Request) {
               restaurantId:   restaurant.id,
               tableId:        table.id,
               tableSessionId: tableSession.id,
-              orderNumber,
-              customerName:   body.customerName,
+              customerName:   body.customerName ? capitalizeInitials(body.customerName) : undefined,
               customerPhone:  body.customerPhone,
               customerEmail:  (body as any).customerEmail,
               notes:          body.notes,
@@ -183,6 +191,7 @@ export async function POST(req: Request) {
 
           return { order: created, tableSessionId: tableSession.id };
       });
+      writeTransactionMs = performance.now() - writeStartedAt;
     } catch (err: any) {
       // Concurrent retries with the same idempotency key can race past the
       // initial lookup. Return the already-created order instead of a 500.
@@ -207,7 +216,13 @@ export async function POST(req: Request) {
       },
     });
 
-    return Response.json({ order: session.order, tableSessionId: session.tableSessionId }, { status: 201 });
+    const totalMs = performance.now() - requestStartedAt;
+    const serverTiming = `qr_table;dur=${tableLookupMs.toFixed(1)}, item_validation;dur=${itemValidationMs.toFixed(1)}, order_write;dur=${writeTransactionMs.toFixed(1)}, total;dur=${totalMs.toFixed(1)}`;
+    console.info("[order:create:timing]", serverTiming);
+    return Response.json(
+      { order: session.order, tableSessionId: session.tableSessionId },
+      { status: 201, headers: { "Server-Timing": serverTiming } }
+    );
   } catch (err) {
     console.error("[order:create]", err);
     const msg = String(err);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, Bell, Shield, Trash2, AlertTriangle, Key, Percent } from "lucide-react";
+import { Save, Bell, Shield, Trash2, AlertTriangle, Key, Percent, Plus } from "lucide-react";
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -53,6 +53,7 @@ export default function SettingsPage() {
   const [openNow, setOpenNow]         = useState(true);
   const [taxName, setTaxName]         = useState("GST");
   const [taxPercent, setTaxPercent]   = useState("5");
+  const [additionalTaxes, setAdditionalTaxes] = useState<Array<{ name: string; percent: number }>>([]);
   const [upiPaymentId, setUpiPaymentId] = useState("");
 
   const [sessionTimeout, setSessionTimeout] = useState("30");
@@ -77,6 +78,7 @@ export default function SettingsPage() {
         setOpenNow(d.restaurant.openNow ?? true);
         setTaxName(d.restaurant.taxName ?? "GST");
         setTaxPercent(String(d.restaurant.taxPercent ?? 5));
+        setAdditionalTaxes(Array.isArray(d.restaurant.additionalTaxes) ? d.restaurant.additionalTaxes : []);
         setUpiPaymentId(d.restaurant.upiPaymentId ?? "");
       }
     });
@@ -89,7 +91,7 @@ export default function SettingsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: restName, openNow,
-        taxName, taxPercent: Number(taxPercent), upiPaymentId,
+        taxName, taxPercent: Number(taxPercent), additionalTaxes, upiPaymentId,
       }),
     });
     setSaving(false);
@@ -184,26 +186,33 @@ export default function SettingsPage() {
                 <Percent className="h-5 w-5 text-[#132A1E]" />
                 <h2 className="font-semibold text-gray-900">Tax & Billing Configuration</h2>
               </div>
-              <p className="text-sm text-gray-500">
-                Set the tax name and percentage that will appear on customer bills and printed receipts.
-              </p>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-gray-600 mb-1 block">Tax Name</label>
-                  <input className="input" placeholder="e.g. GST, VAT, Service Tax" value={taxName} onChange={e => setTaxName(e.target.value)} />
-                  <p className="text-xs text-gray-400 mt-1">This name appears on bills, e.g. "GST (5%): ₹37"</p>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-600 mb-1 block">Tax Percentage (%)</label>
-                  <div className="relative">
-                    <input className="input pr-8" type="number" min="0" max="30" step="0.5"
-                      value={taxPercent} onChange={e => setTaxPercent(e.target.value)} />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">%</span>
+              <p className="text-sm text-gray-500">Add the tax rates your restaurant applies. Each rate is calculated on the discounted subtotal and shown as its own line on bills.</p>
+              <div className="rounded-2xl border border-black/5 p-4 space-y-3">
+                <div className="grid grid-cols-[1fr_130px] gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Primary tax</label>
+                    <input className="input" placeholder="GST" value={taxName} onChange={e => setTaxName(e.target.value)} />
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">Enter 0 to disable tax on bills</p>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Rate (%)</label>
+                    <input className="input" type="number" min="0" max="30" step="0.01" value={taxPercent} onChange={e => setTaxPercent(e.target.value)} />
+                  </div>
                 </div>
+                {additionalTaxes.map((tax, index) => (
+                  <div key={index} className="grid grid-cols-[1fr_130px_40px] items-end gap-3 border-t border-black/5 pt-3">
+                    <div>
+                      <label className="text-xs font-medium text-gray-600 mb-1 block">Additional tax name</label>
+                      <input className="input" placeholder="Service tax" value={tax.name} onChange={e => setAdditionalTaxes(current => current.map((item, i) => i === index ? { ...item, name: e.target.value } : item))} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-600 mb-1 block">Rate (%)</label>
+                      <input className="input" type="number" min="0" max="30" step="0.01" value={tax.percent} onChange={e => setAdditionalTaxes(current => current.map((item, i) => i === index ? { ...item, percent: Number(e.target.value) } : item))} />
+                    </div>
+                    <button type="button" aria-label={`Remove ${tax.name || "tax"}`} onClick={() => setAdditionalTaxes(current => current.filter((_, i) => i !== index))} className="mb-1 flex h-10 items-center justify-center rounded-xl text-rose-600 hover:bg-rose-50"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => setAdditionalTaxes(current => [...current, { name: "", percent: 0 }])} className="inline-flex items-center gap-2 rounded-xl border border-emerald-700/20 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-50"><Plus className="h-4 w-4" /> Add another tax</button>
               </div>
-
               <div>
                 <label className="text-xs font-medium text-gray-600 mb-1 block">Optional UPI ID for bill payment QR</label>
                 <input className="input" value={upiPaymentId} onChange={(e) => setUpiPaymentId(e.target.value)} placeholder="restaurant@upi" />
@@ -214,14 +223,15 @@ export default function SettingsPage() {
               <div className="bg-gray-50 rounded-2xl p-4 border border-black/5">
                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Bill Preview</p>
                 <div className="space-y-1.5 text-sm font-mono">
-                  <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>₹500</span></div>
-                  <div className="flex justify-between text-gray-600">
-                    <span>{taxName || "Tax"} ({taxPercent || 0}%)</span>
-                    <span>₹{((500 * Number(taxPercent || 0)) / 100).toFixed(0)}</span>
-                  </div>
+                  {[{ name: taxName || "GST", percent: Number(taxPercent || 0) }, ...additionalTaxes].filter((tax) => tax.name.trim() && tax.percent > 0).map((tax, index) => (
+                    <div key={index} className="flex justify-between text-gray-600">
+                      <span>{tax.name} ({tax.percent}%)</span>
+                      <span>Rs {((500 * tax.percent) / 100).toFixed(2)}</span>
+                    </div>
+                  ))}
                   <div className="flex justify-between font-bold text-gray-900 pt-1.5 border-t border-black/5">
                     <span>Total</span>
-                    <span>₹{(500 + (500 * Number(taxPercent || 0)) / 100).toFixed(0)}</span>
+                    <span>Rs {(500 + ([{ name: taxName, percent: Number(taxPercent || 0) }, ...additionalTaxes].reduce((sum, tax) => sum + (tax.name.trim() ? tax.percent : 0), 0) * 5)).toFixed(2)}</span>
                   </div>
                 </div>
               </div>

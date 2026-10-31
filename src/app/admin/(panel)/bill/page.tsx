@@ -24,8 +24,10 @@ import {
 } from "lucide-react";
 import { formatRupees, formatTime, formatDate } from "@/lib/utils";
 import QRCode from "qrcode";
+import { capitalizeInitials } from "@/lib/nameFormat";
 
 type AggregatedItem = { name: string; unitPrice: number; quantity: number; subtotal: number };
+type TaxLine = { name: string; percent: number; amountCents: number };
 type OrderSummary = {
   id: string;
   orderNumber: number;
@@ -55,6 +57,7 @@ type Session = {
   taxPercent?: number;
   taxName?: string;
   taxCents?: number;
+  taxBreakdown?: TaxLine[];
   packingCents?: number;
   totalCents?: number;
 };
@@ -83,6 +86,7 @@ type StoredBill = {
   taxCents: number;
   taxPercent: number;
   taxName: string;
+  taxBreakdown?: TaxLine[] | null;
   packingCents: number;
   totalCents: number;
   paymentMethod: string;
@@ -126,6 +130,7 @@ export default function BillPage() {
 
   // Payment Settlement Modal State
   const [settlingPayment, setSettlingPayment] = useState(false);
+  const [billModalMode, setBillModalMode] = useState<"prepare" | "settle">("prepare");
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<"CASH" | "UPI" | "CARD" | "OTHER">("CASH");
   const [customerNameInput, setCustomerNameInput]         = useState("");
   const [customerPhoneInput, setCustomerPhoneInput]       = useState("");
@@ -275,9 +280,10 @@ export default function BillPage() {
     };
   }, [fetchTablesAndRestaurant, loadBill]);
 
-  // Trigger Settle Payment modal
-  function openPaymentModal() {
+  // Prepare and share a customer bill without marking the session paid or closing the table.
+  function openPrepareBillModal() {
     if (!session || !selectedTable) return;
+    setBillModalMode("prepare");
     setBillSubmitError("");
     const firstOrderCustomer = session.orders.find((o) => o.customerName)?.customerName ?? "";
     const firstOrderPhone = session.billCustomerPhone ?? session.orders.find((o) => o.customerPhone)?.customerPhone ?? "";
@@ -287,6 +293,17 @@ export default function BillPage() {
     setCustomerEmailInput(firstOrderEmail);
     setPrepareStatus("");
     setDigitalBillUrl("");
+    setSelectedPaymentMethod("CASH");
+    setSettlingPayment(true);
+  }
+
+  function openPaymentModal() {
+    if (!session || !selectedTable) return;
+    setBillModalMode("settle");
+    setBillSubmitError("");
+    setCustomerNameInput(session.orders.find((order) => order.customerName)?.customerName ?? "");
+    setCustomerPhoneInput(session.billCustomerPhone ?? session.orders.find((order) => order.customerPhone)?.customerPhone ?? "");
+    setCustomerEmailInput(session.billCustomerEmail ?? session.orders.find((order) => order.customerEmail)?.customerEmail ?? "");
     setSelectedPaymentMethod("CASH");
     setSettlingPayment(true);
   }
@@ -397,11 +414,17 @@ export default function BillPage() {
 
     const win = window.open("", "_blank", "width=400,height=700");
     if (!win) return;
+    const esc = (value: unknown) => String(value ?? "").replace(/[&<>\"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char]!));
+    const customerName = capitalizeInitials(session.orders.find((order) => order.customerName)?.customerName);
     let billQr = "";
     if (billToken) {
       try { billQr = await QRCode.toDataURL(`${window.location.origin}/bill/${encodeURIComponent(billToken)}`, { width: 160, margin: 1 }); }
       catch { /* Paper receipt still prints if QR generation fails. */ }
     }
+    const taxRows = (session.taxBreakdown?.length ? session.taxBreakdown : [{ name: session.taxName || taxName, percent: session.taxPercent ?? taxPercent, amountCents: tax }])
+      .filter((line) => line.amountCents > 0)
+      .map((line) => `<div class="r"><span>${esc(line.name)} (${line.percent}%):</span><span>₹${(line.amountCents / 100).toFixed(2)}</span></div>`)
+      .join("");
     win.document.write(`<!DOCTYPE html><html><head>
       <title>Official Bill — Table ${selectedTable.label}</title>
       <style>
@@ -416,22 +439,23 @@ export default function BillPage() {
         .qr { width:96px; height:96px; display:block; margin:8px auto 4px; }
         .disc { color:#0a6b36; font-weight:bold; }
       </style></head><body>
-      <h1>${restaurantName || "Restaurant"}</h1>
+      <h1>${esc(capitalizeInitials(restaurantName || "Restaurant"))}</h1>
       <p class="c" style="font-size:11px;color:#666">Fine Dining & Authentic Taste</p>
       <div class="d"></div>
       ${billNumOverride ? `<div class="r"><b>BILL #${billNumOverride}</b><span>${selectedPaymentMethod} · PAID</span></div>` : ""}
-      <div class="r"><b>Table: ${selectedTable.label}</b><span>${new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</span></div>
+      <div class="r"><b>Table: ${esc(selectedTable.label)}</b><span>${new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</span></div>
+      ${customerName ? `<div class="r"><span>Customer:</span><span>${esc(customerName)}</span></div>` : ""}
       <div class="r"><span>Date:</span><span>${new Date().toLocaleDateString("en-IN")}</span></div>
       <div class="r"><span>Orders in Tab:</span><span>${session.orderCount}</span></div>
       <div class="d"></div>
       <b>Ordered Items:</b>
       ${session.aggregatedItems.map((i) => `
-        <div class="r"><span>${i.name} ×${i.quantity}</span><span>₹${(i.subtotal/100).toFixed(0)}</span></div>
+        <div class="r"><span>${esc(i.name)} ×${i.quantity}</span><span>₹${(i.subtotal/100).toFixed(0)}</span></div>
       `).join("")}
       <div class="d"></div>
       <div class="r"><span>Subtotal:</span><span>₹${(subtotal/100).toFixed(0)}</span></div>
       ${discount > 0 ? `<div class="r disc"><span>Discount (${session.discountName || "Offer"} ${session.discountPercent}%):</span><span>−₹${(discount/100).toFixed(0)}</span></div>` : ""}
-      <div class="r"><span>${session.taxName || taxName} (${session.taxPercent ?? taxPercent}%):</span><span>₹${(tax/100).toFixed(0)}</span></div>
+      ${taxRows}
       <div class="r"><span>Packing & Service:</span><span>₹${(packing/100).toFixed(0)}</span></div>
       <div class="t"><span>FINAL TOTAL:</span><span>₹${(total/100).toFixed(0)}</span></div>
       <div class="f"><div class="d"></div>${billQr ? `<img class="qr" src="${billQr}" alt="Digital bill QR"/><p>Scan to open and save your digital bill</p>` : ""}<p style="margin-top:4px">Thank you for dining with us!</p><p style="margin-top:4px">Powered by InfoRyse</p></div>
@@ -449,6 +473,11 @@ export default function BillPage() {
 
     const win = window.open("", "_blank", "width=400,height=700");
     if (!win) return;
+    const esc = (value: unknown) => String(value ?? "").replace(/[&<>\"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char]!));
+    const taxRows = (b.taxBreakdown?.length ? b.taxBreakdown : [{ name: b.taxName, percent: b.taxPercent, amountCents: b.taxCents }])
+      .filter((line) => line.amountCents > 0)
+      .map((line) => `<div class="r"><span>${esc(line.name)} (${line.percent}%):</span><span>₹${(line.amountCents / 100).toFixed(2)}</span></div>`)
+      .join("");
     win.document.write(`<!DOCTYPE html><html><head>
       <title>Official Bill #${b.billNumber} — Table ${b.tableLabel}</title>
       <style>
@@ -462,22 +491,22 @@ export default function BillPage() {
         .f  { text-align:center; margin-top:14px; font-size:11px; color:#555; }
         .disc { color:#0a6b36; font-weight:bold; }
       </style></head><body>
-      <h1>${restaurantName || "Restaurant"}</h1>
+      <h1>${esc(capitalizeInitials(restaurantName || "Restaurant"))}</h1>
       <p class="c" style="font-size:11px;color:#666">Fine Dining & Authentic Taste</p>
       <div class="d"></div>
       <div class="r"><b>BILL #${b.billNumber}</b><span>${b.paymentMethod} · ${b.paymentStatus}</span></div>
-      <div class="r"><b>Table: ${b.tableLabel}</b><span>${new Date(b.createdAt).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</span></div>
+      <div class="r"><b>Table: ${esc(b.tableLabel)}</b><span>${new Date(b.createdAt).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</span></div>
       <div class="r"><span>Date:</span><span>${new Date(b.createdAt).toLocaleDateString("en-IN")}</span></div>
-      ${b.customerName ? `<div class="r"><span>Customer:</span><span>${b.customerName}</span></div>` : ""}
+      ${b.customerName ? `<div class="r"><span>Customer:</span><span>${esc(capitalizeInitials(b.customerName))}</span></div>` : ""}
       <div class="d"></div>
       <b>Ordered Items:</b>
       ${parsedItems.map((i) => `
-        <div class="r"><span>${i.name} ×${i.quantity}</span><span>₹${(i.subtotal/100).toFixed(0)}</span></div>
+        <div class="r"><span>${esc(i.name)} ×${i.quantity}</span><span>₹${(i.subtotal/100).toFixed(0)}</span></div>
       `).join("")}
       <div class="d"></div>
       <div class="r"><span>Subtotal:</span><span>₹${(b.subtotalCents/100).toFixed(0)}</span></div>
       ${b.discountCents > 0 ? `<div class="r disc"><span>Discount (${b.discountName || "Offer"} ${b.discountPercent}%):</span><span>−₹${(b.discountCents/100).toFixed(0)}</span></div>` : ""}
-      <div class="r"><span>${b.taxName} (${b.taxPercent}%):</span><span>₹${(b.taxCents/100).toFixed(0)}</span></div>
+      ${taxRows}
       <div class="r"><span>Packing & Service:</span><span>₹${(b.packingCents/100).toFixed(0)}</span></div>
       <div class="t"><span>FINAL TOTAL:</span><span>₹${(b.totalCents/100).toFixed(0)}</span></div>
       <div class="f"><div class="d"></div><p>Thank you for dining with us!</p><p style="margin-top:4px">Powered by InfoRyse</p></div>
@@ -800,6 +829,12 @@ export default function BillPage() {
                       {session && session.orderCount > 0 && (
                         <>
                           <button
+                            onClick={openPrepareBillModal}
+                            className="flex items-center gap-1.5 bg-emerald-400 hover:bg-emerald-300 text-gray-950 text-xs font-black px-4 py-2.5 rounded-xl active:scale-95 transition-all shadow-md"
+                          >
+                            <Receipt className="h-4 w-4" /> Prepare customer bill
+                          </button>
+                          <button
                             onClick={() => printBill()}
                             className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold px-4 py-2.5 rounded-xl active:scale-95 transition-all shadow-xs"
                           >
@@ -905,10 +940,7 @@ export default function BillPage() {
                               <span>−{formatRupees(discount)}</span>
                             </div>
                           )}
-                          <div className="flex justify-between text-gray-600">
-                            <span>{session.taxName || taxName} ({session.taxPercent ?? taxPercent}%)</span>
-                            <span className="font-semibold text-gray-900">{formatRupees(tax)}</span>
-                          </div>
+                          {(session.taxBreakdown?.length ? session.taxBreakdown : [{ name: session.taxName || taxName, percent: session.taxPercent ?? taxPercent, amountCents: tax }]).filter((line) => line.amountCents > 0).map((line, index) => <div key={`${line.name}-${index}`} className="flex justify-between text-gray-600"><span>{line.name} ({line.percent}%)</span><span className="font-semibold text-gray-900">{formatRupees(line.amountCents)}</span></div>)}
                           <div className="flex justify-between text-gray-600">
                             <span>Packing & Service</span>
                             <span className="font-semibold text-gray-900">{formatRupees(packing)}</span>
@@ -1168,8 +1200,8 @@ export default function BillPage() {
             {/* Header */}
             <div className="bg-[#132A1E] text-white p-5 flex items-center justify-between">
               <div>
-                <h3 className="font-extrabold text-base">Settle Bill & Confirm Payment</h3>
-                <p className="text-white/60 text-xs">Table {selectedTable.label} · Final Closure</p>
+                <h3 className="font-extrabold text-base">{billModalMode === "prepare" ? "Prepare customer bill" : "Settle payment & close table"}</h3>
+                <p className="text-white/60 text-xs">Table {selectedTable.label} · {billModalMode === "prepare" ? "The guest can view and download it" : "Record payment after receiving it"}</p>
               </div>
               <button
                 onClick={() => setSettlingPayment(false)}
@@ -1196,10 +1228,13 @@ export default function BillPage() {
                 <div className="text-right text-[11px] text-gray-500">
                   <p>Subtotal: {formatRupees(subtotal)}</p>
                   {discount > 0 && <p className="text-emerald-700">Disc: −{formatRupees(discount)}</p>}
-                  <p>Tax ({taxPercent}%): {formatRupees(tax)}</p>
+                  {(session.taxBreakdown?.length ? session.taxBreakdown : [{ name: session.taxName || taxName, percent: session.taxPercent ?? taxPercent, amountCents: tax }])
+                    .filter((line) => line.amountCents > 0)
+                    .map((line, index) => <p key={`${line.name}-${index}`}>{line.name} ({line.percent}%): {formatRupees(line.amountCents)}</p>)}
                 </div>
               </div>
 
+              {billModalMode === "settle" && <>
               {/* Payment Mode Selector */}
               <div>
                 <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
@@ -1233,24 +1268,14 @@ export default function BillPage() {
                 </div>
               </div>
 
-              {/* Optional Customer Name */}
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Customer Name (Optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Rahul Sharma"
-                  value={customerNameInput}
-                  onChange={(e) => setCustomerNameInput(e.target.value)}
-                  className="w-full bg-gray-50 text-xs px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-600"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Phone (optional)</label>
-                <input type="tel" inputMode="tel" placeholder="Customer mobile number" value={customerPhoneInput} onChange={(e) => setCustomerPhoneInput(e.target.value)} className="w-full bg-gray-50 text-xs px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-600" />
-                <label className="mt-3 block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Email (optional)</label>
-                <input type="email" placeholder="customer@example.com" value={customerEmailInput} onChange={(e) => setCustomerEmailInput(e.target.value)} className="w-full bg-gray-50 text-xs px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-600" />
+              </>}
+              <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <p className="text-xs font-bold text-gray-700">Customer details <span className="font-normal text-gray-400">(optional)</span></p>
+                <input type="text" placeholder="Customer name" value={customerNameInput} onChange={(e) => setCustomerNameInput(e.target.value)} className="w-full bg-gray-50 text-xs px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-600" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input type="tel" inputMode="tel" placeholder="Phone number" value={customerPhoneInput} onChange={(e) => setCustomerPhoneInput(e.target.value)} className="w-full min-w-0 bg-gray-50 text-xs px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-600" />
+                  <input type="email" placeholder="Email address" value={customerEmailInput} onChange={(e) => setCustomerEmailInput(e.target.value)} className="w-full min-w-0 bg-gray-50 text-xs px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-600" />
+                </div>
               </div>
             </div>
 
@@ -1262,22 +1287,24 @@ export default function BillPage() {
               >
                 Cancel
               </button>
-              {!digitalBillUrl ? (
+              {billModalMode === "prepare" ? (!digitalBillUrl ? (
                 <button
                   onClick={prepareDigitalBill}
                   disabled={isSubmittingBill}
                   className="flex-1 bg-[#132A1E] hover:bg-[#1a3828] text-white py-3 rounded-xl text-xs font-black transition-all shadow-md disabled:opacity-60"
                 >
-                  {isSubmittingBill ? "Preparing bill?" : "Generate bill for customer"}
+                  {isSubmittingBill ? "Preparing bill…" : "Generate & share bill"}
                 </button>
               ) : (
+                <button onClick={() => setSettlingPayment(false)} className="flex-1 bg-[#132A1E] text-white py-3 rounded-xl text-xs font-black">Done</button>
+              )) : (
                 <button
                   onClick={confirmPaymentAndStoreBill}
                   disabled={isSubmittingBill}
                   className="flex-1 bg-[#132A1E] hover:bg-[#1a3828] text-white py-3 rounded-xl text-xs font-black transition-all shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60"
                 >
                   <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  {isSubmittingBill ? "Closing table?" : "Payment received ? Close table & print"}
+                  {isSubmittingBill ? "Closing table…" : "Payment received · Close table"}
                 </button>
               )}
             </div>
@@ -1374,10 +1401,7 @@ export default function BillPage() {
                     <span>−{formatRupees(selectedBillDetail.discountCents)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-gray-600">
-                  <span>{selectedBillDetail.taxName} ({selectedBillDetail.taxPercent}%):</span>
-                  <span>{formatRupees(selectedBillDetail.taxCents)}</span>
-                </div>
+                {(selectedBillDetail.taxBreakdown?.length ? selectedBillDetail.taxBreakdown : [{ name: selectedBillDetail.taxName, percent: selectedBillDetail.taxPercent, amountCents: selectedBillDetail.taxCents }]).filter((line) => line.amountCents > 0).map((line, index) => <div key={`${line.name}-${index}`} className="flex justify-between text-gray-600"><span>{line.name} ({line.percent}%):</span><span>{formatRupees(line.amountCents)}</span></div>)}
                 <div className="flex justify-between text-gray-600">
                   <span>Packing & Service:</span>
                   <span>{formatRupees(selectedBillDetail.packingCents)}</span>

@@ -1,6 +1,7 @@
 import "server-only";
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
+import { capitalizeInitials } from "@/lib/nameFormat";
 
 export type PdfBill = {
   billNumber: number;
@@ -14,6 +15,7 @@ export type PdfBill = {
   taxCents: number;
   taxPercent: number;
   taxName: string;
+  taxBreakdown?: unknown;
   packingCents: number;
   totalCents: number;
   paymentMethod: string;
@@ -32,7 +34,7 @@ export async function createBillPdf(bill: PdfBill, billUrl?: string) {
   const doc = new PDFDocument({
     size: "A4",
     margins: { top: 42, bottom: 42, left: 46, right: 46 },
-    info: { Title: `Bill ${bill.billNumber}`, Author: safe(bill.restaurant.name) },
+    info: { Title: `Bill ${bill.billNumber}`, Author: safe(capitalizeInitials(bill.restaurant.name)) },
   });
   const chunks: Buffer[] = [];
   const done = new Promise<Buffer>((resolve, reject) => {
@@ -50,7 +52,7 @@ export async function createBillPdf(bill: PdfBill, billUrl?: string) {
   const setCursor = (y: number) => { doc.y = y; };
 
   doc.font("Helvetica-Bold").fontSize(23).fillColor("#132a1e")
-    .text(safe(bill.restaurant.name), left, doc.y, { width: right - left, align: "center" });
+    .text(safe(capitalizeInitials(bill.restaurant.name)), left, doc.y, { width: right - left, align: "center" });
   if (bill.restaurant.location) {
     doc.font("Helvetica").fontSize(9).fillColor("#64748b")
       .text(safe(bill.restaurant.location), left, doc.y + 2, { width: right - left, align: "center" });
@@ -81,7 +83,7 @@ export async function createBillPdf(bill: PdfBill, billUrl?: string) {
   setCursor(detailY + 15);
   if (bill.customerName) {
     doc.font("Helvetica").fontSize(9).fillColor("#475569")
-      .text(`Customer: ${safe(bill.customerName)}`, left, doc.y, { width: right - left });
+      .text(`Customer: ${safe(capitalizeInitials(bill.customerName))}`, left, doc.y, { width: right - left });
     setCursor(doc.y + 13);
   }
   setCursor(doc.y + 3);
@@ -128,7 +130,11 @@ export async function createBillPdf(bill: PdfBill, billUrl?: string) {
   const totals: [string, string][] = [
     ["Subtotal", money(bill.subtotalCents)],
     ...(bill.discountCents > 0 ? [[`${safe(bill.discountName || "Discount")} (${bill.discountPercent}%)`, `-${money(bill.discountCents)}`] as [string, string]] : []),
-    ...(bill.taxCents > 0 ? [[`${safe(bill.taxName)} (${bill.taxPercent}%)`, money(bill.taxCents)] as [string, string]] : []),
+    ...((Array.isArray(bill.taxBreakdown)
+      ? bill.taxBreakdown as { name: string; percent: number; amountCents: number }[]
+      : [{ name: bill.taxName, percent: bill.taxPercent, amountCents: bill.taxCents }])
+      .filter((line) => line.amountCents > 0)
+      .map((line) => [`${safe(line.name)} (${line.percent}%)`, money(line.amountCents)] as [string, string])),
     ...(bill.packingCents > 0 ? [["Packing / service", money(bill.packingCents)] as [string, string]] : []),
   ];
   const totalsHeight = totals.length * 18 + 45;
@@ -176,7 +182,7 @@ export async function createBillPdf(bill: PdfBill, billUrl?: string) {
 
   if (doc.y + 24 > pageBottom()) doc.addPage();
   doc.font("Helvetica").fontSize(9).fillColor("#64748b")
-    .text(`Thank you for dining with ${safe(bill.restaurant.name)}.`, left, doc.y + 6, { width: right - left, align: "center" });
+      .text(`Thank you for dining with ${safe(capitalizeInitials(bill.restaurant.name))}.`, left, doc.y + 6, { width: right - left, align: "center" });
   doc.end();
   return done;
 }

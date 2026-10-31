@@ -6,6 +6,8 @@ import { ArrowLeft, ChevronRight, Shield } from "lucide-react";
 import { useCart, formatRupees, getStoredOrders, saveStoredOrders } from "@/components/CartContext";
 import { useLanguage } from "@/lib/i18n";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { saveGuestTableSession } from "@/lib/guestTableSession";
+import { capitalizeInitials } from "@/lib/nameFormat";
 
 type OrderType     = "DINE_IN" | "TAKEAWAY";
 type PaymentMethod = "PAY_AT_RESTAURANT" | "UPI" | "CARD" | "WALLET";
@@ -51,24 +53,8 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
             name: data.restaurant.discountName || "Special Offer",
           });
         }
-        return;
       }
-    } catch { /* fetch fresh restaurant pricing below */ }
-
-    const controller = new AbortController();
-    fetch(`/api/public/menu/${params.slug}/${params.qrToken}`, { signal: controller.signal })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.restaurant?.discountActive && (data.restaurant?.discountPercent ?? 0) > 0) {
-          setRestaurantDiscount({
-            active: true,
-            percent: data.restaurant.discountPercent,
-            name: data.restaurant.discountName || "Special Offer",
-          });
-        }
-      })
-      .catch(() => {});
-    return () => controller.abort();
+    } catch { /* The server remains the source of truth for final pricing. */ }
   }, [params.slug, params.qrToken]);
 
   // Clean customer billing without hidden taxes/CGST at checkout (taxes only apply on final bill)
@@ -115,7 +101,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
           slug: params.slug,
           qrToken: params.qrToken,
           idempotencyKey,
-          customerName: name,
+          customerName: capitalizeInitials(name),
           customerPhone: phone.trim() || undefined,
           customerEmail: email.trim() || undefined,
           notes: note || undefined,
@@ -135,6 +121,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
       }
 
       // Save order to localStorage with session ID so cart page shows it during active meal
+      if (json.tableSessionId) saveGuestTableSession(params.qrToken, json.tableSessionId);
       const existing = getStoredOrders(params.qrToken, json.tableSessionId);
       existing.push({
         id:          json.order.id,
@@ -156,7 +143,9 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
         localStorage.removeItem(`inforyse_cart_${params.slug}_${params.qrToken}`);
       } catch { /* ignore */ }
 
-      router.push(`/r/${params.slug}/${params.qrToken}/confirmation?orderNumber=${json.order.orderNumber}&name=${encodeURIComponent(name)}&total=${grandTotal}`);
+      const confirmedName = capitalizeInitials(json.order.customerName || name);
+      const confirmedTotal = Number.isFinite(json.order.totalCents) ? json.order.totalCents : grandTotal;
+      router.push(`/r/${params.slug}/${params.qrToken}/confirmation?orderNumber=${json.order.orderNumber}&name=${encodeURIComponent(confirmedName)}&total=${confirmedTotal}`);
     } catch {
       setError("Network error — please try again");
       setSubmitting(false);
@@ -225,9 +214,10 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
                 fieldErrors.name ? "border-red-400 ring-1 ring-red-400" : "border-gray-200"
               }`}
               placeholder={t("yourName", "Your name *")}
+              autoCapitalize="words"
               value={name}
               onChange={(e) => {
-                setName(e.target.value);
+                setName(capitalizeInitials(e.target.value));
                 setFieldErrors((f) => ({ ...f, name: undefined }));
               }}
             />
