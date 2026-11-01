@@ -2,10 +2,30 @@ import { getSession } from "./auth";
 import { db } from "./db";
 
 const restaurantActiveCache = new Map<string, { active: boolean; expiresAt: number }>();
-const RESTAURANT_ACTIVE_TTL_MS = 8_000;
+const RESTAURANT_ACTIVE_TTL_MS = 10_000;
 
 export function invalidateRestaurantActiveCache(restaurantId: string) {
   restaurantActiveCache.delete(restaurantId);
+}
+
+/**
+ * Session JWT verification only. Used by hot endpoints (notification polling,
+ * dashboard counters) that must not spend an extra pooler round-trip on the
+ * restaurant check on every poll — the admin layout already blocks suspended
+ * restaurants, and mutations still go through `requireRestaurantUser`.
+ */
+export async function requireFastRestaurantUser() {
+  const session = await getSession();
+  if (!session) throw new UnauthorizedError("Not logged in");
+  if (session.role !== "OWNER" && session.role !== "STAFF") {
+    throw new ForbiddenError("Not a restaurant user");
+  }
+  if (!session.restaurantId) throw new ForbiddenError("No restaurant on session");
+  const cached = restaurantActiveCache.get(session.restaurantId);
+  if (cached && cached.expiresAt > Date.now() && !cached.active) {
+    throw new ForbiddenError("Restaurant account is inactive");
+  }
+  return { userId: session.userId, role: session.role, restaurantId: session.restaurantId };
 }
 
 /**

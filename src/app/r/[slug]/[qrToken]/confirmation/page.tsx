@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { UtensilsCrossed, RefreshCw, X, AlertTriangle, ReceiptText, Download } from "lucide-react";
 import { getStoredOrders, saveStoredOrders } from "@/components/CartContext";
+import { requestTableBill, fetchBillSnapshot, rememberBillLink, recallBillLink } from "@/lib/guestBill";
+import { saveGuestTableSession } from "@/lib/guestTableSession";
 
 const STEPS: { label: string; subLabel: string; key: string }[] = [
   { label: "Order Placed",         subLabel: "We received your order",       key: "NEW"       },
@@ -87,7 +89,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
               if (data?.status) applyStatus(data.status);
               if (data?.tableSessionId) setTableSessionId(data.tableSessionId);
               if (data?.billShareToken) setBillShareToken(data.billShareToken);
-              setHasBillableItems(Boolean(data?.hasBillableItems));
+              setHasBillableItems(Boolean(data?.billShareToken) || statusRef.current === "COMPLETED");
             })
             .catch(() => {});
         };
@@ -179,24 +181,47 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   }
 
   async function requestBill() {
-    if (!hasBillableItems || status === "CANCELLED") return;
+    if (status === "CANCELLED" || billRequestState === "sending") return;
     setBillRequestState("sending");
     setBillRequestMessage("");
-    try {
-      const response = await fetch("/api/public/assistance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug: params.slug, qrToken: params.qrToken, requests: ["pay_bill"] }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "Could not request the bill. Please try again.");
-      setBillRequestState("sent");
-      setBillRequestMessage("The staff has been notified. Your bill will appear here when it is ready.");
-    } catch (error) {
+    const result = await requestTableBill({ slug: params.slug, qrToken: params.qrToken });
+    if (!result.ok) {
       setBillRequestState("error");
-      setBillRequestMessage(error instanceof Error ? error.message : "Could not request the bill. Please try again.");
+      setBillRequestMessage(result.error);
+      return;
     }
+    setBillRequestState("sent");
+    setBillRequestMessage(result.duplicate
+      ? "The staff already have your request. Your bill appears here the moment it is generated."
+      : "Request sent — the staff have been notified and your bill appears here automatically.");
   }
+
+  // Pick up a bill that was delivered while this page was open or after a reload.
+  useEffect(() => {
+    if (!orderNumber) return;
+    let stopped = false;
+    const hydrate = async () => {
+      const snapshot = await fetchBillSnapshot(params.slug, params.qrToken);
+      if (!snapshot || stopped) return;
+      if (snapshot.tableSessionId) {
+        setTableSessionId(snapshot.tableSessionId);
+        saveGuestTableSession(params.qrToken, snapshot.tableSessionId);
+      }
+      if (snapshot.billToken && snapshot.tableSessionId) {
+        rememberBillLink(params.qrToken, { token: snapshot.billToken, sessionId: snapshot.tableSessionId });
+        setBillShareToken(snapshot.billToken);
+      }
+      if (snapshot.requestedAt) setHasBillableItems(true);
+    };
+    const saved = recallBillLink(params.qrToken);
+    if (saved) setBillShareToken(saved.token);
+    void hydrate();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void hydrate();
+    }, 8000);
+    return () => { stopped = true; clearInterval(timer); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderNumber, params.slug, params.qrToken]);
 
   function fmt(d: Date) {
     return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
@@ -413,7 +438,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
             </button>
           ) : (
             <p className="mt-3 rounded-xl bg-stone-50 px-3 py-3 text-center text-xs text-stone-500">
-              {status === "CANCELLED" ? "A cancelled order cannot request a bill." : "Bill requests are available after an item has been served."}
+              {status === "CANCELLED" ? "A cancelled order cannot request a bill." : "Your bill becomes available once you have an order at this table."}
             </p>
           )}
           {billRequestMessage && <p role={billRequestState === "error" ? "alert" : "status"} className={`mt-2 text-xs ${billRequestState === "error" ? "text-red-600" : "text-emerald-700"}`}>{billRequestMessage}</p>}

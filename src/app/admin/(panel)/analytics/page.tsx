@@ -7,6 +7,7 @@ import {
 } from "recharts";
 import { formatRupees } from "@/lib/utils";
 import { TrendingUp, ShoppingBag, Clock, DollarSign, Calendar, BarChart3 } from "lucide-react";
+import { cachedJson, peekCache } from "@/lib/cachedFetch";
 
 type Order = {
   id: string;
@@ -21,25 +22,24 @@ type Order = {
 const COLORS = ["#132A1E", "#D4A94C", "#0284C7", "#9333EA", "#E11D48"];
 
 export default function AnalyticsPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<Order[]>(() => peekCache<{ orders?: Order[] }>("admin:/api/admin/orders")?.orders ?? []);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {
-    fetch("/api/admin/me")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.role === "STAFF") {
+    Promise.all([
+      cachedJson<{ role?: string }>("admin:/api/admin/me", "/api/admin/me"),
+      cachedJson<{ orders?: Order[] }>("admin:/api/admin/orders", "/api/admin/orders"),
+    ])
+      .then(([me, orderData]) => {
+        if (me.data.role === "STAFF") {
           setAccessDenied(true);
-          setLoading(false);
           return;
         }
-        return fetch("/api/admin/orders")
-          .then((r) => r.json())
-          .then((data) => setOrders(data.orders ?? []))
-          .finally(() => setLoading(false));
+        setOrders(orderData.data.orders ?? []);
       })
-      .catch(() => setLoading(false));
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   // Build real dynamic 30-day trend

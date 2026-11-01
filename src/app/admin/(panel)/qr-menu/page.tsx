@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Download, Printer, Share2, RefreshCw, Eye, X, QrCode, ToggleLeft, ToggleRight } from "lucide-react";
+import { cachedJson, peekCache, invalidateCache } from "@/lib/cachedFetch";
 
 type Table = {
   id: string; label: string; section: string | null; status: string;
@@ -9,20 +10,27 @@ type Table = {
 };
 
 export default function QrMenuPage() {
-  const [tables, setTables]   = useState<Table[]>([]);
+  const [tables, setTables]   = useState<Table[]>(() => peekCache<{ tables?: Table[] }>("admin:/api/admin/tables")?.tables ?? []);
   const [selected, setSelected] = useState<Table | null>(null);
   const [qrImages, setQrImages] = useState<Record<string, string>>({});
   const [activeOnly, setActiveOnly] = useState(false);
-  const [restaurantName, setRestaurantName] = useState("Your Restaurant");
+  const [restaurantName, setRestaurantName] = useState(() => peekCache<{ restaurant?: { name?: string } }>("admin:/api/admin/me")?.restaurant?.name ?? "Your Restaurant");
 
-  async function load() {
-    const [tr, mr] = await Promise.all([fetch("/api/admin/tables"), fetch("/api/admin/me")]);
-    setTables((await tr.json()).tables ?? []);
-    const me = await mr.json();
-    setRestaurantName(me.restaurant?.name ?? "Your Restaurant");
+  async function load(bust = false) {
+    if (bust) invalidateCache("admin:/api/admin/tables");
+    try {
+      const [tablesData, meData] = await Promise.all([
+        cachedJson<{ tables?: Table[] }>("admin:/api/admin/tables", "/api/admin/tables"),
+        cachedJson<{ restaurant?: { name?: string } }>("admin:/api/admin/me", "/api/admin/me"),
+      ]);
+      setTables(tablesData.data.tables ?? []);
+      setRestaurantName(meData.data.restaurant?.name ?? "Your Restaurant");
+    } catch (error) {
+      console.error("Could not load QR menu data", error);
+    }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void load(); }, []);
 
   async function loadQr(table: Table) {
     if (qrImages[table.id]) return;
@@ -43,7 +51,7 @@ export default function QrMenuPage() {
     if (selected?.id === t.id) {
       setSelected({ ...t, qrToken: data.qrToken ?? t.qrToken });
     }
-    load();
+    void load(true);
   }
 
   const visible = activeOnly ? tables.filter((t) => t.status !== "OUT_OF_SERVICE") : tables;
@@ -91,7 +99,7 @@ export default function QrMenuPage() {
                   {activeOnly ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
                   Active Only
                 </button>
-                <button onClick={load} className="p-1.5 rounded-xl hover:bg-gray-100 text-gray-400">
+                <button onClick={() => void load(true)} className="p-1.5 rounded-xl hover:bg-gray-100 text-gray-400">
                   <RefreshCw className="h-4 w-4" />
                 </button>
               </div>

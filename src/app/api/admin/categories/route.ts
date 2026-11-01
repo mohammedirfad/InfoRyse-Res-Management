@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { requireFastRestaurantUser, requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { invalidatePublicMenu } from "@/lib/publicMenuCache";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const { restaurantId } = await requireRestaurantUser();
+    const { restaurantId } = await requireFastRestaurantUser();
     const categories = await db.category.findMany({
       where: { restaurantId, deletedAt: null },
       orderBy: { position: "asc" },

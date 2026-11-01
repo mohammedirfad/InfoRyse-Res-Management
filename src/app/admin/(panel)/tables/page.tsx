@@ -6,6 +6,7 @@ import {
   Users, Wifi, QrCode, CheckCircle, AlertCircle,
   Clock, Wrench, LayoutGrid, List, ChevronRight
 } from "lucide-react";
+import { fetchJsonCached, invalidateCache, peekCache } from "@/lib/cachedFetch";
 
 type Table = {
   id: string; label: string; section: string | null;
@@ -23,7 +24,7 @@ const STATUS: Record<string, {
 };
 
 export default function TablesPage() {
-  const [tables, setTables]         = useState<Table[]>([]);
+  const [tables, setTables]         = useState<Table[]>(() => peekCache<{ tables?: Table[] }>("admin:/api/admin/tables")?.tables ?? []);
   const [selected, setSelected]     = useState<Table | null>(null);
   const [qrImages, setQrImages]     = useState<Record<string, string>>({});
   const [qrLoading, setQrLoading]   = useState<Record<string, boolean>>({});
@@ -35,20 +36,23 @@ export default function TablesPage() {
   const [tableBusy, setTableBusy] = useState(false);
   const [filterSection, setFilterSection] = useState("all");
 
-  // cache in sessionStorage for speed
+  // Cache-first: the list paints instantly, then refreshes in the background.
   const load = useCallback(async (bust = false) => {
     if (!bust) {
-      const cached = sessionStorage.getItem("admin_tables");
-      if (cached) { try { setTables(JSON.parse(cached)); } catch {} }
+      const cached = peekCache<{ tables?: Table[] }>("admin:/api/admin/tables");
+      if (cached?.tables) setTables(cached.tables);
     }
-    const res = await fetch("/api/admin/tables", { cache: "no-store" });
-    const data = await res.json();
-    const list: Table[] = data.tables ?? [];
-    setTables(list);
-    sessionStorage.setItem("admin_tables", JSON.stringify(list));
-    if (selected) {
-      const updated = list.find(t => t.id === selected.id);
-      if (updated) setSelected(updated);
+    try {
+      if (bust) invalidateCache("admin:/api/admin/tables");
+      const data = await fetchJsonCached<{ tables?: Table[] }>("admin:/api/admin/tables", "/api/admin/tables");
+      const list: Table[] = data.tables ?? [];
+      setTables(list);
+      if (selected) {
+        const updated = list.find(t => t.id === selected.id);
+        if (updated) setSelected(updated);
+      }
+    } catch {
+      /* Keep the cached list on screen if the refresh fails. */
     }
   }, [selected]);
 
@@ -62,7 +66,7 @@ export default function TablesPage() {
       body: JSON.stringify({ status }),
     });
     if (res.ok) {
-      sessionStorage.removeItem("admin_tables");
+      invalidateCache("admin:/api/admin/tables");
       setSelected(t => t ? { ...t, status } : t);
       setTables(p => p.map(t => t.id === table.id ? { ...t, status } : t));
     }
@@ -99,6 +103,7 @@ export default function TablesPage() {
       return;
     }
     sessionStorage.removeItem("admin_tables");
+    invalidateCache("admin:/api/admin/tables");
     load(true);
   }
 
@@ -113,7 +118,7 @@ export default function TablesPage() {
     });
     const data = await res.json();
     if (!res.ok) { alert(data.error || "Could not update table"); return; }
-    sessionStorage.removeItem("admin_tables");
+    invalidateCache("admin:/api/admin/tables");
     await load(true);
   }
 
@@ -126,7 +131,7 @@ export default function TablesPage() {
     if (!res.ok) { alert(data.error || "Could not delete table"); return; }
     setQrImages((images) => { const next = { ...images }; delete next[table.id]; return next; });
     setSelected(null);
-    sessionStorage.removeItem("admin_tables");
+    invalidateCache("admin:/api/admin/tables");
     await load(true);
   }
 

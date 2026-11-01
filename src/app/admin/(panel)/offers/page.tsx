@@ -13,6 +13,8 @@ import {
   Zap,
 } from "lucide-react";
 
+import { cachedJson, invalidateCache } from "@/lib/cachedFetch";
+
 export default function OffersPage() {
   const [loading, setLoading]                 = useState(true);
   const [saving, setSaving]                   = useState(false);
@@ -30,24 +32,20 @@ export default function OffersPage() {
   useEffect(() => {
     async function load() {
       try {
-        const meRes = await fetch("/api/admin/me");
-        if (meRes.ok) {
-          const meData = await meRes.json();
-          if (meData.role === "STAFF") {
-            setAccessDenied(true);
-            setLoading(false);
-            return;
-          }
+        const [me, restaurant] = await Promise.all([
+          cachedJson<{ role?: string }>("admin:/api/admin/me", "/api/admin/me"),
+          cachedJson<{ restaurant?: any }>("admin:/api/admin/restaurant", "/api/admin/restaurant"),
+        ]);
+        if (me.data.role === "STAFF") {
+          setAccessDenied(true);
+          return;
         }
-        const res = await fetch("/api/admin/restaurant");
-        if (res.ok) {
-          const data = await res.json();
-          if (data.restaurant) {
-            setRestaurantName(data.restaurant.name ?? "Restaurant");
-            setDiscountActive(Boolean(data.restaurant.discountActive));
-            setDiscountPercent(Number(data.restaurant.discountPercent ?? 10) || 10);
-            setDiscountName(data.restaurant.discountName || "Festival Special Offer");
-          }
+        const r = restaurant.data.restaurant;
+        if (r) {
+          setRestaurantName(r.name ?? "Restaurant");
+          setDiscountActive(Boolean(r.discountActive));
+          setDiscountPercent(Number(r.discountPercent ?? 10) || 10);
+          setDiscountName(r.discountName || "Festival Special Offer");
         }
       } catch (err) {
         console.error("Failed to load restaurant settings", err);
@@ -55,7 +53,7 @@ export default function OffersPage() {
         setLoading(false);
       }
     }
-    load();
+    void load();
   }, []);
 
   async function handleSaveDiscount(newActive?: boolean, newPercent?: number, newName?: string) {
@@ -78,6 +76,8 @@ export default function OffersPage() {
       });
 
       if (res.ok) {
+        invalidateCache("admin:/api/admin/restaurant");
+        invalidateCache("admin:/api/admin/me");
         setSavedSuccess(true);
         setTimeout(() => setSavedSuccess(false), 3000);
       }

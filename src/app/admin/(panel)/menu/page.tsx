@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { LayoutGrid, List, Plus, Search, X, Pencil, Trash2, Star, Flame, ChefHat, Sparkles } from "lucide-react";
 import { formatRupees } from "@/lib/utils";
 import ImageUpload from "@/components/ImageUpload";
+import { fetchJsonCached, invalidateCache, peekCache, writeCache } from "@/lib/cachedFetch";
 
 type Category = { id: string; name: string };
 type MenuItem = {
@@ -36,8 +37,8 @@ function catEmoji(name: string) {
 }
 
 export default function MenuManagementPage() {
-  const [items, setItems]               = useState<MenuItem[]>([]);
-  const [categories, setCategories]     = useState<Category[]>([]);
+  const [items, setItems]               = useState<MenuItem[]>(() => (peekCache<{ items?: MenuItem[] }>("admin:/api/admin/menu-items")?.items ?? []));
+  const [categories, setCategories]     = useState<Category[]>(() => (peekCache<{ categories?: Category[] }>("admin:/api/admin/categories")?.categories ?? []));
   const [loading, setLoading]           = useState(true);
   const [loadError, setLoadError]       = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<string>("all");
@@ -58,24 +59,24 @@ export default function MenuManagementPage() {
 
   async function load() {
     try {
-      const [ir, cr] = await Promise.all([
-        fetch("/api/admin/menu-items", { cache: "no-store" }),
-        fetch("/api/admin/categories", { cache: "no-store" }),
+      const [itemsPayload, categoriesPayload] = await Promise.all([
+        fetchJsonCached<{ items?: MenuItem[]; error?: string }>("admin:/api/admin/menu-items", "/api/admin/menu-items").catch((error): { items?: MenuItem[]; error?: string } => ({ error: error instanceof Error ? error.message : "Menu items could not be loaded." })),
+        fetchJsonCached<{ categories?: Category[]; error?: string }>("admin:/api/admin/categories", "/api/admin/categories").catch((error): { categories?: Category[]; error?: string } => ({ error: error instanceof Error ? error.message : "Categories could not be loaded." })),
       ]);
-      const [itemsPayload, categoriesPayload] = await Promise.all([ir.json(), cr.json()]);
       const errors: string[] = [];
-      if (ir.ok) {
+      if (itemsPayload.items) {
         const itemsData = itemsPayload.items ?? [];
         setItems(itemsData);
-        try { sessionStorage.setItem("inforyse_admin_items", JSON.stringify(itemsData)); } catch { /* ignore */ }
+        writeCache("admin:/api/admin/menu-items", itemsPayload);
       } else {
         errors.push(itemsPayload.error || "Menu items could not be loaded.");
       }
-      if (cr.ok) {
+      if (categoriesPayload.categories) {
         const catsData = categoriesPayload.categories ?? [];
         setCategories(catsData);
-        try { sessionStorage.setItem("inforyse_admin_cats", JSON.stringify(catsData)); } catch { /* ignore */ }
-        if (!form.categoryId && catsData[0]) setForm((f) => ({ ...f, categoryId: catsData[0].id }));
+        writeCache("admin:/api/admin/categories", categoriesPayload);
+        const firstCategoryId = catsData[0]?.id;
+        if (firstCategoryId) setForm((f) => (f.categoryId ? f : { ...f, categoryId: firstCategoryId }));
       } else {
         errors.push(categoriesPayload.error || "Categories could not be loaded.");
       }
@@ -89,17 +90,16 @@ export default function MenuManagementPage() {
   }
 
   useEffect(() => {
-    // Instant cache-first load
-    try {
-      const cachedItems = sessionStorage.getItem("inforyse_admin_items");
-      const cachedCats = sessionStorage.getItem("inforyse_admin_cats");
-      if (cachedItems && cachedCats) {
-        setItems(JSON.parse(cachedItems));
-        setCategories(JSON.parse(cachedCats));
-        setLoading(false);
-      }
-    } catch { /* ignore */ }
-    load();
+    // Instant cache-first load: the list is already on screen, refresh silently.
+    const cachedItems = peekCache<{ items?: MenuItem[] }>("admin:/api/admin/menu-items");
+    const cachedCats = peekCache<{ categories?: Category[] }>("admin:/api/admin/categories");
+    if (cachedItems?.items && cachedCats?.categories) {
+      const firstCategoryId = cachedCats.categories[0]?.id;
+      setLoading(false);
+      if (firstCategoryId) setForm((f) => (f.categoryId ? f : { ...f, categoryId: firstCategoryId }));
+    }
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function openEdit(item: MenuItem) {
@@ -170,9 +170,7 @@ export default function MenuManagementPage() {
       }
 
       // Bust cached items so the changes immediately reflect everywhere
-      try {
-        sessionStorage.removeItem("inforyse_admin_items");
-      } catch { /* ignore */ }
+      invalidateCache("admin:/api/admin/menu-items");
 
       setEditItem(null);
       setShowAdd(false);
@@ -187,6 +185,7 @@ export default function MenuManagementPage() {
   async function deleteItem(item: MenuItem) {
     if (!confirm(`Delete "${item.name}"?`)) return;
     await fetch(`/api/admin/menu-items/${item.id}`, { method: "DELETE" });
+    invalidateCache("admin:/api/admin/menu-items");
     setEditItem(null); load();
   }
 
@@ -195,6 +194,7 @@ export default function MenuManagementPage() {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ isAvailable: !item.isAvailable }),
     });
+    invalidateCache("admin:/api/admin/menu-items");
     load();
   }
 
@@ -217,6 +217,7 @@ export default function MenuManagementPage() {
         setCategories((prev) => [...prev, data.category]);
         setForm((f) => ({ ...f, categoryId: data.category.id }));
       }
+      invalidateCache("admin:/api/admin/categories");
       await load();
     } catch {
       setSaveError("Could not add category. Please try again.");
@@ -248,10 +249,8 @@ export default function MenuManagementPage() {
         : item));
       setEditingCategoryId(null);
       setCategoryDraft("");
-      try {
-        sessionStorage.removeItem("inforyse_admin_items");
-        sessionStorage.removeItem("inforyse_admin_cats");
-      } catch { /* ignore */ }
+      invalidateCache("admin:/api/admin/categories");
+      invalidateCache("admin:/api/admin/menu-items");
       await load();
     } catch {
       setSaveError("Could not rename category. Please try again.");
@@ -276,6 +275,7 @@ export default function MenuManagementPage() {
       }
       if (activeFilter === category.id) setActiveFilter("all");
       if (form.categoryId === category.id) setForm((current) => ({ ...current, categoryId: categories.find((entry) => entry.id !== category.id)?.id ?? "" }));
+      invalidateCache("admin:/api/admin/categories");
       await load();
     } catch {
       setSaveError("Could not delete category. Please try again.");

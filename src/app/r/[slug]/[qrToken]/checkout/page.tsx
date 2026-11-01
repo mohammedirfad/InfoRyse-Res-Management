@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ChevronRight, Shield } from "lucide-react";
 import { useCart, formatRupees, getStoredOrders, saveStoredOrders } from "@/components/CartContext";
@@ -33,6 +34,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
     email?: string;
   }>({});
   const [idempotencyKey, setIdempotencyKey] = useState("");
+  const [placedOrderNumber, setPlacedOrderNumber] = useState<number | null>(null);
   const cartFingerprint = lines.map((line) => `${line.item.id}:${line.quantity}`).sort().join("|");
   const pendingOrderStorageKey = `inforyse_pending_order_${params.slug}_${params.qrToken}`;
 
@@ -109,69 +111,118 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
     return Object.keys(errs).length === 0;
   }
 
+  /** Persist the placed order and move on to the status screen. */
+  function goToConfirmation(json: any) {
+    try {
+      // Save order to localStorage with session ID so the table tab shows it immediately.
+      if (json.tableSessionId) saveGuestTableSession(params.qrToken, json.tableSessionId);
+      const existing = getStoredOrders(params.qrToken, json.tableSessionId);
+      if (!existing.some((order) => order.id === json.order.id || order.orderNumber === json.order.orderNumber)) {
+        existing.push({
+          id: json.order.id,
+          orderNumber: json.order.orderNumber,
+          status: json.order.status ?? "NEW",
+          totalCents: Number.isFinite(json.order.totalCents) ? json.order.totalCents : grandTotal,
+          createdAt: json.order.createdAt ?? new Date().toISOString(),
+          items: lines.map((l) => ({
+            nameSnapshot: l.item.name,
+            priceCentsSnapshot: l.item.priceCents,
+            quantity: l.quantity,
+          })),
+          sessionId: json.tableSessionId,
+        });
+        saveStoredOrders(params.qrToken, existing, json.tableSessionId);
+      }
+      localStorage.removeItem(pendingOrderStorageKey);
+    } catch { /* Storage may be unavailable — the server still has the order. */ }
+
+    try {
+      clear();
+      localStorage.removeItem(`inforyse_cart_${params.slug}_${params.qrToken}`);
+    } catch { /* ignore */ }
+
+    const confirmedName = capitalizeInitials(json.order.customerName || name);
+    const confirmedTotal = Number.isFinite(json.order.totalCents) ? json.order.totalCents : grandTotal;
+    const sessionQuery = json.tableSessionId ? `&sessionId=${encodeURIComponent(json.tableSessionId)}` : "";
+    setPlacedOrderNumber(json.order.orderNumber);
+    router.push(`/r/${params.slug}/${params.qrToken}/confirmation?orderNumber=${json.order.orderNumber}&name=${encodeURIComponent(confirmedName)}&total=${confirmedTotal}${sessionQuery}`);
+  }
+
   async function placeOrder() {
-    if (!idempotencyKey) return;
+    if (!idempotencyKey || submitting) return;
     if (!validate()) return;
     setSubmitting(true);
     setError(null);
-    try {
-      const res = await fetch("/api/public/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          slug: params.slug,
-          qrToken: params.qrToken,
-          idempotencyKey,
-          customerName: capitalizeInitials(name),
-          customerPhone: phone.trim() || undefined,
-          customerEmail: email.trim() || undefined,
-          notes: note || undefined,
-          orderType,
-          paymentMethod: payment,
-          items: lines.map((l) => ({ menuItemId: l.item.id, quantity: l.quantity })),
-        }),
-      });
 
-      let json: any = {};
-      try { json = await res.json(); } catch { /* ignore */ }
+    const body = JSON.stringify({
+      slug: params.slug,
+      qrToken: params.qrToken,
+      idempotencyKey,
+      customerName: capitalizeInitials(name),
+      customerPhone: phone.trim() || undefined,
+      customerEmail: email.trim() || undefined,
+      notes: note || undefined,
+      orderType,
+      paymentMethod: payment,
+      items: lines.map((l) => ({ menuItemId: l.item.id, quantity: l.quantity })),
+    });
 
-      if (!res.ok) {
-        setError(json?.error || "Could not place order. Please try again.");
-        setSubmitting(false);
-        return;
-      }
-
-      // Save order to localStorage with session ID so cart page shows it during active meal
-      if (json.tableSessionId) saveGuestTableSession(params.qrToken, json.tableSessionId);
-      const existing = getStoredOrders(params.qrToken, json.tableSessionId);
-      if (!existing.some((order) => order.id === json.order.id || order.orderNumber === json.order.orderNumber)) existing.push({
-        id:          json.order.id,
-        orderNumber: json.order.orderNumber,
-        status:      "NEW",
-        totalCents:  grandTotal,
-        createdAt:   new Date().toISOString(),
-        items:       lines.map((l) => ({
-          nameSnapshot:       l.item.name,
-          priceCentsSnapshot: l.item.priceCents,
-          quantity:           l.quantity,
-        })),
-        sessionId:   json.tableSessionId,
-      });
-      saveStoredOrders(params.qrToken, existing, json.tableSessionId);
-      try { localStorage.removeItem(pendingOrderStorageKey); } catch { /* ignore unavailable browser storage */ }
-
-      clear();
+    // The server deduplicates on `idempotencyKey`, so a retry is always safe.
+    // Two attempts only ever happen on the *client* side of a failure.
+    let lastMessage = "Could not place order. Please try again.";
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        localStorage.removeItem(`inforyse_cart_${params.slug}_${params.qrToken}`);
-      } catch { /* ignore */ }
+        const res = await fetch("/api/public/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        const json = await res.json().catch(() => null);
 
-      const confirmedName = capitalizeInitials(json.order.customerName || name);
-      const confirmedTotal = Number.isFinite(json.order.totalCents) ? json.order.totalCents : grandTotal;
-      const sessionQuery = json.tableSessionId ? `&sessionId=${encodeURIComponent(json.tableSessionId)}` : "";
-      router.push(`/r/${params.slug}/${params.qrToken}/confirmation?orderNumber=${json.order.orderNumber}&name=${encodeURIComponent(confirmedName)}&total=${confirmedTotal}${sessionQuery}`);
+        if (res.ok && json?.order) {
+          goToConfirmation(json);
+          return;
+        }
+        // 4xx = the order was rejected for a real reason; retrying cannot help.
+        if (res.status >= 400 && res.status < 500) {
+          setError(json?.error || lastMessage);
+          setSubmitting(false);
+          return;
+        }
+        lastMessage = json?.error || "The kitchen did not confirm your order.";
+      } catch {
+        lastMessage = "Network error — we are retrying your order…";
+        setError(lastMessage);
+      }
+    }
+
+    // Both attempts failed at the transport level. The order may still have
+    // landed server-side (the browser can lose a response after the write).
+    const recovered = await recoverPlacedOrder();
+    if (recovered) {
+      goToConfirmation(recovered);
+      return;
+    }
+
+    setError(`${lastMessage} If money is not involved, you can safely tap "Place Order" again — your order will not be duplicated.`);
+    setSubmitting(false);
+  }
+
+  /**
+   * Ask the server whether this exact idempotency key already produced an
+   * order. Prevents the classic "it showed an error but the food arrived".
+   */
+  async function recoverPlacedOrder(): Promise<any | null> {
+    try {
+      const res = await fetch(
+        `/api/public/orders/status?idempotencyKey=${encodeURIComponent(idempotencyKey)}&slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json?.order ?? null;
     } catch {
-      setError("Network error — please try again");
-      setSubmitting(false);
+      return null;
     }
   }
 
@@ -361,8 +412,8 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
           </div>
         </div>
 
-        {error && (
-          <div className="rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs p-3.5 font-medium">
+        {error && !placedOrderNumber && (
+          <div role="alert" className="rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs p-3.5 font-medium">
             ⚠️ {error}
           </div>
         )}
@@ -370,6 +421,18 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
 
       {/* Fixed CTA */}
       <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-black/5 p-4 safe-pb z-30 shadow-lg">
+        {placedOrderNumber ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center">
+            <p className="text-sm font-bold text-emerald-900">✅ Order #{placedOrderNumber} placed successfully</p>
+            <p className="text-xs text-emerald-700 mt-1">Taking you to your live order status…</p>
+            <Link
+              href={`/r/${params.slug}/${params.qrToken}/confirmation?orderNumber=${placedOrderNumber}`}
+              className="mt-3 inline-flex items-center justify-center rounded-xl bg-[#132A1E] px-4 py-2 text-xs font-bold text-white"
+            >
+              View order status
+            </Link>
+          </div>
+        ) : (
         <button
           onClick={placeOrder}
           disabled={submitting || lines.length === 0 || !idempotencyKey}
@@ -383,6 +446,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
             </div>
           )}
         </button>
+        )}
         <p className="text-center text-[11px] text-gray-400 mt-2 flex items-center justify-center gap-1">
           <Shield className="h-3 w-3" /> Contactless Kitchen Dispatch
         </p>

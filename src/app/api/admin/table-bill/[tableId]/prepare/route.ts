@@ -110,7 +110,7 @@ export async function POST(req: Request, { params }: { params: { tableId: string
     });
     if ("error" in result) return Response.json({ error: result.error }, { status: 409 });
 
-    void emitOrderEvent({ restaurantId, type: "bill_updated", data: { billId: result.bill.id, tableId: result.tableId, tableSessionId: result.bill.tableSessionId, shareToken: result.bill.shareToken } });
+    void emitOrderEvent({ restaurantId, type: "bill_updated", data: { billId: result.bill.id, billNumber: result.bill.billNumber, tableId: result.tableId, tableSessionId: result.bill.tableSessionId, shareToken: result.bill.shareToken } });
     if (result.resolvedBillRequest) {
       const request = await db.serviceRequest.findFirst({ where: { restaurantId, tableSessionId: result.bill.tableSessionId, requests: { has: "pay_bill" }, status: "COMPLETED" }, orderBy: { updatedAt: "desc" }, select: { id: true, tableId: true, tableSessionId: true, tableLabel: true, requests: true, custom: true, status: true, createdAt: true } });
       if (request) void emitOrderEvent({ restaurantId, type: "service_request_updated", data: { request } });

@@ -1,13 +1,13 @@
 import { db } from "@/lib/db";
-import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { requireFastRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { buildCustomerMenuUrl } from "@/lib/qr";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const { restaurantId } = await requireRestaurantUser();
-    const restaurant = await db.restaurant.findUniqueOrThrow({ where: { id: restaurantId } });
+    const { restaurantId } = await requireFastRestaurantUser();
+    const restaurant = await db.restaurant.findUniqueOrThrow({ where: { id: restaurantId }, select: { slug: true } });
     const tables = await db.table.findMany({
       where: { restaurantId, deletedAt: null },
       orderBy: { label: "asc" },
@@ -48,7 +48,7 @@ export async function GET() {
     return new Response(JSON.stringify({ tables: mapped }), {
       headers: {
         "Content-Type": "application/json",
-        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Cache-Control": "private, max-age=2, stale-while-revalidate=8",
       },
     });
   } catch (err) {

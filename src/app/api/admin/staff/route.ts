@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { requireFastRestaurantUser, requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { hashPassword } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const { restaurantId, role } = await requireRestaurantUser();
+    const { restaurantId, role } = await requireFastRestaurantUser();
     if (role !== "OWNER") {
       return Response.json({ error: "Access denied. Only owners can access staff management." }, { status: 403 });
     }

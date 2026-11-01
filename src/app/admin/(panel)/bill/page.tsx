@@ -23,6 +23,7 @@ import {
   FileText,
 } from "lucide-react";
 import { formatRupees, formatTime, formatDate } from "@/lib/utils";
+import { cachedJson, invalidateCache } from "@/lib/cachedFetch";
 import QRCode from "qrcode";
 import { capitalizeInitials } from "@/lib/nameFormat";
 
@@ -153,6 +154,8 @@ export default function BillPage() {
 
   const selectedTableRef = useRef<Table | null>(null);
   selectedTableRef.current = selectedTable;
+  const tablesRef = useRef<Table[]>([]);
+  tablesRef.current = tables;
   const requestedTableIdRef = useRef<string | null>(null);
   if (!requestedTableIdRef.current && typeof window !== "undefined") {
     requestedTableIdRef.current = new URLSearchParams(window.location.search).get("tableId");
@@ -162,35 +165,27 @@ export default function BillPage() {
   const fetchTablesAndRestaurant = useCallback(async (isInitial = false) => {
     try {
       setIsRefreshing(true);
-      const [tablesRes, meRes] = await Promise.all([
-        fetch("/api/admin/tables", { cache: "no-store" }),
-        fetch("/api/admin/me", { cache: "no-store" }),
-      ]);
-
       const [tablesData, meData] = await Promise.all([
-        tablesRes.json(),
-        meRes.json(),
+        cachedJson<{ tables?: Table[] }>("admin:/api/admin/tables", "/api/admin/tables"),
+        cachedJson<{ restaurant?: { name?: string; taxName?: string; taxPercent?: number } }>("admin:/api/admin/me", "/api/admin/me"),
       ]);
 
-      const loadedTables: Table[] = tablesData.tables ?? [];
+      const loadedTables: Table[] = tablesData.data.tables ?? [];
       setTables(loadedTables);
 
-      if (meData?.restaurant) {
-        setRestaurantName(meData.restaurant.name ?? "");
-        setTaxName(meData.restaurant.taxName ?? "GST");
-        setTaxPercent(meData.restaurant.taxPercent ?? 5);
+      if (meData.data?.restaurant) {
+        setRestaurantName(meData.data.restaurant.name ?? "");
+        setTaxName(meData.data.restaurant.taxName ?? "GST");
+        setTaxPercent(meData.data.restaurant.taxPercent ?? 5);
       }
 
-      if (isInitial && !selectedTableRef.current) {
+      // On first paint, open the requested / first busy table immediately so the
+      // page never shows an empty bill while the user waits.
+      if (isInitial && !selectedTableRef.current && loadedTables.length > 0) {
         const firstActive = loadedTables.find((table) => table.id === requestedTableIdRef.current)
-          ?? loadedTables.find(
-          (t) => (t.activeOrderCount ?? 0) > 0 || t.status === "OCCUPIED"
-          );
-        if (firstActive) {
-          loadBill(firstActive);
-        } else if (loadedTables.length > 0) {
-          loadBill(loadedTables[0]);
-        }
+          ?? loadedTables.find((t) => (t.activeOrderCount ?? 0) > 0 || t.status === "OCCUPIED")
+          ?? loadedTables[0];
+        void loadBill(firstActive);
       }
     } catch (err) {
       console.error("Failed to fetch tables:", err);
@@ -204,8 +199,11 @@ export default function BillPage() {
     setSelectedTable(table);
     if (!silent) setLoading(true);
     try {
-      const res = await fetch(`/api/admin/table-bill/${table.id}`, { cache: "no-store" });
-      const data = await res.json();
+      const { data } = await cachedJson<{ session?: Session | null; restaurant?: { taxName?: string; taxPercent?: number } }>(
+        `admin:/api/admin/table-bill/${table.id}`,
+        `/api/admin/table-bill/${table.id}`,
+        { ttlMs: 5_000 },
+      );
       setSession(data.session ?? null);
       if (data.restaurant) {
         setTaxName(data.restaurant.taxName ?? "GST");
@@ -228,9 +226,13 @@ export default function BillPage() {
         search: billsSearch,
         paymentMethod: billsMethodFilter,
       });
+      const url = `/api/admin/bills?${query.toString()}`;
 
-      const res = await fetch(`/api/admin/bills?${query.toString()}`, { cache: "no-store" });
-      const data = await res.json();
+      const { data } = await cachedJson<{
+        bills?: StoredBill[];
+        pagination?: { totalPages?: number; total?: number };
+        totalRevenueCents?: number;
+      }>(`admin:${url}`, url, { ttlMs: 15_000 });
 
       setBills(data.bills ?? []);
       setBillsTotalPages(data.pagination?.totalPages ?? 1);
@@ -249,10 +251,30 @@ export default function BillPage() {
     fetchBills(1);
   }, [fetchTablesAndRestaurant, fetchBills]);
 
+  // When the guest taps "Request bill" on their table screen, open that table
+  // automatically so the cashier only has to press "Generate bill".
+  useEffect(() => {
+    const onServiceRequest = (event: Event) => {
+      const payload = (event as CustomEvent).detail;
+      if (payload?.type !== "service_request_created") return;
+      const request = payload?.data?.request;
+      if (!request?.requests?.includes("pay_bill")) return;
+      const table = tablesRef.current.find((item) => item.id === request.tableId);
+      if (!table) return;
+      setActiveTab("live");
+      if (selectedTableRef.current?.id !== table.id) void loadBill(table);
+      else void loadBill(table, true);
+    };
+    window.addEventListener("inforyse:restaurant-event", onServiceRequest);
+    return () => window.removeEventListener("inforyse:restaurant-event", onServiceRequest);
+  }, [loadBill]);
+
   useEffect(() => {
     const onRestaurantEvent = (event: Event) => {
       const payload = (event as CustomEvent).detail;
-      if (payload?.type === "resync") {
+      invalidateCache("admin:/api/admin/table-bill");
+      invalidateCache("admin:/api/admin/bills");
+      if (payload?.type === "resync" || payload?.type === "bill_updated" || payload?.type === "order_updated") {
         void fetchTablesAndRestaurant(false);
         const selected = selectedTableRef.current;
         if (selected) void loadBill(selected, true);
@@ -279,6 +301,37 @@ export default function BillPage() {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [fetchTablesAndRestaurant, loadBill]);
+
+  // Generate the final bill and push it to the guest instantly (one tap).
+  async function generateAndShareBill() {
+    if (!session || !selectedTable) return;
+    if (digitalBillUrl) {
+      window.open(digitalBillUrl, "_blank", "noopener");
+      return;
+    }
+    setIsSubmittingBill(true);
+    setBillSubmitError("");
+    try {
+      const response = await fetch(`/api/admin/table-bill/${selectedTable.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableSessionId: session.id }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "Could not generate the bill");
+      if (data?.billUrl) {
+        setDigitalBillUrl(data.billUrl);
+        window.open(data.billUrl, "_blank", "noopener");
+      }
+      invalidateCache("admin:/api/admin/bills");
+      invalidateCache("admin:/api/admin/table-bill");
+      await loadBill(selectedTable, true);
+    } catch (error) {
+      setBillSubmitError(error instanceof Error ? error.message : "Could not generate the bill");
+    } finally {
+      setIsSubmittingBill(false);
+    }
+  }
 
   // Prepare and share a customer bill without marking the session paid or closing the table.
   function openPrepareBillModal() {
@@ -829,10 +882,12 @@ export default function BillPage() {
                       {session && session.orderCount > 0 && (
                         <>
                           <button
-                            onClick={openPrepareBillModal}
-                            className="flex items-center gap-1.5 bg-emerald-400 hover:bg-emerald-300 text-gray-950 text-xs font-black px-4 py-2.5 rounded-xl active:scale-95 transition-all shadow-md"
+                            onClick={generateAndShareBill}
+                            disabled={isSubmittingBill}
+                            title={digitalBillUrl ? "Reopen the generated bill" : "Generate the bill and send it to the guest instantly"}
+                            className="flex items-center gap-1.5 bg-emerald-400 hover:bg-emerald-300 text-gray-950 text-xs font-black px-4 py-2.5 rounded-xl active:scale-95 transition-all shadow-md disabled:opacity-60"
                           >
-                            <Receipt className="h-4 w-4" /> Prepare customer bill
+                            <Receipt className="h-4 w-4" /> {isSubmittingBill ? "Generating…" : digitalBillUrl ? "Bill generated · reopen" : "Generate bill"}
                           </button>
                           <button
                             onClick={() => printBill()}

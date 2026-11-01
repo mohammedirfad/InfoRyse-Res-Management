@@ -52,6 +52,7 @@ export default function AdminOrderNotifications() {
   const [open, setOpen] = useState(false);
   const [toast, setToast] = useState<IncomingOrder | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [generatingFor, setGeneratingFor] = useState<string | null>(null);
   const cursor = useRef("");
   const soundEnabledRef = useRef(true);
   const seen = useRef(new Set<string>());
@@ -232,6 +233,31 @@ export default function AdminOrderNotifications() {
     if (next) chime();
   }
 
+  async function generateBillNow(request: ServiceRequest) {
+    if (generatingFor) return;
+    setGeneratingFor(request.id);
+    try {
+      // The guest's tab is already fully known server-side; one tap produces the
+      // final bill and pushes it straight to the guest's open table screen.
+      const response = await fetch(`/api/admin/table-bill/${request.tableId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableSessionId: request.tableSessionId ?? undefined }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || "Could not generate the bill");
+      setServiceRequests((current) => current.filter((item) => item.id !== request.id));
+      setServiceToast(null);
+      setOpen(false);
+      if (payload?.billUrl) window.open(payload.billUrl, "_blank", "noopener");
+    } catch (error) {
+      console.error("Could not generate bill", error);
+      window.alert(error instanceof Error ? error.message : "Could not generate the bill");
+    } finally {
+      setGeneratingFor(null);
+    }
+  }
+
   async function updateServiceRequest(requestId: string, status: "IN_PROGRESS" | "COMPLETED") {
     try {
       const response = await fetch(`/api/admin/service-requests/${requestId}`, {
@@ -278,7 +304,10 @@ export default function AdminOrderNotifications() {
               <p className="font-bold text-slate-900">{serviceToast.requests.includes("pay_bill") ? "Bill requested" : "Service requested"} · Table {serviceToast.tableLabel}</p>
               <p className="mt-1 text-xs text-slate-500">{serviceToast.requests.map((request) => SERVICE_LABELS[request] ?? request).join(", ")}{serviceToast.custom ? ` · ${serviceToast.custom}` : ""}</p>
               {serviceToast.requests.includes("pay_bill")
-                ? <Link href={`/admin/bill?tableId=${encodeURIComponent(serviceToast.tableId)}`} onClick={() => setServiceToast(null)} className="mt-2 inline-flex text-xs font-bold text-emerald-800">Open this table’s bill</Link>
+                ? <div className="mt-2 flex items-center gap-3">
+                    <button type="button" onClick={() => void generateBillNow(serviceToast)} disabled={generatingFor === serviceToast.id} className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-2.5 py-1.5 text-xs font-bold text-white disabled:opacity-60">{generatingFor === serviceToast.id ? "Generating…" : "Generate bill"}</button>
+                    <Link href={`/admin/bill?tableId=${encodeURIComponent(serviceToast.tableId)}`} onClick={() => setServiceToast(null)} className="text-xs font-bold text-emerald-800">Open table</Link>
+                  </div>
                 : <button type="button" onClick={() => { setOpen(true); setServiceToast(null); }} className="mt-2 text-xs font-bold text-emerald-800">Review request</button>}
             </div>
             <button aria-label="Dismiss service request alert" onClick={() => setServiceToast(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button>
@@ -320,10 +349,15 @@ export default function AdminOrderNotifications() {
                     {request.custom && <p className="mt-1 text-xs text-slate-500">{request.custom}</p>}
                     <p className="mt-1 text-[10px] text-slate-400">{formatTime(request.createdAt)}</p>
                   </div>
-                  {request.requests.includes("pay_bill") && <Link href={`/admin/bill?tableId=${encodeURIComponent(request.tableId)}`} onClick={() => setOpen(false)} className="shrink-0 text-xs font-bold text-emerald-800">Open bill</Link>}
+                  {request.requests.includes("pay_bill") && <Link href={`/admin/bill?tableId=${encodeURIComponent(request.tableId)}`} onClick={() => setOpen(false)} className="shrink-0 text-xs font-bold text-emerald-800">Open table</Link>}
                 </div>
                 <div className="mt-2 flex items-center gap-2">
-                  {request.status === "PENDING" && <button type="button" onClick={() => void updateServiceRequest(request.id, "IN_PROGRESS")} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600">Start</button>}
+                  {request.requests.includes("pay_bill") && (
+                    <button type="button" onClick={() => void generateBillNow(request)} disabled={generatingFor === request.id} className="rounded-lg bg-emerald-700 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-60">
+                      {generatingFor === request.id ? "Generating…" : "Generate bill"}
+                    </button>
+                  )}
+                  {request.status === "PENDING" && !request.requests.includes("pay_bill") && <button type="button" onClick={() => void updateServiceRequest(request.id, "IN_PROGRESS")} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600">Start</button>}
                   <button type="button" onClick={() => void updateServiceRequest(request.id, "COMPLETED")} className="rounded-lg bg-emerald-700 px-2.5 py-1 text-[11px] font-semibold text-white">Mark done</button>
                   {request.status === "IN_PROGRESS" && <span className="text-[10px] font-semibold text-amber-700">In progress</span>}
                 </div>

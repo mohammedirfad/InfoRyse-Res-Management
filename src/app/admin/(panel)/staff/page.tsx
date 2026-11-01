@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Plus, Mail, Phone, Trash2, UserCheck, Shield, Users, AlertCircle } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { cachedJson, fetchJsonCached, invalidateCache, peekCache } from "@/lib/cachedFetch";
 
 type StaffMember = {
   id: string;
@@ -14,7 +15,7 @@ type StaffMember = {
 };
 
 export default function StaffPage() {
-  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>(() => peekCache<{ staff?: StaffMember[] }>("admin:/api/admin/staff")?.staff ?? []);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
@@ -28,25 +29,22 @@ export default function StaffPage() {
   const [error, setError] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
 
-  async function load() {
+  async function load(bust = false) {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/staff");
-      if (res.status === 403) {
-        setAccessDenied(true);
-        return;
-      }
-      if (res.ok) {
-        const data = await res.json();
-        setStaff(data.staff ?? []);
-      }
+      if (bust) invalidateCache("admin:/api/admin/staff");
+      const data = await cachedJson<{ staff?: StaffMember[] }>("admin:/api/admin/staff", "/api/admin/staff", { ttlMs: 30_000 });
+      setStaff(data.data.staff ?? []);
+    } catch {
+      setAccessDenied(true);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    load();
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function addStaff(e: React.FormEvent) {
@@ -76,7 +74,7 @@ export default function StaffPage() {
 
       setForm({ name: "", email: "", phone: "", role: "STAFF", password: "" });
       setShowForm(false);
-      load();
+      void load(true);
     } catch {
       setError("Network error while adding staff member.");
     } finally {
@@ -87,7 +85,7 @@ export default function StaffPage() {
   async function deleteStaff(id: string, name: string | null) {
     if (!confirm(`Remove staff access for ${name || "this user"}?`)) return;
     await fetch(`/api/admin/staff?id=${id}`, { method: "DELETE" });
-    load();
+    void load(true);
   }
 
   if (accessDenied) {

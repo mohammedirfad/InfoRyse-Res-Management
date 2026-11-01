@@ -1,11 +1,11 @@
 import { db } from "@/lib/db";
-import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { requireFastRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
-    const { restaurantId } = await requireRestaurantUser();
+    const { restaurantId } = await requireFastRestaurantUser();
     const url = new URL(req.url);
     const search = (url.searchParams.get("search") ?? "").trim().toLowerCase();
     const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10));

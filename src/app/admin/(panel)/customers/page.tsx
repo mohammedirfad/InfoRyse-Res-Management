@@ -20,6 +20,7 @@ import {
   ArrowUpDown,
 } from "lucide-react";
 import { formatRupees, formatDate, formatTime } from "@/lib/utils";
+import { cachedJson, peekCache } from "@/lib/cachedFetch";
 
 type Customer = {
   id: string;
@@ -50,7 +51,7 @@ const STATUS_META: Record<string, { label: string; bg: string; color: string; ic
 };
 
 export default function CustomersPage() {
-  const [customers, setCustomers]         = useState<Customer[]>([]);
+  const [customers, setCustomers]         = useState<Customer[]>(() => peekCache<{ customers?: Customer[] }>("admin:/api/admin/customers?page=1&limit=10&search=")?.customers ?? []);
   const [loading, setLoading]             = useState(true);
   const [search, setSearch]               = useState("");
   const [statusFilter, setStatusFilter]   = useState<"all" | "NEW" | "REPEAT" | "VIP">("all");
@@ -75,8 +76,8 @@ export default function CustomersPage() {
         search,
       });
 
-      const res = await fetch(`/api/admin/customers?${query.toString()}`, { cache: "no-store" });
-      const data = await res.json();
+      const url = `/api/admin/customers?${query.toString()}`;
+      const { data } = await cachedJson<any>(`admin:${url}`, url, { ttlMs: 30_000 });
 
       let list: Customer[] = data.customers ?? [];
       if (statusFilter !== "all") {

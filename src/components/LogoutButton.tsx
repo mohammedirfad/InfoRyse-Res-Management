@@ -2,11 +2,19 @@
 
 import { useRouter } from "next/navigation";
 
-export default function LogoutButton({ redirectTo = "/" }: { redirectTo?: string }) {
+export default function LogoutButton({
+  redirectTo = "/",
+  onSignOut,
+}: {
+  redirectTo?: string;
+  onSignOut?: () => void;
+}) {
   const router = useRouter();
   return (
     <button
       onClick={async () => {
+        // Never leave another account's data in the shared browser cache.
+        onSignOut?.();
         await fetch("/api/auth/logout", { method: "POST" });
         router.push(redirectTo);
       }}

@@ -13,7 +13,21 @@ import {
 } from "@/components/CartContext";
 import { useLanguage } from "@/lib/i18n";
 import { LanguageSelector } from "@/components/LanguageSelector";
-import { getGuestTableSession, saveGuestTableSession } from "@/lib/guestTableSession";
+import {
+  getGuestTableSession,
+  guestSessionQuery,
+  saveGuestTableSession,
+} from "@/lib/guestTableSession";
+import {
+  refreshTableTab,
+  requestTableBill,
+  fetchBillSnapshot,
+  rememberBillLink,
+  recallBillLink,
+  billButtonLabel,
+  billStatusMessage,
+  type BillStage,
+} from "@/lib/guestBill";
 import { capitalizeInitials } from "@/lib/nameFormat";
 
 interface TableSessionData {
@@ -99,47 +113,37 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
   const [lastDigitalBill, setLastDigitalBill] = useState<{ token: string; sessionId: string } | null>(null);
   const [pastOrders, setPastOrders]       = useState<StoredPastOrder[]>([]);
   const [isFetchingSession, setIsFetchingSession] = useState(false);
-  const [billRequestState, setBillRequestState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [billRequestState, setBillRequestState] = useState<BillStage>("idle");
   const [billRequestMessage, setBillRequestMessage] = useState("");
   const [note, setNote]                   = useState("");
 
   const base = `/r/${params.slug}/${params.qrToken}`;
-  const billStorageKey = `digital-bill:${params.qrToken}`;
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(billStorageKey);
-      if (saved) setLastDigitalBill(JSON.parse(saved));
-    } catch { /* Ignore stale or malformed browser state. */ }
-  }, [billStorageKey]);
+    const saved = recallBillLink(params.qrToken);
+    if (saved) setLastDigitalBill(saved);
+  }, [params.qrToken]);
 
   // Poll server for active TableSession (all orders placed by anyone at this table)
   const refreshTableOrders = useCallback(async () => {
     setIsFetchingSession(true);
     try {
-      const savedSessionId = getGuestTableSession(params.qrToken);
-      const sessionQuery = savedSessionId ? `&sessionId=${encodeURIComponent(savedSessionId)}` : "";
-      const res = await fetch(
-        `/api/public/table-orders?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}${sessionQuery}`,
-        { cache: "no-store" }
-      );
-      if (res.ok) {
-        const data: TableSessionData = await res.json();
-        setSessionData(data);
+      const data = await refreshTableTab(params.slug, params.qrToken);
+      if (data) {
+        setSessionData(data as unknown as TableSessionData);
 
         if (data.session?.id) {
           saveGuestTableSession(params.qrToken, data.session.id);
           // A new table session invalidates the previous guest's bill link on this device.
-          const previous = localStorage.getItem(billStorageKey);
-          const parsed = previous ? JSON.parse(previous) as { token?: string; sessionId?: string } : null;
-          if (parsed?.sessionId && parsed.sessionId !== data.session.id) {
-            localStorage.removeItem(billStorageKey);
+          const previous = recallBillLink(params.qrToken);
+          if (previous?.sessionId && previous.sessionId !== data.session.id) {
             setLastDigitalBill(null);
           }
           if (data.bill?.shareToken) {
             const savedBill = { token: data.bill.shareToken, sessionId: data.bill.tableSessionId || data.session.id };
-            localStorage.setItem(billStorageKey, JSON.stringify(savedBill));
+            rememberBillLink(params.qrToken, savedBill);
             setLastDigitalBill(savedBill);
+            setBillRequestState("ready");
           }
         }
 
@@ -166,10 +170,8 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
           clearStoredOrders(params.qrToken);
           setPastOrders([]);
           syncSession(null, data.table.status);
-          const saved = localStorage.getItem(billStorageKey);
-          if (saved) {
-            try { setLastDigitalBill(JSON.parse(saved)); } catch { localStorage.removeItem(billStorageKey); }
-          }
+          const saved = recallBillLink(params.qrToken);
+          if (saved) setLastDigitalBill(saved);
         }
       }
     } catch {
@@ -178,7 +180,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
     } finally {
       setIsFetchingSession(false);
     }
-  }, [params.slug, params.qrToken, syncSession, billStorageKey]);
+  }, [params.slug, params.qrToken, syncSession]);
 
   useEffect(() => {
     // Initial fetch on mount
@@ -200,12 +202,14 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       try {
         const event = JSON.parse(rawEvent.data);
         const shareToken = event?.data?.shareToken;
-        const sessionId = event?.data?.sessionId;
+        const sessionId = event?.data?.tableSessionId ?? event?.data?.sessionId;
         if (event?.type === "bill_updated" && shareToken && sessionId) {
           const billLink = { token: shareToken as string, sessionId: sessionId as string };
-          localStorage.setItem(billStorageKey, JSON.stringify(billLink));
+          rememberBillLink(params.qrToken, billLink);
           saveGuestTableSession(params.qrToken, sessionId as string);
           setLastDigitalBill(billLink);
+          setBillRequestState("ready");
+          setBillRequestMessage("Your bill is ready! 🎉");
         }
       } catch { /* The session snapshot will still refresh when possible. */ }
       void refreshTableOrders();
@@ -255,28 +259,66 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
 
   const tableLabel = sessionData?.table?.label ?? "Your Table";
   const confirmedCount = sessionData?.session?.orders.length ?? pastOrders.length;
-  const hasBillableItems = Boolean(sessionData?.session?.aggregatedItems.length);
-  const billAlreadyRequested = hasBillableItems && (billRequestState === "sent" || Boolean(sessionData?.session?.billRequestedAt));
+  const hasOrdersOnTab = Boolean(sessionData?.session?.orders.length);
 
-  async function requestTableBill() {
-    if (!sessionData?.session || !hasBillableItems || billAlreadyRequested || billRequestState === "sending") return;
+  async function askForBill() {
+    if (billRequestState === "sending") return;
     setBillRequestState("sending");
     setBillRequestMessage("");
-    try {
-      const response = await fetch("/api/public/assistance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug: params.slug, qrToken: params.qrToken, requests: ["pay_bill"] }),
-      });
-      const result = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(result?.error || "Could not notify staff. Please try again.");
-      setBillRequestState("sent");
-      setBillRequestMessage(result?.duplicate ? "Staff already have your bill request." : "Staff have been notified. Your bill will appear here when it is ready.");
-    } catch (error) {
+    const result = await requestTableBill({ slug: params.slug, qrToken: params.qrToken, tableLabel });
+    if (!result.ok) {
       setBillRequestState("error");
-      setBillRequestMessage(error instanceof Error ? error.message : "Could not notify staff. Please try again.");
+      setBillRequestMessage(result.error);
+      return;
     }
+    setBillRequestState("waiting");
+    setBillRequestMessage(result.duplicate
+      ? "The staff already have your request — your bill appears here the moment it is generated."
+      : "Request sent. The staff have been notified and your bill appears here automatically.");
+    void refreshTableOrders();
   }
+
+  /** Keep the bill state fresh when the realtime stream is unavailable. */
+  useEffect(() => {
+    if (tab !== "confirmed") return;
+    if (billRequestState !== "waiting") return;
+    let stopped = false;
+    const timer = setInterval(async () => {
+      if (stopped || document.visibilityState === "hidden") return;
+      const snapshot = await fetchBillSnapshot(params.slug, params.qrToken);
+      if (!snapshot || stopped) return;
+      if (snapshot.tableSessionId) saveGuestTableSession(params.qrToken, snapshot.tableSessionId);
+      if (snapshot.billToken && snapshot.tableSessionId) {
+        const link = { token: snapshot.billToken, sessionId: snapshot.tableSessionId };
+        rememberBillLink(params.qrToken, link);
+        setLastDigitalBill(link);
+        setBillRequestState("ready");
+        setBillRequestMessage("Your bill is ready! 🎉");
+        void refreshTableOrders();
+      }
+    }, 6000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [tab, billRequestState, params.slug, params.qrToken, refreshTableOrders]);
+
+  // Restore the "waiting" state for a guest who reloads or rescans the QR.
+  useEffect(() => {
+    if (tab !== "confirmed" || billRequestState !== "idle") return;
+    let stopped = false;
+    void (async () => {
+      const snapshot = await fetchBillSnapshot(params.slug, params.qrToken);
+      if (!snapshot || stopped) return;
+      if (snapshot.tableSessionId) saveGuestTableSession(params.qrToken, snapshot.tableSessionId);
+      if (snapshot.billToken && snapshot.tableSessionId) {
+        const link = { token: snapshot.billToken, sessionId: snapshot.tableSessionId };
+        rememberBillLink(params.qrToken, link);
+        setLastDigitalBill(link);
+        setBillRequestState("ready");
+      } else if (snapshot.requestedAt) {
+        setBillRequestState("waiting");
+      }
+    })();
+    return () => { stopped = true; };
+  }, [tab, billRequestState, params.slug, params.qrToken]);
 
   return (
     <div className="min-h-screen bg-[#FAFAF8]">
@@ -490,21 +532,21 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               >
                 + Order More
               </Link>
-              {!sessionData?.bill && sessionData?.session && hasBillableItems && (
+              {!sessionData?.bill && sessionData?.session && (
                 <button
                   type="button"
-                  onClick={() => void requestTableBill()}
-                  disabled={billAlreadyRequested || billRequestState === "sending"}
+                  onClick={() => void askForBill()}
+                  disabled={billRequestState === "sending" || billRequestState === "waiting"}
                   aria-live="polite"
-                  className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition active:scale-[0.98] disabled:cursor-default disabled:opacity-90 ${billAlreadyRequested ? "bg-emerald-500/15 text-emerald-200" : billRequestState === "error" ? "bg-rose-500/15 text-rose-200" : "bg-emerald-500 text-gray-950 hover:bg-emerald-400"}`}
+                  className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition active:scale-[0.98] disabled:cursor-default disabled:opacity-90 ${billRequestState === "waiting" ? "bg-emerald-500/15 text-emerald-200" : billRequestState === "error" ? "bg-rose-500/15 text-rose-200" : "bg-emerald-500 text-gray-950 hover:bg-emerald-400"}`}
                 >
                   <Receipt className="h-4 w-4" />
-                  {billRequestState === "sending" ? "Sending…" : billAlreadyRequested ? "Staff notified" : billRequestState === "error" ? "Retry bill request" : "Request bill"}
+                  {billButtonLabel(billRequestState, false)}
                 </button>
               )}
-              {!sessionData?.bill && sessionData?.session && !hasBillableItems && (
+              {!sessionData?.session && (
                 <p className="col-span-2 rounded-xl bg-white/10 px-3 py-3 text-center text-xs font-medium text-zinc-300">
-                  Bill requests are available after at least one item has been served.
+                  Place an order and your bill will appear here.
                 </p>
               )}
             </div>
@@ -515,10 +557,13 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
             )}
           </div>
 
-          {hasBillableItems && sessionData?.session?.billRequestedAt && !sessionData.bill && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              <p className="font-bold">Bill requested</p>
-              <p className="mt-1 text-xs">A staff member is preparing your final bill. It will appear here when ready.</p>
+          {billRequestState === "waiting" && !sessionData?.bill && (
+            <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+              <span className="mt-0.5 h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-amber-700 border-t-transparent" />
+              <div>
+                <p className="font-bold">Staff are preparing your bill</p>
+                <p className="mt-1 text-xs">{billStatusMessage(billRequestState, false)}</p>
+              </div>
             </div>
           )}
 

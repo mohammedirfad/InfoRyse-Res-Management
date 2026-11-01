@@ -8,6 +8,8 @@ import {
   Check, AlertCircle, ChevronDown, Sparkles
 } from "lucide-react";
 import { formatRupees, formatTime } from "@/lib/utils";
+import { fetchJsonCached, invalidateCache, peekCache } from "@/lib/cachedFetch";
+import { saveAdminRouteData } from "@/lib/adminPrefetch";
 
 type OrderItem = { id: string; nameSnapshot: string; priceCentsSnapshot: number; quantity: number; servedQuantity: number; cancelledQuantity: number };
 type Order = {
@@ -98,7 +100,7 @@ function formatElapsed(createdAt: string): string {
 }
 
 export default function OrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<Order[]>(() => peekCache<{ orders?: Order[] }>("admin:/api/admin/orders")?.orders ?? []);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<string>("All");
   const [search, setSearch] = useState("");
@@ -179,9 +181,8 @@ export default function OrdersPage() {
     if (isFetching.current) return;
     isFetching.current = true;
     try {
-      const res = await fetch("/api/admin/orders", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await fetchJsonCached<{ orders?: Order[] }>("admin:/api/admin/orders", "/api/admin/orders");
+      saveAdminRouteData("/api/admin/orders", data);
       const list: Order[] = data.orders ?? [];
       setOrders(list);
       setLoading(false);
@@ -212,7 +213,10 @@ export default function OrdersPage() {
     void load();
     const onRestaurantEvent = (event: Event) => {
       const detail = (event as CustomEvent).detail;
-      if (detail?.type === "resync" || detail?.type === "order_created" || detail?.type === "order_updated" || detail?.type === "bill_updated") void load();
+      if (detail?.type === "resync" || detail?.type === "order_created" || detail?.type === "order_updated" || detail?.type === "bill_updated") {
+        invalidateCache("admin:/api/admin/orders");
+        void load();
+      }
     };
     const onVisible = () => {
       if (document.visibilityState === "visible") void load();
@@ -314,6 +318,7 @@ export default function OrdersPage() {
         if (arrivalToastOrder?.id === order.id) {
           setArrivalToastOrder(null);
         }
+        invalidateCache("admin:/api/admin/orders");
       }
     } finally {
       setUpdatingId(null);

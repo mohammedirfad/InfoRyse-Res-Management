@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Save, Bell, Shield, Trash2, AlertTriangle, Key, Percent, Plus, X } from "lucide-react";
+import { cachedJson, invalidateCache, peekCache } from "@/lib/cachedFetch";
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -72,20 +73,22 @@ export default function SettingsPage() {
   const [deactivating, setDeactivating] = useState(false);
 
   useEffect(() => {
-    fetch("/api/admin/me").then(r => r.json()).then(d => {
-      if (d.role === "STAFF") {
-        setAccessDenied(true);
-        return;
-      }
-      if (d.restaurant) {
-        setRestName(d.restaurant.name ?? "");
-        setOpenNow(d.restaurant.openNow ?? true);
-        setTaxName(d.restaurant.taxName ?? "GST");
-        setTaxPercent(String(d.restaurant.taxPercent ?? 5));
-        setAdditionalTaxes(Array.isArray(d.restaurant.additionalTaxes) ? d.restaurant.additionalTaxes : []);
-        setUpiPaymentId(d.restaurant.upiPaymentId ?? "");
-      }
-    });
+    cachedJson<{ role?: string; restaurant?: any }>("admin:/api/admin/me", "/api/admin/me")
+      .then(({ data: d }) => {
+        if (d.role === "STAFF") {
+          setAccessDenied(true);
+          return;
+        }
+        if (d.restaurant) {
+          setRestName(d.restaurant.name ?? "");
+          setOpenNow(d.restaurant.openNow ?? true);
+          setTaxName(d.restaurant.taxName ?? "GST");
+          setTaxPercent(String(d.restaurant.taxPercent ?? 5));
+          setAdditionalTaxes(Array.isArray(d.restaurant.additionalTaxes) ? d.restaurant.additionalTaxes : []);
+          setUpiPaymentId(d.restaurant.upiPaymentId ?? "");
+        }
+      })
+      .catch(() => {});
   }, []);
 
   async function save() {
@@ -98,6 +101,8 @@ export default function SettingsPage() {
         taxName, taxPercent: Number(taxPercent), additionalTaxes, upiPaymentId,
       }),
     });
+    invalidateCache("admin:/api/admin/restaurant");
+    invalidateCache("admin:/api/admin/me");
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);

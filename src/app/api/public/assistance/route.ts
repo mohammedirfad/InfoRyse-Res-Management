@@ -14,6 +14,7 @@ const BodySchema = z.object({
   slug: z.string().min(1).max(100),
   qrToken: z.string().min(1).max(200),
   tableLabel: z.string().max(100).optional(),
+  deviceId: z.string().max(80).optional(),
   requests: z.array(z.string()).max(10),
   custom: z.string().trim().max(300).optional(),
 });
@@ -42,27 +43,26 @@ export async function POST(req: Request) {
     });
     if (!table) return Response.json({ ok: false }, { status: 404 });
 
+    const deviceId = body.deviceId?.trim() || undefined;
+
     const result = await db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${table.id}))::text AS "locked"`;
       const session = await getCurrentTableSession(tx, table.id, restaurant.id);
       if (requests.includes("pay_bill") && !session) {
-        return { error: "There is no open bill for this table yet." } as const;
+        return { error: "There is no open bill for this table yet.", tableSessionId: null } as const;
       }
 
+      // A bill request is a request to *see* the tab — it does not require the
+      // kitchen to have marked items served. The cashier reviews the tab and
+      // decides what gets billed. This keeps the guest action one tap.
       if (requests.includes("pay_bill") && session) {
-        const billableItem = await tx.orderItem.findFirst({
-          where: {
-            servedQuantity: { gt: 0 },
-            order: {
-              restaurantId: restaurant.id,
-              tableSessionId: session.id,
-              status: { not: "CANCELLED" },
-            },
-          },
-          select: { id: true },
+        const existingBill = await tx.bill.findFirst({
+          where: { restaurantId: restaurant.id, tableSessionId: session.id },
+          orderBy: { createdAt: "desc" },
+          select: { shareToken: true, paymentStatus: true },
         });
-        if (!billableItem) {
-          return { error: "A bill can be requested after at least one item has been served." } as const;
+        if (existingBill?.shareToken) {
+          return { error: "Your bill is already ready — open it from the table tab.", tableSessionId: session.id } as const;
         }
       }
 
@@ -76,7 +76,7 @@ export async function POST(req: Request) {
           },
           orderBy: { createdAt: "desc" },
         });
-        if (existing) return { request: existing, duplicate: true } as const;
+        if (existing) return { request: existing, duplicate: true, tableSessionId: session.id } as const;
       }
 
       const request = await tx.serviceRequest.create({
@@ -96,10 +96,12 @@ export async function POST(req: Request) {
           data: { billRequestedAt: new Date() },
         });
       }
-      return { request, duplicate: false } as const;
+      return { request, duplicate: false, tableSessionId: session?.id ?? null } as const;
     });
 
-    if ("error" in result) return Response.json({ ok: false, error: result.error }, { status: 409 });
+    if ("error" in result) {
+      return Response.json({ ok: false, error: result.error, tableSessionId: result.tableSessionId }, { status: 409 });
+    }
 
     if (!result.duplicate) {
       void emitOrderEvent({
@@ -112,7 +114,7 @@ export async function POST(req: Request) {
             tableLabel: table.label,
             tableSessionId: result.request.tableSessionId,
             requests: result.request.requests,
-            custom: result.request.custom,
+            custom: "custom" in result.request ? result.request.custom ?? null : null,
             status: result.request.status,
             createdAt: result.request.createdAt.toISOString(),
           },
@@ -120,7 +122,7 @@ export async function POST(req: Request) {
       });
     }
 
-    return Response.json({ ok: true, duplicate: result.duplicate }, { status: result.duplicate ? 200 : 201 });
+    return Response.json({ ok: true, duplicate: result.duplicate, tableSessionId: result.tableSessionId }, { status: result.duplicate ? 200 : 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return Response.json({ ok: false, error: error.issues[0]?.message ?? "Invalid request." }, { status: 400 });

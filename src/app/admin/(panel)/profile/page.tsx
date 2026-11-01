@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Save, MapPin, Phone, Mail, Globe, Eye, Building2, User, CheckCircle2 } from "lucide-react";
 import ImageUpload from "@/components/ImageUpload";
 import Link from "next/link";
+import { cachedJson, invalidateCache } from "@/lib/cachedFetch";
 
 export default function RestaurantProfilePage() {
   const [tab, setTab] = useState("basic");
@@ -29,37 +30,30 @@ export default function RestaurantProfilePage() {
   useEffect(() => {
     async function load() {
       try {
-        const [meRes, res] = await Promise.all([
-          fetch("/api/admin/me"),
-          fetch("/api/admin/restaurant", { cache: "no-store" }),
+        const [me, restaurant] = await Promise.all([
+          cachedJson<{ role?: string }>("admin:/api/admin/me", "/api/admin/me"),
+          cachedJson<{ restaurant?: any }>("admin:/api/admin/restaurant", "/api/admin/restaurant"),
         ]);
 
-        if (meRes.ok) {
-          const meData = await meRes.json();
-          if (meData.role === "STAFF") {
-            setAccessDenied(true);
-            setLoading(false);
-            return;
-          }
+        if (me.data.role === "STAFF") {
+          setAccessDenied(true);
+          return;
         }
 
-        if (res.ok) {
-          const data = await res.json();
-          const r = data.restaurant;
-          if (r) {
-            setSlug(r.slug || "");
-            setName(r.name || "");
-            setOwnerName(r.ownerName || "");
-            setLocation(r.location || "");
-            setPhone(r.contactPhone || "");
-            setEmail(r.contactEmail || "");
-            setLogoUrl(r.logoUrl || "");
-            setOpenNow(r.openNow ?? true);
-            setAbout(
-              r.about ||
-              `${r.name || "Our restaurant"} brings a delightful dining experience with premium ingredients and exceptional hospitality.`
-            );
-          }
+        const r = restaurant.data.restaurant;
+        if (r) {
+          setSlug(r.slug || "");
+          setName(r.name || "");
+          setOwnerName(r.ownerName || "");
+          setLocation(r.location || "");
+          setPhone(r.contactPhone || "");
+          setEmail(r.contactEmail || "");
+          setLogoUrl(r.logoUrl || "");
+          setOpenNow(r.openNow ?? true);
+          setAbout(
+            r.about ||
+            `${r.name || "Our restaurant"} brings a delightful dining experience with premium ingredients and exceptional hospitality.`
+          );
         }
       } catch (err) {
         console.error("Failed to load restaurant profile", err);
@@ -67,7 +61,7 @@ export default function RestaurantProfilePage() {
         setLoading(false);
       }
     }
-    load();
+    void load();
   }, []);
 
   async function save() {
@@ -88,6 +82,8 @@ export default function RestaurantProfilePage() {
         }),
       });
       if (res.ok) {
+        invalidateCache("admin:/api/admin/restaurant");
+        invalidateCache("admin:/api/admin/me");
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
       }

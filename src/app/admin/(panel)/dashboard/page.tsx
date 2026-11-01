@@ -10,6 +10,7 @@ import {
   ShoppingBag, TrendingUp, Clock, CheckCircle, Plus, LayoutGrid, QrCode, BarChart2, ArrowRight
 } from "lucide-react";
 import { formatRupees } from "@/lib/utils";
+import { cachedJson } from "@/lib/cachedFetch";
 
 type Order = {
   id: string; status: string; totalCents: number; orderNumber: number;
@@ -32,6 +33,24 @@ const QUICK_ACTIONS = [
 ];
 
 const DASHBOARD_CACHE_KEY = "inforyse_admin_dashboard_v1";
+const DASHBOARD_ORDERS_URL = "/api/admin/orders?view=dashboard";
+
+type DashboardSnapshot = { orders: Order[]; restaurantName: string; userRole: string };
+
+function readSnapshot(): DashboardSnapshot | null {
+  try {
+    const cached = sessionStorage.getItem(DASHBOARD_CACHE_KEY);
+    if (!cached) return null;
+    const snapshot = JSON.parse(cached);
+    return {
+      orders: Array.isArray(snapshot.orders) ? snapshot.orders : [],
+      restaurantName: typeof snapshot.restaurantName === "string" ? snapshot.restaurantName : "Your Restaurant",
+      userRole: typeof snapshot.userRole === "string" ? snapshot.userRole : "OWNER",
+    };
+  } catch {
+    return null;
+  }
+}
 
 function buildHourlySales(orders: Order[]) {
   const map: Record<number, number> = {};
@@ -47,43 +66,25 @@ function buildHourlySales(orders: Order[]) {
 }
 
 export default function DashboardPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [restaurantName, setRestaurantName] = useState("Your Restaurant");
-  const [userRole, setUserRole] = useState("OWNER");
+  const [orders, setOrders] = useState<Order[]>(() => readSnapshot()?.orders ?? []);
+  const [restaurantName, setRestaurantName] = useState(() => readSnapshot()?.restaurantName ?? "Your Restaurant");
+  const [userRole, setUserRole] = useState(() => readSnapshot()?.userRole ?? "OWNER");
 
+  // Paint from the previous snapshot instantly, refresh in the background.
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    try {
-      const cached = sessionStorage.getItem(DASHBOARD_CACHE_KEY);
-      if (cached) {
-        const snapshot = JSON.parse(cached);
-        if (Array.isArray(snapshot.orders)) setOrders(snapshot.orders);
-        if (typeof snapshot.restaurantName === "string") setRestaurantName(snapshot.restaurantName);
-        if (typeof snapshot.userRole === "string") setUserRole(snapshot.userRole);
-        setLoading(false);
-      }
-    } catch { /* a stale or unavailable browser cache should not block the dashboard */ }
 
-    // Refresh a lightweight dashboard payload in parallel with the profile request.
     Promise.all([
-      fetch("/api/admin/orders?view=dashboard", { cache: "no-store" }).then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || "Could not load dashboard orders");
-        return payload;
-      }),
-      fetch("/api/admin/me", { cache: "no-store" }).then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || "Could not load restaurant profile");
-        return payload;
-      }),
+      cachedJson<{ orders?: Order[] }>("admin:" + DASHBOARD_ORDERS_URL, DASHBOARD_ORDERS_URL, { ttlMs: 20_000 }),
+      cachedJson<{ restaurant?: { name?: string }; role?: string }>("admin:/api/admin/me", "/api/admin/me"),
     ])
       .then(([ordersData, meData]) => {
         if (cancelled) return;
-        const nextOrders = ordersData.orders ?? [];
-        const nextName = meData.restaurant?.name || "Your Restaurant";
-        const nextRole = meData.role || "OWNER";
+        const nextOrders = ordersData.data.orders ?? [];
+        const nextName = meData.data.restaurant?.name || "Your Restaurant";
+        const nextRole = meData.data.role || "OWNER";
         setOrders(nextOrders);
         setRestaurantName(nextName);
         setUserRole(nextRole);

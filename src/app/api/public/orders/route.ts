@@ -115,7 +115,7 @@ export async function POST(req: Request) {
       // A first request may have committed the order but lost its realtime
       // broadcast or its HTTP response. Re-broadcast on an idempotent retry so
       // the restaurant notification is repaired without creating an order.
-      await emitOrderEvent({
+      void emitOrderEvent({
         restaurantId: restaurant.id,
         type: "order_created",
         data: {
@@ -215,7 +215,7 @@ export async function POST(req: Request) {
       if (err?.code === "P2002") {
         const duplicate = await db.order.findFirst({ where: { idempotencyKey: body.idempotencyKey, restaurantId: restaurant.id, tableId: table.id } });
         if (duplicate) {
-          await emitOrderEvent({
+          void emitOrderEvent({
             restaurantId: restaurant.id,
             type: "order_created",
             data: {
@@ -235,7 +235,10 @@ export async function POST(req: Request) {
     }
 
     const realtimeStartedAt = performance.now();
-    await emitOrderEvent({
+    // Broadcast fire-and-forget. The guest screen must never wait on Supabase
+    // (a cold edge or a stalled HTTPS call was holding the response for tens of
+    // seconds); the admin panel also reconciles via its snapshot poll.
+    void emitOrderEvent({
       restaurantId: restaurant.id,
       type: "order_created",
       data: {

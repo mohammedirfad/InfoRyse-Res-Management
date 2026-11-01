@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { requireFastRestaurantUser, requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { getCurrentTableSession } from "@/lib/tableSessions";
 import { randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request) {
   try {
-    const { restaurantId } = await requireRestaurantUser();
+    const { restaurantId } = await requireFastRestaurantUser();
     const url = new URL(req.url);
     const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10));
     const limit = Math.max(1, parseInt(url.searchParams.get("limit") ?? "10", 10));
@@ -257,6 +257,7 @@ export async function POST(req: Request) {
       type: "bill_updated",
       data: {
         billId: createdBill.id,
+        billNumber: createdBill.billNumber,
         tableId: createdBill.tableId,
         tableSessionId: createdBill.tableSessionId,
         shareToken: createdBill.shareToken,

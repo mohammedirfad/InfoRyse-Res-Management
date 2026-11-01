@@ -20,6 +20,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { formatRupees, formatTime, formatDate } from "@/lib/utils";
+import { cachedJson, invalidateCache, peekCache } from "@/lib/cachedFetch";
 
 type StoredBill = {
   id: string;
@@ -52,19 +53,20 @@ const PAYMENT_ICONS: Record<string, any> = {
 };
 
 export default function PaymentsPage() {
-  const [bills, setBills] = useState<StoredBill[]>([]);
+  const initial = peekCache<{ bills?: StoredBill[]; pagination?: { totalPages?: number; total?: number }; totalRevenueCents?: number }>("admin:/api/admin/bills?page=1&limit=10&search=&paymentMethod=all");
+  const [bills, setBills] = useState<StoredBill[]>(initial?.bills ?? []);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [totalPages, setTotalPages] = useState(initial?.pagination?.totalPages ?? 1);
+  const [totalCount, setTotalCount] = useState(initial?.pagination?.total ?? 0);
+  const [totalRevenue, setTotalRevenue] = useState(initial?.totalRevenueCents ?? 0);
   const [search, setSearch] = useState("");
   const [methodFilter, setMethodFilter] = useState("all");
   const [selectedBillDetail, setSelectedBillDetail] = useState<StoredBill | null>(null);
-  const [restaurantName, setRestaurantName] = useState("");
+  const [restaurantName, setRestaurantName] = useState(() => peekCache<{ restaurant?: { name?: string } }>("admin:/api/admin/me")?.restaurant?.name ?? "");
 
   const fetchBills = useCallback(
-    async (targetPage = page) => {
+    async (targetPage = page, force = false) => {
       try {
         setLoading(true);
         const query = new URLSearchParams({
@@ -73,31 +75,27 @@ export default function PaymentsPage() {
           search,
           paymentMethod: methodFilter,
         });
+        const url = `/api/admin/bills?${query.toString()}`;
+        if (force) invalidateCache(`admin:${url}`);
 
-        const [res, meRes] = await Promise.all([
-          fetch(`/api/admin/bills?${query.toString()}`, { cache: "no-store" }),
-          restaurantName ? Promise.resolve(null) : fetch("/api/admin/me", { cache: "no-store" }),
+        const [billsData, meData] = await Promise.all([
+          cachedJson<any>(`admin:${url}`, url, { ttlMs: 15_000 }),
+          cachedJson<{ restaurant?: { name?: string } }>("admin:/api/admin/me", "/api/admin/me"),
         ]);
 
-        const data = await res.json();
+        const data = billsData.data;
         setBills(data.bills ?? []);
         setTotalPages(data.pagination?.totalPages ?? 1);
         setTotalCount(data.pagination?.total ?? 0);
         setTotalRevenue(data.totalRevenueCents ?? 0);
-
-        if (meRes) {
-          const meData = await meRes.json();
-          if (meData?.restaurant?.name) {
-            setRestaurantName(meData.restaurant.name);
-          }
-        }
+        if (meData.data?.restaurant?.name) setRestaurantName(meData.data.restaurant.name);
       } catch (err) {
         console.error("Failed to fetch bills:", err);
       } finally {
         setLoading(false);
       }
     },
-    [page, search, methodFilter, restaurantName]
+    [page, search, methodFilter]
   );
 
   useEffect(() => {
@@ -106,7 +104,10 @@ export default function PaymentsPage() {
 
   useEffect(() => {
     const onRestaurantEvent = (event: Event) => {
-      if (["resync", "bill_updated"].includes((event as CustomEvent).detail?.type)) void fetchBills(page);
+      if (["resync", "bill_updated"].includes((event as CustomEvent).detail?.type)) {
+        invalidateCache("admin:/api/admin/bills");
+        void fetchBills(page);
+      }
     };
     const onVisible = () => { if (document.visibilityState === "visible") void fetchBills(page); };
     window.addEventListener("inforyse:restaurant-event", onRestaurantEvent);
@@ -246,7 +247,7 @@ export default function PaymentsPage() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => fetchBills(1)}
+              onClick={() => fetchBills(1, true)}
               className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh

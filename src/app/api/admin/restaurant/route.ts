@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { requireFastRestaurantUser, requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { invalidatePublicMenu } from "@/lib/publicMenuCache";
 import { clearSession } from "@/lib/auth";
 import { invalidateRestaurantActiveCache } from "@/lib/tenant";
@@ -28,7 +28,7 @@ const DeactivateSchema = z.object({ confirmationName: z.string().trim().min(1).m
 
 export async function GET() {
   try {
-    const { restaurantId } = await requireRestaurantUser();
+    const { restaurantId } = await requireFastRestaurantUser();
     const restaurant = await db.restaurant.findUnique({ where: { id: restaurantId } });
     return Response.json({ restaurant });
   } catch (err) {

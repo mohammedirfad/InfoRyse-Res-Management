@@ -46,8 +46,13 @@ export async function broadcastOrderEvent(payload: {
     : {
         orderNumber: data.orderNumber,
         status: data.status,
-        tableId,
+        // Guests attach bills to their table tab by session id; use the
+        // canonical field name here (not the message-level `sessionId` alias).
         sessionId: data.tableSessionId ?? data.sessionId,
+        tableSessionId: data.tableSessionId ?? data.sessionId,
+        tableId,
+        billId: data.billId,
+        billNumber: data.billNumber,
         requested: data.requested,
         shareToken: payload.type === "bill_updated" ? data.shareToken : undefined,
       };
@@ -71,7 +76,7 @@ export async function broadcastOrderEvent(payload: {
       },
       body: JSON.stringify(message.payload),
       // Keep an unavailable realtime service from holding up order submission.
-      signal: AbortSignal.timeout(1500),
+      signal: AbortSignal.timeout(1200),
     });
   }));
   for (const result of results) {

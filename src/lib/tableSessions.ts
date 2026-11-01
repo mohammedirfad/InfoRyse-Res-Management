@@ -13,6 +13,32 @@ export async function getCurrentTableSession(
   tableId: string,
   restaurantId: string,
 ) {
+  // FAST PATH: exactly one open tab and it has activity inside the window.
+  // This is the normal case, and it needs a single indexed row instead of the
+  // full-history scan the repair path below uses.
+  const newest = await client.tableSession.findFirst({
+    where: { tableId, restaurantId, status: "OPEN" },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
+      billRequestedAt: true,
+      orders: {
+        select: { createdAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
+    },
+  });
+  if (newest) {
+    const lastActivity = newest.orders[0]?.createdAt ?? newest.createdAt;
+    if (newest.createdAt.getTime() >= Date.now() - TABLE_SESSION_MAX_AGE_MS
+      && lastActivity.getTime() >= Date.now() - TABLE_SESSION_IDLE_MS) {
+      return newest;
+    }
+  }
+
   const sessions = await client.tableSession.findMany({
     where: { tableId, restaurantId, status: "OPEN" },
     orderBy: { createdAt: "desc" },

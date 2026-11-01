@@ -9,7 +9,8 @@ import { useCart, formatRupees, type MenuItem } from "@/components/CartContext";
 import { getDishImageUrl } from "@/lib/dishImages";
 import { useLanguage } from "@/lib/i18n";
 import { LanguageSelector } from "@/components/LanguageSelector";
-import { clearGuestTableSession, saveGuestTableSession } from "@/lib/guestTableSession";
+import { clearGuestTableSession, guestSessionQuery, saveGuestTableSession } from "@/lib/guestTableSession";
+import { requestTableBill } from "@/lib/guestBill";
 
 /* ── types ──────────────────────────────────────────────────────────────────── */
 type Category  = { id: string; name: string; menuItems: MenuItem[] };
@@ -420,25 +421,17 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
     if (!data || billRequestState === "sending") return;
     setBillRequestState("sending");
     setBillRequestMessage("");
-    try {
-      const response = await fetch("/api/public/assistance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug: params.slug, qrToken: params.qrToken, requests: ["pay_bill"] }),
-      });
-      const result = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(result?.error ?? "Could not notify staff. Please try again.");
-      setBillRequestState("sent");
-      setBillRequestMessage(result?.duplicate ? "Staff already have your bill request." : "Bill request sent. Staff has been notified.");
-      router.push(`/r/${params.slug}/${params.qrToken}/cart?tab=confirmed`);
-    } catch (error) {
+    const result = await requestTableBill({ slug: params.slug, qrToken: params.qrToken, tableLabel: data.table.label });
+    if (!result.ok) {
       setBillRequestState("error");
-      setBillRequestMessage(error instanceof Error ? error.message : "Could not notify staff. Please try again.");
+      setBillRequestMessage(result.error);
+      window.setTimeout(() => { setBillRequestState("idle"); setBillRequestMessage(""); }, 4500);
+      return;
     }
-    window.setTimeout(() => {
-      setBillRequestState("idle");
-      setBillRequestMessage("");
-    }, 4500);
+    setBillRequestState("sent");
+    setBillRequestMessage(result.duplicate ? "Staff already have your bill request." : "Bill request sent. Staff has been notified.");
+    // Land on the table tab, where the bill appears the moment the staff generate it.
+    router.push(`/r/${params.slug}/${params.qrToken}/cart?tab=confirmed`);
   }
 
   /* fetch + cache in sessionStorage */
@@ -472,6 +465,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
           } else if (json) {
             if (cancelled) return;
             const menu = json as MenuData;
+            // Keep the last good menu on screen while a slow refresh is in flight.
             setData(menu);
             setActiveCat((current) => menu.categories.some((category) => category.id === current)
               ? current
