@@ -49,6 +49,23 @@ export async function POST(req: Request) {
         return { error: "There is no open bill for this table yet." } as const;
       }
 
+      if (requests.includes("pay_bill") && session) {
+        const billableItem = await tx.orderItem.findFirst({
+          where: {
+            servedQuantity: { gt: 0 },
+            order: {
+              restaurantId: restaurant.id,
+              tableSessionId: session.id,
+              status: { not: "CANCELLED" },
+            },
+          },
+          select: { id: true },
+        });
+        if (!billableItem) {
+          return { error: "A bill can be requested after at least one item has been served." } as const;
+        }
+      }
+
       if (session && requests.length === 1 && requests[0] === "pay_bill") {
         const existing = await tx.serviceRequest.findFirst({
           where: {

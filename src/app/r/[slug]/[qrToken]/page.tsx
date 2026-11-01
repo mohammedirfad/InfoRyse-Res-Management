@@ -570,6 +570,9 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
 
   const d = data!;
   const isOccupied = d.table.status === "OCCUPIED";
+  const hasActiveDiningSession = Boolean(d.table.activeSessionId);
+  const cartHref = `/r/${params.slug}/${params.qrToken}/cart${totalCount === 0 && hasActiveDiningSession ? "?tab=confirmed" : ""}`;
+  const cartLabel = totalCount === 0 && hasActiveDiningSession ? "My Orders" : t("cart", "Cart");
 
   /* ── LANDING SPLASH PAGE ──────────────────────────────────────────────────── */
   if (phase === "landing") return (
@@ -652,13 +655,13 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                   className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors">
                   <Search className="h-4 w-4 text-gray-600"/>
                 </button>
-                {totalCount > 0 && (
-                  <Link href={`/r/${params.slug}/${params.qrToken}/cart`}
+                {(totalCount > 0 || hasActiveDiningSession) && (
+                  <Link href={cartHref} aria-label={cartLabel}
                     className="relative p-2 rounded-full bg-gray-900 text-white">
-                    <ShoppingCart className="h-4 w-4"/>
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full text-[9px] w-4 h-4 flex items-center justify-center font-bold">
+                    {totalCount > 0 ? <ShoppingCart className="h-4 w-4"/> : <ReceiptText className="h-4 w-4"/>}
+                    {totalCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full text-[9px] w-4 h-4 flex items-center justify-center font-bold">
                       {totalCount>9?"9+":totalCount}
-                    </span>
+                    </span>}
                   </Link>
                 )}
               </div>
@@ -1012,15 +1015,15 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
           <span className="text-xl">🏠</span>
           <span className="text-[10px] font-bold">{t("menu", "Menu")}</span>
         </button>
-        <Link href={`/r/${params.slug}/${params.qrToken}/cart`}
+        <Link href={cartHref}
           className="flex flex-col items-center gap-0.5 text-gray-400 relative">
-          <ShoppingCart className="h-5 w-5"/>
+          {totalCount > 0 ? <ShoppingCart className="h-5 w-5"/> : hasActiveDiningSession ? <ReceiptText className="h-5 w-5"/> : <ShoppingCart className="h-5 w-5"/>}
           {totalCount>0 && (
             <span className="absolute -top-1 right-2 bg-red-500 text-white rounded-full text-[8px] w-3.5 h-3.5 flex items-center justify-center font-bold">
               {totalCount>9?"9+":totalCount}
             </span>
           )}
-          <span className="text-[10px] font-medium">{t("cart", "Cart")}</span>
+          <span className="text-[10px] font-medium">{cartLabel}</span>
         </Link>
         <button type="button" aria-label="Request bill" onClick={() => void requestBill()} disabled={billRequestState === "sending"}
           className={`flex flex-col items-center gap-0.5 transition-transform active:scale-90 disabled:opacity-60 ${billRequestState === "sent" ? "text-emerald-700" : "text-gray-400"}`}>

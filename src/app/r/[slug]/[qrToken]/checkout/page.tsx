@@ -32,13 +32,33 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
     phone?: string;
     email?: string;
   }>({});
-  const [idempotencyKey]        = useState(() => crypto.randomUUID());
+  const [idempotencyKey, setIdempotencyKey] = useState("");
+  const cartFingerprint = lines.map((line) => `${line.item.id}:${line.quantity}`).sort().join("|");
+  const pendingOrderStorageKey = `inforyse_pending_order_${params.slug}_${params.qrToken}`;
 
   const [restaurantDiscount, setRestaurantDiscount] = useState<{
     active: boolean;
     percent: number;
     name: string;
   }>({ active: false, percent: 0, name: "" });
+
+  useEffect(() => {
+    if (!cartFingerprint) {
+      setIdempotencyKey("");
+      return;
+    }
+    let key = "";
+    try {
+      const raw = localStorage.getItem(pendingOrderStorageKey);
+      const saved = raw ? JSON.parse(raw) as { fingerprint?: string; key?: string; createdAt?: number } : null;
+      if (saved?.fingerprint === cartFingerprint && saved.key && Date.now() - (saved.createdAt ?? 0) < 30 * 60 * 1000) {
+        key = saved.key;
+      }
+    } catch { /* Replace invalid browser state below. */ }
+    if (!key) key = crypto.randomUUID();
+    setIdempotencyKey(key);
+    try { localStorage.setItem(pendingOrderStorageKey, JSON.stringify({ fingerprint: cartFingerprint, key, createdAt: Date.now() })); } catch { /* Server idempotency still protects in-page retries. */ }
+  }, [cartFingerprint, pendingOrderStorageKey]);
 
   useEffect(() => {
     const cacheKey = `menu_${params.slug}_${params.qrToken}`;
@@ -90,6 +110,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
   }
 
   async function placeOrder() {
+    if (!idempotencyKey) return;
     if (!validate()) return;
     setSubmitting(true);
     setError(null);
@@ -123,7 +144,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
       // Save order to localStorage with session ID so cart page shows it during active meal
       if (json.tableSessionId) saveGuestTableSession(params.qrToken, json.tableSessionId);
       const existing = getStoredOrders(params.qrToken, json.tableSessionId);
-      existing.push({
+      if (!existing.some((order) => order.id === json.order.id || order.orderNumber === json.order.orderNumber)) existing.push({
         id:          json.order.id,
         orderNumber: json.order.orderNumber,
         status:      "NEW",
@@ -137,6 +158,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
         sessionId:   json.tableSessionId,
       });
       saveStoredOrders(params.qrToken, existing, json.tableSessionId);
+      try { localStorage.removeItem(pendingOrderStorageKey); } catch { /* ignore unavailable browser storage */ }
 
       clear();
       try {
@@ -145,7 +167,8 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
 
       const confirmedName = capitalizeInitials(json.order.customerName || name);
       const confirmedTotal = Number.isFinite(json.order.totalCents) ? json.order.totalCents : grandTotal;
-      router.push(`/r/${params.slug}/${params.qrToken}/confirmation?orderNumber=${json.order.orderNumber}&name=${encodeURIComponent(confirmedName)}&total=${confirmedTotal}`);
+      const sessionQuery = json.tableSessionId ? `&sessionId=${encodeURIComponent(json.tableSessionId)}` : "";
+      router.push(`/r/${params.slug}/${params.qrToken}/confirmation?orderNumber=${json.order.orderNumber}&name=${encodeURIComponent(confirmedName)}&total=${confirmedTotal}${sessionQuery}`);
     } catch {
       setError("Network error — please try again");
       setSubmitting(false);
@@ -349,7 +372,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
       <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-black/5 p-4 safe-pb z-30 shadow-lg">
         <button
           onClick={placeOrder}
-          disabled={submitting || lines.length === 0}
+          disabled={submitting || lines.length === 0 || !idempotencyKey}
           className="w-full bg-[#132A1E] text-white flex items-center justify-between px-5 py-4 text-base shadow-xl rounded-2xl disabled:opacity-50 active:scale-[0.98] transition-all font-bold"
         >
           <span>{submitting ? t("placingOrder", "Placing Order…") : t("placeOrder", "Place Order")}</span>

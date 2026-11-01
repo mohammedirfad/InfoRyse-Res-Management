@@ -13,8 +13,8 @@ export type OrderEventPayload = {
   data?: any;
 };
 
-export function emitOrderEvent(payload: OrderEventPayload): void {
-  void broadcastOrderEvent(payload).catch((err) => {
+export function emitOrderEvent(payload: OrderEventPayload): Promise<void> {
+  return broadcastOrderEvent(payload).catch((err) => {
     console.error("Failed to broadcast restaurant event", err);
   });
 }

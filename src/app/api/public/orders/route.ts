@@ -37,6 +37,7 @@ export async function POST(req: Request) {
   let tableLookupMs = 0;
   let itemValidationMs = 0;
   let writeTransactionMs = 0;
+  let realtimeBroadcastMs = 0;
   try {
     const body = BodySchema.parse(await req.json());
 
@@ -105,13 +106,29 @@ export async function POST(req: Request) {
     //    and network retries).
     const validationStartedAt = performance.now();
     const [existing, dbItems] = await Promise.all([
-      db.order.findUnique({ where: { idempotencyKey: body.idempotencyKey } }),
+      db.order.findFirst({ where: { idempotencyKey: body.idempotencyKey, restaurantId: restaurant.id, tableId: table.id } }),
       db.menuItem.findMany({
         where: { id: { in: body.items.map((item) => item.menuItemId) }, restaurantId: restaurant.id, deletedAt: null },
       }),
     ]);
     if (existing) {
-      return Response.json({ order: existing, duplicate: true }, { status: 200 });
+      // A first request may have committed the order but lost its realtime
+      // broadcast or its HTTP response. Re-broadcast on an idempotent retry so
+      // the restaurant notification is repaired without creating an order.
+      await emitOrderEvent({
+        restaurantId: restaurant.id,
+        type: "order_created",
+        data: {
+          orderId: existing.id,
+          orderNumber: existing.orderNumber,
+          customerName: existing.customerName,
+          createdAt: existing.createdAt,
+          tableLabel: table.label,
+          tableId: table.id,
+          totalCents: existing.totalCents,
+        },
+      });
+      return Response.json({ order: existing, tableSessionId: existing.tableSessionId, duplicate: true }, { status: 200 });
     }
 
     // 6) Re-price every item from the DATABASE — never trust a price the
@@ -196,12 +213,28 @@ export async function POST(req: Request) {
       // Concurrent retries with the same idempotency key can race past the
       // initial lookup. Return the already-created order instead of a 500.
       if (err?.code === "P2002") {
-        const duplicate = await db.order.findUnique({ where: { idempotencyKey: body.idempotencyKey } });
-        if (duplicate) return Response.json({ order: duplicate, duplicate: true }, { status: 200 });
+        const duplicate = await db.order.findFirst({ where: { idempotencyKey: body.idempotencyKey, restaurantId: restaurant.id, tableId: table.id } });
+        if (duplicate) {
+          await emitOrderEvent({
+            restaurantId: restaurant.id,
+            type: "order_created",
+            data: {
+              orderId: duplicate.id,
+              orderNumber: duplicate.orderNumber,
+              customerName: duplicate.customerName,
+              createdAt: duplicate.createdAt,
+              tableLabel: table.label,
+              tableId: table.id,
+              totalCents: duplicate.totalCents,
+            },
+          });
+          return Response.json({ order: duplicate, tableSessionId: duplicate.tableSessionId, duplicate: true }, { status: 200 });
+        }
       }
       throw err;
     }
 
+    const realtimeStartedAt = performance.now();
     await emitOrderEvent({
       restaurantId: restaurant.id,
       type: "order_created",
@@ -215,9 +248,10 @@ export async function POST(req: Request) {
         totalCents: session.order.totalCents,
       },
     });
+    realtimeBroadcastMs = performance.now() - realtimeStartedAt;
 
     const totalMs = performance.now() - requestStartedAt;
-    const serverTiming = `qr_table;dur=${tableLookupMs.toFixed(1)}, item_validation;dur=${itemValidationMs.toFixed(1)}, order_write;dur=${writeTransactionMs.toFixed(1)}, total;dur=${totalMs.toFixed(1)}`;
+    const serverTiming = `qr_table;dur=${tableLookupMs.toFixed(1)}, item_validation;dur=${itemValidationMs.toFixed(1)}, order_write;dur=${writeTransactionMs.toFixed(1)}, realtime_broadcast;dur=${realtimeBroadcastMs.toFixed(1)}, total;dur=${totalMs.toFixed(1)}`;
     console.info("[order:create:timing]", serverTiming);
     return Response.json(
       { order: session.order, tableSessionId: session.tableSessionId },

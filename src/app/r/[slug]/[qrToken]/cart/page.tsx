@@ -255,10 +255,11 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
 
   const tableLabel = sessionData?.table?.label ?? "Your Table";
   const confirmedCount = sessionData?.session?.orders.length ?? pastOrders.length;
-  const billAlreadyRequested = billRequestState === "sent" || Boolean(sessionData?.session?.billRequestedAt);
+  const hasBillableItems = Boolean(sessionData?.session?.aggregatedItems.length);
+  const billAlreadyRequested = hasBillableItems && (billRequestState === "sent" || Boolean(sessionData?.session?.billRequestedAt));
 
   async function requestTableBill() {
-    if (!sessionData?.session || billAlreadyRequested || billRequestState === "sending") return;
+    if (!sessionData?.session || !hasBillableItems || billAlreadyRequested || billRequestState === "sending") return;
     setBillRequestState("sending");
     setBillRequestMessage("");
     try {
@@ -489,7 +490,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               >
                 + Order More
               </Link>
-              {!sessionData?.bill && sessionData?.session && (
+              {!sessionData?.bill && sessionData?.session && hasBillableItems && (
                 <button
                   type="button"
                   onClick={() => void requestTableBill()}
@@ -501,6 +502,11 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                   {billRequestState === "sending" ? "Sending…" : billAlreadyRequested ? "Staff notified" : billRequestState === "error" ? "Retry bill request" : "Request bill"}
                 </button>
               )}
+              {!sessionData?.bill && sessionData?.session && !hasBillableItems && (
+                <p className="col-span-2 rounded-xl bg-white/10 px-3 py-3 text-center text-xs font-medium text-zinc-300">
+                  Bill requests are available after at least one item has been served.
+                </p>
+              )}
             </div>
             {billRequestMessage && (
               <p role={billRequestState === "error" ? "alert" : "status"} className={`mt-2 text-xs ${billRequestState === "error" ? "text-rose-200" : "text-emerald-200"}`}>
@@ -509,7 +515,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
             )}
           </div>
 
-          {sessionData?.session?.billRequestedAt && !sessionData.bill && (
+          {hasBillableItems && sessionData?.session?.billRequestedAt && !sessionData.bill && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <p className="font-bold">Bill requested</p>
               <p className="mt-1 text-xs">A staff member is preparing your final bill. It will appear here when ready.</p>

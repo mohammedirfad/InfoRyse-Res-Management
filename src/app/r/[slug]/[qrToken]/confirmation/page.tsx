@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { UtensilsCrossed, RefreshCw, X, AlertTriangle } from "lucide-react";
+import { UtensilsCrossed, RefreshCw, X, AlertTriangle, ReceiptText, Download } from "lucide-react";
 import { getStoredOrders, saveStoredOrders } from "@/components/CartContext";
 
 const STEPS: { label: string; subLabel: string; key: string }[] = [
@@ -32,10 +32,17 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   const [cancelling, setCancelling]   = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelled, setCancelled]     = useState(false);
+  const [tableSessionId, setTableSessionId] = useState<string | null>(sp.get("sessionId"));
+  const [billShareToken, setBillShareToken] = useState<string | null>(null);
+  const [hasBillableItems, setHasBillableItems] = useState(false);
+  const [billRequestState, setBillRequestState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [billRequestMessage, setBillRequestMessage] = useState("");
 
   const nudgeTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const statusRef = useRef(status);
   statusRef.current = status;
+  const tableSessionIdRef = useRef(tableSessionId);
+  tableSessionIdRef.current = tableSessionId;
   const isDone      = status === "COMPLETED" || status === "CANCELLED";
   const canCancel   = CANCELLABLE.includes(status) && !cancelled;
   const currentIdx  = STATUS_ORDER.indexOf(status);
@@ -52,6 +59,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       if (!nextStatus || stopped) return;
       statusRef.current = nextStatus;
       setStatus(nextStatus);
+      if (nextStatus === "COMPLETED") setHasBillableItems(true);
       setLastUpdated(new Date());
       if (nextStatus === "CANCELLED") setCancelled(true);
       if (nextStatus === "COMPLETED" || nextStatus === "CANCELLED") {
@@ -73,9 +81,14 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
         streamConnected = false;
         const pollStatus = () => {
           if (stopped || streamConnected || document.visibilityState === "hidden" || ["COMPLETED", "CANCELLED"].includes(statusRef.current)) return;
-          void fetch(`/api/public/order-status?slug=${encodeURIComponent(params.slug)}&orderNumber=${encodeURIComponent(orderNumber)}`, { cache: "no-store" })
+          void fetch(`/api/public/order-status?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}&orderNumber=${encodeURIComponent(orderNumber)}`, { cache: "no-store" })
             .then((response) => response.ok ? response.json() : null)
-            .then((data) => { if (data?.status) applyStatus(data.status); })
+            .then((data) => {
+              if (data?.status) applyStatus(data.status);
+              if (data?.tableSessionId) setTableSessionId(data.tableSessionId);
+              if (data?.billShareToken) setBillShareToken(data.billShareToken);
+              setHasBillableItems(Boolean(data?.hasBillableItems));
+            })
             .catch(() => {});
         };
         if (!fallbackTimer) {
@@ -87,11 +100,22 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       };
       source.addEventListener("realtime_unavailable", () => source?.onerror?.(new Event("error")));
       source.addEventListener("snapshot", (rawEvent) => {
-        try { applyStatus(JSON.parse((rawEvent as MessageEvent).data).status); } catch { /* Ignore malformed snapshot. */ }
+        try {
+          const snapshot = JSON.parse((rawEvent as MessageEvent).data);
+          applyStatus(snapshot.status);
+          if (snapshot.tableSessionId) setTableSessionId(snapshot.tableSessionId);
+          if (snapshot.billShareToken) setBillShareToken(snapshot.billShareToken);
+          setHasBillableItems(Boolean(snapshot.hasBillableItems));
+        } catch { /* Ignore malformed snapshot. */ }
       });
       source.addEventListener("restaurant_event", (rawEvent) => {
       try {
         const event = JSON.parse((rawEvent as MessageEvent).data);
+        if (event.type === "bill_updated") {
+          const data = event.data ?? {};
+          if (data.shareToken && data.sessionId && data.sessionId === tableSessionIdRef.current) setBillShareToken(data.shareToken);
+          return;
+        }
         if (event.type !== "order_updated") return;
         const data = event.data ?? {};
         if (String(data.orderNumber) === String(orderNumber)) applyStatus(data.status);
@@ -152,6 +176,26 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       setCancelError("Network error — try again");
     }
     setCancelling(false);
+  }
+
+  async function requestBill() {
+    if (!hasBillableItems || status === "CANCELLED") return;
+    setBillRequestState("sending");
+    setBillRequestMessage("");
+    try {
+      const response = await fetch("/api/public/assistance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: params.slug, qrToken: params.qrToken, requests: ["pay_bill"] }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Could not request the bill. Please try again.");
+      setBillRequestState("sent");
+      setBillRequestMessage("The staff has been notified. Your bill will appear here when it is ready.");
+    } catch (error) {
+      setBillRequestState("error");
+      setBillRequestMessage(error instanceof Error ? error.message : "Could not request the bill. Please try again.");
+    }
   }
 
   function fmt(d: Date) {
@@ -342,6 +386,39 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
         )}
 
         {/* Action buttons */}
+        <section className="rounded-2xl border border-[#132A1E]/10 bg-white p-4 shadow-sm" aria-labelledby="bill-actions-title">
+          <div className="flex items-start gap-3">
+            <div className="rounded-xl bg-[#132A1E]/5 p-2.5 text-[#132A1E]"><ReceiptText className="h-5 w-5" /></div>
+            <div className="min-w-0 flex-1">
+              <h2 id="bill-actions-title" className="font-bold text-gray-900">Your bill</h2>
+              <p className="mt-1 text-xs leading-relaxed text-gray-500">
+                {billShareToken ? "Your bill is ready to view, download, or print." : "Request the bill here. Staff will prepare it for the items served at your table."}
+              </p>
+            </div>
+          </div>
+          {billShareToken ? (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Link href={`/bill/${encodeURIComponent(billShareToken)}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#132A1E] px-3 py-2 text-sm font-semibold text-white">
+                <ReceiptText className="h-4 w-4" /> View bill
+              </Link>
+              <Link href={`/bill/${encodeURIComponent(billShareToken)}/pdf`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#132A1E]/20 px-3 py-2 text-sm font-semibold text-[#132A1E]">
+                <Download className="h-4 w-4" /> Download PDF
+              </Link>
+            </div>
+          ) : hasBillableItems && status !== "CANCELLED" ? (
+            <button type="button" onClick={requestBill} disabled={!tableSessionId || billRequestState === "sending" || billRequestState === "sent" || status === "CANCELLED"}
+              className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#132A1E] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1a3828] disabled:cursor-not-allowed disabled:opacity-55">
+              <ReceiptText className="h-4 w-4" />
+              {billRequestState === "sending" ? "Requesting bill…" : billRequestState === "sent" ? "Bill requested" : "Request bill"}
+            </button>
+          ) : (
+            <p className="mt-3 rounded-xl bg-stone-50 px-3 py-3 text-center text-xs text-stone-500">
+              {status === "CANCELLED" ? "A cancelled order cannot request a bill." : "Bill requests are available after an item has been served."}
+            </p>
+          )}
+          {billRequestMessage && <p role={billRequestState === "error" ? "alert" : "status"} className={`mt-2 text-xs ${billRequestState === "error" ? "text-red-600" : "text-emerald-700"}`}>{billRequestMessage}</p>}
+        </section>
+
         <div className="grid grid-cols-2 gap-3">
           <Link href={`/r/${params.slug}/${params.qrToken}`}
             className="btn-primary border-2 border-[#132A1E] text-[#132A1E] justify-center py-3.5 rounded-2xl font-semibold">
