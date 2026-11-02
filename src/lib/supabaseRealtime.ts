@@ -65,7 +65,10 @@ export async function broadcastOrderEvent(payload: {
       payload: { restaurantId: payload.restaurantId, type: payload.type, data: publicData },
     }] : []),
   ];
-  const results = await Promise.all(messages.map(async (message) => {
+  // Settle every topic publish before returning. Promise.all would reject as
+  // soon as one request fails while the other publish could still be running;
+  // on serverless hosts that remaining publish may be frozen with the request.
+  const results = await Promise.allSettled(messages.map(async (message) => {
     const endpoint = `${base}/realtime/v1/api/broadcast/${encodeURIComponent(message.topic)}/events/restaurant_event?private=${message.private}`;
     return fetch(endpoint, {
       method: "POST",
@@ -80,7 +83,11 @@ export async function broadcastOrderEvent(payload: {
     });
   }));
   for (const result of results) {
-    if (!result.ok) console.error(`[realtime:broadcast] Supabase returned ${result.status}`);
+    if (result.status === "rejected") {
+      console.error("[realtime:broadcast] Supabase publish failed", result.reason);
+    } else if (!result.value.ok) {
+      console.error(`[realtime:broadcast] Supabase returned ${result.value.status}`);
+    }
   }
 }
 

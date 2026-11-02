@@ -2,6 +2,7 @@
 
 import {
   guestSessionQuery,
+  clearStoredBillLink,
   readGuestDeviceId as readGuestDeviceIdFromStore,
   readStoredBillLink,
   saveGuestTableSession,
@@ -42,6 +43,7 @@ export type BillRequestResult =
 export async function requestTableBill(params: {
   slug: string;
   qrToken: string;
+  tableSessionId?: string | null;
   /** Only used for the UI label; the server always uses the real table label. */
   tableLabel?: string;
 }): Promise<BillRequestResult> {
@@ -54,6 +56,7 @@ export async function requestTableBill(params: {
         slug,
         qrToken,
         tableLabel: params.tableLabel,
+        tableSessionId: params.tableSessionId ?? undefined,
         requests: ["pay_bill"],
         deviceId: readGuestDeviceId(qrToken) || undefined,
       }),
@@ -104,6 +107,10 @@ export async function fetchBillSnapshot(
 /** Persist the delivered bill link for this QR (survives reloads/rescans). */
 export function rememberBillLink(qrToken: string, link: StoredBillLink) {
   saveStoredBillLink(qrToken, link);
+}
+
+export function forgetBillLink(qrToken: string) {
+  clearStoredBillLink(qrToken);
 }
 
 /** The bill link this device already received for the current table tab. */

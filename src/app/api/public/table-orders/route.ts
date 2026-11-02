@@ -20,7 +20,6 @@ export async function GET(req: Request) {
     const url     = new URL(req.url);
     const slug    = url.searchParams.get("slug");
     const qrToken = url.searchParams.get("qrToken");
-    const requestedSessionId = url.searchParams.get("sessionId");
 
     if (!slug || !qrToken) {
       return Response.json({ error: "Missing required parameters" }, { status: 400 });
@@ -53,9 +52,10 @@ export async function GET(req: Request) {
     const publicTable = { id: table.id, label: table.label, status: table.status };
 
     // Find the currently open TableSession for this table
-    const currentSession = requestedSessionId
-      ? await db.tableSession.findFirst({ where: { id: requestedSessionId, tableId: table.id, restaurantId: restaurant.id } })
-      : await getCurrentTableSession(db, table.id, restaurant.id);
+    // The server is authoritative for the current visit. Never load a session
+    // just because a browser remembers its ID; that ID may refer to a settled
+    // bill from the previous visit.
+    const currentSession = await getCurrentTableSession(db, table.id, restaurant.id);
     let session = currentSession ? await db.tableSession.findUnique({
       where: { id: currentSession.id },
       select: {
@@ -88,7 +88,7 @@ export async function GET(req: Request) {
     }) : null;
 
     // Resilient fallback: If no open session exists yet, check if there are recent unlinked active orders for this table
-    if (!session && !requestedSessionId) {
+    if (!session) {
       const recentOrders = await db.order.findMany({
         where: {
           tableId: table.id,

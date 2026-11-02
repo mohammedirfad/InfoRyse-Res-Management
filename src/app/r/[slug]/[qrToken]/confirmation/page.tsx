@@ -5,8 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { UtensilsCrossed, RefreshCw, X, AlertTriangle, ReceiptText, Download } from "lucide-react";
 import { getStoredOrders, saveStoredOrders } from "@/components/CartContext";
-import { requestTableBill, fetchBillSnapshot, rememberBillLink, recallBillLink } from "@/lib/guestBill";
-import { saveGuestTableSession } from "@/lib/guestTableSession";
+import { requestTableBill } from "@/lib/guestBill";
 
 const STEPS: { label: string; subLabel: string; key: string }[] = [
   { label: "Order Placed",         subLabel: "We received your order",       key: "NEW"       },
@@ -37,6 +36,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   const [tableSessionId, setTableSessionId] = useState<string | null>(sp.get("sessionId"));
   const [billShareToken, setBillShareToken] = useState<string | null>(null);
   const [hasBillableItems, setHasBillableItems] = useState(false);
+  const [tableSessionOpen, setTableSessionOpen] = useState(false);
   const [billRequestState, setBillRequestState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [billRequestMessage, setBillRequestMessage] = useState("");
 
@@ -88,8 +88,9 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
             .then((data) => {
               if (data?.status) applyStatus(data.status);
               if (data?.tableSessionId) setTableSessionId(data.tableSessionId);
-              if (data?.billShareToken) setBillShareToken(data.billShareToken);
-              setHasBillableItems(Boolean(data?.billShareToken) || statusRef.current === "COMPLETED");
+              setBillShareToken(data?.billShareToken ?? null);
+              setHasBillableItems(Boolean(data?.hasBillableItems));
+              setTableSessionOpen(Boolean(data?.tableSessionOpen));
             })
             .catch(() => {});
         };
@@ -106,8 +107,9 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
           const snapshot = JSON.parse((rawEvent as MessageEvent).data);
           applyStatus(snapshot.status);
           if (snapshot.tableSessionId) setTableSessionId(snapshot.tableSessionId);
-          if (snapshot.billShareToken) setBillShareToken(snapshot.billShareToken);
+          setBillShareToken(snapshot.billShareToken ?? null);
           setHasBillableItems(Boolean(snapshot.hasBillableItems));
+          setTableSessionOpen(Boolean(snapshot.tableSessionOpen));
         } catch { /* Ignore malformed snapshot. */ }
       });
       source.addEventListener("restaurant_event", (rawEvent) => {
@@ -184,7 +186,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
     if (status === "CANCELLED" || billRequestState === "sending") return;
     setBillRequestState("sending");
     setBillRequestMessage("");
-    const result = await requestTableBill({ slug: params.slug, qrToken: params.qrToken });
+    const result = await requestTableBill({ slug: params.slug, qrToken: params.qrToken, tableSessionId });
     if (!result.ok) {
       setBillRequestState("error");
       setBillRequestMessage(result.error);
@@ -196,25 +198,27 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       : "Request sent — the staff have been notified and your bill appears here automatically.");
   }
 
-  // Pick up a bill that was delivered while this page was open or after a reload.
+  // Resolve bills by this order's ID. A QR-wide cached bill can belong to an
+  // earlier visit at the same table and must never appear on a new order.
   useEffect(() => {
     if (!orderNumber) return;
     let stopped = false;
     const hydrate = async () => {
-      const snapshot = await fetchBillSnapshot(params.slug, params.qrToken);
-      if (!snapshot || stopped) return;
-      if (snapshot.tableSessionId) {
-        setTableSessionId(snapshot.tableSessionId);
-        saveGuestTableSession(params.qrToken, snapshot.tableSessionId);
-      }
-      if (snapshot.billToken && snapshot.tableSessionId) {
-        rememberBillLink(params.qrToken, { token: snapshot.billToken, sessionId: snapshot.tableSessionId });
-        setBillShareToken(snapshot.billToken);
-      }
-      if (snapshot.requestedAt) setHasBillableItems(true);
+      try {
+        const response = await fetch(`/api/public/order-status?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}&orderNumber=${encodeURIComponent(orderNumber)}`, { cache: "no-store" });
+        if (!response.ok || stopped) return;
+        const snapshot = await response.json();
+        if (snapshot.status) {
+          statusRef.current = snapshot.status;
+          setStatus(snapshot.status);
+          if (snapshot.status === "CANCELLED") setCancelled(true);
+        }
+        if (snapshot.tableSessionId) setTableSessionId(snapshot.tableSessionId);
+        setBillShareToken(snapshot.billShareToken ?? null);
+        setHasBillableItems(Boolean(snapshot.hasBillableItems));
+        setTableSessionOpen(Boolean(snapshot.tableSessionOpen));
+      } catch { /* Keep the live event stream as the primary status source. */ }
     };
-    const saved = recallBillLink(params.qrToken);
-    if (saved) setBillShareToken(saved.token);
     void hydrate();
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") void hydrate();
@@ -430,7 +434,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
                 <Download className="h-4 w-4" /> Download PDF
               </Link>
             </div>
-          ) : hasBillableItems && status !== "CANCELLED" ? (
+          ) : hasBillableItems && tableSessionOpen && status !== "CANCELLED" ? (
             <button type="button" onClick={requestBill} disabled={!tableSessionId || billRequestState === "sending" || billRequestState === "sent" || status === "CANCELLED"}
               className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#132A1E] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1a3828] disabled:cursor-not-allowed disabled:opacity-55">
               <ReceiptText className="h-4 w-4" />
@@ -438,7 +442,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
             </button>
           ) : (
             <p className="mt-3 rounded-xl bg-stone-50 px-3 py-3 text-center text-xs text-stone-500">
-              {status === "CANCELLED" ? "A cancelled order cannot request a bill." : "Your bill becomes available once you have an order at this table."}
+              {status === "CANCELLED" ? "A cancelled order cannot request a bill." : tableSessionOpen ? "Your bill becomes available after an item is served." : "This order belongs to a closed table visit. Open the current table tab for its bill."}
             </p>
           )}
           {billRequestMessage && <p role={billRequestState === "error" ? "alert" : "status"} className={`mt-2 text-xs ${billRequestState === "error" ? "text-red-600" : "text-emerald-700"}`}>{billRequestMessage}</p>}

@@ -55,7 +55,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (!didUpdate) return Response.json({ error: "Order status changed while processing. Refresh and try again." }, { status: 409 });
     const updated = await db.order.findUnique({ where: { id: order.id } });
 
-    void emitOrderEvent({
+    await emitOrderEvent({
       restaurantId,
       type: "order_updated",
       data: { orderId: order.id, orderNumber: order.orderNumber, tableId: order.tableId, status: nextStatus },

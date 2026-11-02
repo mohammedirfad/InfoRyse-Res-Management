@@ -24,6 +24,7 @@ import {
   fetchBillSnapshot,
   rememberBillLink,
   recallBillLink,
+  forgetBillLink,
   billButtonLabel,
   billStatusMessage,
   type BillStage,
@@ -137,7 +138,10 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
           // A new table session invalidates the previous guest's bill link on this device.
           const previous = recallBillLink(params.qrToken);
           if (previous?.sessionId && previous.sessionId !== data.session.id) {
+            forgetBillLink(params.qrToken);
             setLastDigitalBill(null);
+            setBillRequestState("idle");
+            setBillRequestMessage("");
           }
           if (data.bill?.shareToken) {
             const savedBill = { token: data.bill.shareToken, sessionId: data.bill.tableSessionId || data.session.id };
@@ -589,7 +593,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
             </section>
           )}
 
-          {!sessionData?.session && lastDigitalBill?.token && (
+          {!isFetchingSession && !sessionData?.session && lastDigitalBill?.token && (
             <section className="flex items-center justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
               <div><p className="font-bold text-emerald-950">Your digital bill is ready</p><p className="mt-1 text-xs text-emerald-800">View, download, or share your bill.</p></div>
               <Link href={`/bill/${lastDigitalBill.token}`} target="_blank" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-emerald-950 px-3 py-2 text-xs font-bold text-white"><Download className="h-4 w-4" /> View bill</Link>

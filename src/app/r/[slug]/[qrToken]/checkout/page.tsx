@@ -8,6 +8,7 @@ import { useCart, formatRupees, getStoredOrders, saveStoredOrders } from "@/comp
 import { useLanguage } from "@/lib/i18n";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { saveGuestTableSession } from "@/lib/guestTableSession";
+import { forgetBillLink, recallBillLink } from "@/lib/guestBill";
 import { capitalizeInitials } from "@/lib/nameFormat";
 
 type OrderType     = "DINE_IN" | "TAKEAWAY";
@@ -115,7 +116,13 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
   function goToConfirmation(json: any) {
     try {
       // Save order to localStorage with session ID so the table tab shows it immediately.
-      if (json.tableSessionId) saveGuestTableSession(params.qrToken, json.tableSessionId);
+      if (json.tableSessionId) {
+        const previousBill = recallBillLink(params.qrToken);
+        if (previousBill?.sessionId && previousBill.sessionId !== json.tableSessionId) {
+          forgetBillLink(params.qrToken);
+        }
+        saveGuestTableSession(params.qrToken, json.tableSessionId);
+      }
       const existing = getStoredOrders(params.qrToken, json.tableSessionId);
       if (!existing.some((order) => order.id === json.order.id || order.orderNumber === json.order.orderNumber)) {
         existing.push({

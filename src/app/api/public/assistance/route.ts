@@ -14,6 +14,7 @@ const BodySchema = z.object({
   slug: z.string().min(1).max(100),
   qrToken: z.string().min(1).max(200),
   tableLabel: z.string().max(100).optional(),
+  tableSessionId: z.string().uuid().optional(),
   deviceId: z.string().max(80).optional(),
   requests: z.array(z.string()).max(10),
   custom: z.string().trim().max(300).optional(),
@@ -48,6 +49,9 @@ export async function POST(req: Request) {
     const result = await db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${table.id}))::text AS "locked"`;
       const session = await getCurrentTableSession(tx, table.id, restaurant.id);
+      if (body.tableSessionId && session?.id !== body.tableSessionId) {
+        return { error: "This order belongs to a previous table visit. Open the current table tab to request its bill.", tableSessionId: session?.id ?? null } as const;
+      }
       if (requests.includes("pay_bill") && !session) {
         return { error: "There is no open bill for this table yet.", tableSessionId: null } as const;
       }
@@ -104,7 +108,7 @@ export async function POST(req: Request) {
     }
 
     if (!result.duplicate) {
-      void emitOrderEvent({
+      await emitOrderEvent({
         restaurantId: restaurant.id,
         type: "service_request_created",
         data: {
