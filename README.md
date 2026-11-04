@@ -114,6 +114,8 @@ prisma/
 - Apply database changes before promoting the new app: `npx prisma migrate deploy`. This release includes a migration that merges duplicate active categories while retaining their menu items, repairs duplicate table labels, and adds uniqueness constraints.
 - Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET` in local and Vercel environments, along with `DATABASE_URL`, `SESSION_SECRET`, and email delivery credentials. Preview deployments should use a separate database if they run migrations.
 - `SESSION_SECRET` must be a random value of at least 32 characters; production startup/build now fails closed if it is missing or too short.
+- Admin order and bill-request notifications use a restaurant-scoped WebSocket with Redis fan-out on Vercel. Add an Upstash Redis integration in Vercel and make sure it provides the native `REDIS_URL` connection string (`rediss://...`) to Production and Preview. Add the same variable to local `.env.local` for a Redis-enabled local deployment. Do not use the REST-only Upstash URL/token as `REDIS_URL`.
+- Enable Fluid Compute for the Vercel project. WebSocket sessions reconnect after the function duration limit; Redis shares events across function instances and missed events are reconciled from the database after reconnect.
 
 Image upload sends files directly to Supabase Storage using a time-limited upload token; Vercel's local filesystem is not used for persistent image storage. Supabase Storage delivers stored assets through its CDN. The Free plan currently includes 1 GB of storage and 10 GB of monthly bandwidth; monitor usage and plan for paid capacity if the restaurant fleet exceeds those quotas.
 

@@ -1,3 +1,5 @@
+import { isAdminRedisRealtimeConfigured, publishAdminRestaurantEvent } from "@/lib/adminRedisRealtime";
+
 const SUPABASE_URL = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
@@ -18,7 +20,9 @@ export async function broadcastOrderEvent(payload: {
   data?: any;
 }) {
   const base = SUPABASE_URL;
-  if (!/^https:\/\//i.test(base) || !SUPABASE_KEY) return;
+  const hasSupabaseRealtime = /^https:\/\//i.test(base) && Boolean(SUPABASE_KEY);
+  const useRedisForAdmin = isAdminRedisRealtimeConfigured();
+  if (!hasSupabaseRealtime && !useRedisForAdmin) return;
 
   const data = payload.data ?? {};
   const order = data.order ?? data;
@@ -58,8 +62,8 @@ export async function broadcastOrderEvent(payload: {
       };
 
   const messages = [
-    { topic: `restaurant:${payload.restaurantId}`, private: true, payload },
-    ...(tableId ? [{
+    ...(!useRedisForAdmin && hasSupabaseRealtime ? [{ topic: `restaurant:${payload.restaurantId}`, private: true, payload }] : []),
+    ...(hasSupabaseRealtime && tableId ? [{
       topic: `table:${payload.restaurantId}:${tableId}`,
       private: true,
       payload: { restaurantId: payload.restaurantId, type: payload.type, data: publicData },
@@ -68,9 +72,9 @@ export async function broadcastOrderEvent(payload: {
   // Settle every topic publish before returning. Promise.all would reject as
   // soon as one request fails while the other publish could still be running;
   // on serverless hosts that remaining publish may be frozen with the request.
-  const results = await Promise.allSettled(messages.map(async (message) => {
+  const tasks: Promise<unknown>[] = messages.map(async (message) => {
     const endpoint = `${base}/realtime/v1/api/broadcast/${encodeURIComponent(message.topic)}/events/restaurant_event?private=${message.private}`;
-    return fetch(endpoint, {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         apikey: SUPABASE_KEY,
@@ -81,12 +85,14 @@ export async function broadcastOrderEvent(payload: {
       // Keep an unavailable realtime service from holding up order submission.
       signal: AbortSignal.timeout(1200),
     });
-  }));
+    if (!response.ok) throw new Error(`Supabase returned ${response.status}`);
+    return response;
+  });
+  if (useRedisForAdmin) tasks.push(publishAdminRestaurantEvent(payload));
+  const results = await Promise.allSettled(tasks);
   for (const result of results) {
     if (result.status === "rejected") {
       console.error("[realtime:broadcast] Supabase publish failed", result.reason);
-    } else if (!result.value.ok) {
-      console.error(`[realtime:broadcast] Supabase returned ${result.value.status}`);
     }
   }
 }

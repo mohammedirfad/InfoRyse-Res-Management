@@ -45,7 +45,7 @@ const SERVICE_LABELS: Record<string, string> = {
 
 const STORAGE_KEY = "inforyse_admin_seen_orders_v1";
 
-export default function AdminOrderNotifications() {
+export default function AdminOrderNotifications({ realtimeTransport = "sse" }: { realtimeTransport?: "sse" | "redis-ws" }) {
   const [orders, setOrders] = useState<IncomingOrder[]>([]);
   const [serviceRequests, setServiceRequests] = useState<ServiceRequest[]>([]);
   const [serviceToast, setServiceToast] = useState<ServiceRequest | null>(null);
@@ -123,6 +123,8 @@ export default function AdminOrderNotifications() {
     let reconnectTimer: number | null = null;
     let wasVisible = document.visibilityState === "visible";
     let source: EventSource | null = null;
+    let socket: WebSocket | null = null;
+    const useRedisWebSocket = realtimeTransport === "redis-ws";
     const remember = (order: IncomingOrder) => {
       if (!order?.id || seen.current.has(order.id)) return;
       seen.current.add(order.id);
@@ -146,6 +148,7 @@ export default function AdminOrderNotifications() {
         if (response.status === 401) {
           authorized = false;
           source?.close();
+          socket?.close(1000, "session expired");
           router.replace("/admin/login");
           return;
         }
@@ -165,47 +168,82 @@ export default function AdminOrderNotifications() {
       } catch { /* The realtime stream remains active; retry on reconnect/focus. */ }
       finally { snapshotBusy = false; }
     };
+    const onConnected = () => {
+      const reconnected = needsResync;
+      needsResync = false;
+      reconnectAttempt = 0;
+      if (reconnected && document.visibilityState === "visible") void loadSnapshot(true);
+    };
+    const onRestaurantEvent = (event: any) => {
+      window.dispatchEvent(new CustomEvent("inforyse:restaurant-event", { detail: event }));
+      if (event.type === "service_request_created" || event.type === "service_request_updated") {
+        const request = event.data?.request as ServiceRequest | undefined;
+        if (!request?.id) return;
+        setServiceRequests((current) => {
+          const remaining = current.filter((item) => item.id !== request.id);
+          return request.status === "PENDING" || request.status === "IN_PROGRESS"
+            ? [request, ...remaining].slice(0, 50)
+            : remaining;
+        });
+        if (event.type === "service_request_created") {
+          setServiceToast(request);
+          window.setTimeout(() => setServiceToast((current) => current?.id === request.id ? null : current), 8000);
+          if (soundEnabledRef.current) chime();
+        }
+        return;
+      }
+      if (event.type !== "order_created") return;
+      const data = event.data ?? {};
+      const order = data.order ?? data;
+      const orderNumber = order.orderNumber ?? data.orderNumber;
+      remember({
+        id: order.id ?? data.orderId ?? `${event.restaurantId}-${orderNumber}`,
+        orderNumber,
+        customerName: order.customerName ?? data.customerName ?? null,
+        totalCents: order.totalCents ?? data.totalCents ?? 0,
+        createdAt: order.createdAt ?? data.createdAt ?? new Date().toISOString(),
+        table: order.table ?? (data.tableLabel ? { label: data.tableLabel } : null),
+      });
+    };
+    const scheduleReconnect = () => {
+      needsResync = true;
+      if (disposed || !authorized || reconnectTimer !== null) return;
+      const delay = Math.min(30000, 1000 * 2 ** reconnectAttempt++);
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connectStream();
+      }, delay);
+    };
     const connectStream = () => {
       if (disposed || !authorized) return;
-      source = new EventSource("/api/admin/events");
-      source.addEventListener("connected", () => {
-        const reconnected = needsResync;
-        needsResync = false;
-        reconnectAttempt = 0;
-        if (reconnected && document.visibilityState === "visible") void loadSnapshot(true);
-      });
-      source.addEventListener("restaurant_event", (rawEvent) => {
-        try {
-          const event = JSON.parse((rawEvent as MessageEvent).data);
-          window.dispatchEvent(new CustomEvent("inforyse:restaurant-event", { detail: event }));
-          if (event.type === "service_request_created" || event.type === "service_request_updated") {
-            const request = event.data?.request as ServiceRequest | undefined;
-            if (!request?.id) return;
-            setServiceRequests((current) => {
-              const remaining = current.filter((item) => item.id !== request.id);
-              return request.status === "PENDING" || request.status === "IN_PROGRESS"
-                ? [request, ...remaining].slice(0, 50)
-                : remaining;
-            });
-            if (event.type === "service_request_created") {
-              setServiceToast(request);
-              window.setTimeout(() => setServiceToast((current) => current?.id === request.id ? null : current), 8000);
-              if (soundEnabledRef.current) chime();
-            }
+      if (useRedisWebSocket) {
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        socket = new WebSocket(`${protocol}//${window.location.host}/api/admin/ws`);
+        socket.onmessage = (rawEvent) => {
+          try {
+            const message = JSON.parse(String(rawEvent.data));
+            if (message.type === "connected") onConnected();
+            else if (message.type === "restaurant_event") onRestaurantEvent(message.event);
+          } catch { /* Ignore malformed socket frames. */ }
+        };
+        socket.onclose = (event) => {
+          socket = null;
+          if (event.code === 4401) {
+            authorized = false;
+            router.replace("/admin/login");
             return;
           }
-          if (event.type !== "order_created") return;
-          const data = event.data ?? {};
-          const order = data.order ?? data;
-          const orderNumber = order.orderNumber ?? data.orderNumber;
-          remember({
-            id: order.id ?? data.orderId ?? `${event.restaurantId}-${orderNumber}`,
-            orderNumber,
-            customerName: order.customerName ?? data.customerName ?? null,
-            totalCents: order.totalCents ?? data.totalCents ?? 0,
-            createdAt: order.createdAt ?? data.createdAt ?? new Date().toISOString(),
-            table: order.table ?? (data.tableLabel ? { label: data.tableLabel } : null),
-          });
+          scheduleReconnect();
+        };
+        socket.onerror = () => socket?.close();
+        return;
+      }
+
+      source = new EventSource("/api/admin/events");
+      source.addEventListener("connected", onConnected);
+      source.addEventListener("restaurant_event", (rawEvent) => {
+        try {
+          onRestaurantEvent(JSON.parse((rawEvent as MessageEvent).data));
         } catch { /* Ignore malformed realtime events. */ }
       });
       source.onerror = () => {
@@ -213,13 +251,7 @@ export default function AdminOrderNotifications() {
         // exponential backoff; reconcile missed events once after it recovers.
         source?.close();
         source = null;
-        needsResync = true;
-        if (disposed || !authorized || reconnectTimer !== null) return;
-        const delay = Math.min(30000, 1000 * 2 ** reconnectAttempt++);
-        reconnectTimer = window.setTimeout(() => {
-          reconnectTimer = null;
-          connectStream();
-        }, delay);
+        scheduleReconnect();
       };
     };
     connectStream();
@@ -233,11 +265,12 @@ export default function AdminOrderNotifications() {
     return () => {
       disposed = true;
       source?.close();
+      socket?.close(1000, "admin panel closed");
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       document.removeEventListener("visibilitychange", onVisible);
       if (audio.current) void audio.current.close();
     };
-  }, [chime, router]);
+  }, [chime, realtimeTransport, router]);
 
   function toggleSound() {
     const next = !soundEnabled;
@@ -320,7 +353,7 @@ export default function AdminOrderNotifications() {
               {serviceToast.requests.includes("pay_bill")
                 ? <div className="mt-2 flex items-center gap-3">
                     <button type="button" onClick={() => void generateBillNow(serviceToast)} disabled={generatingFor === serviceToast.id} className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-2.5 py-1.5 text-xs font-bold text-white disabled:opacity-60">{generatingFor === serviceToast.id ? "Generating…" : "Generate bill"}</button>
-                    <Link href={`/admin/bill?tableId=${encodeURIComponent(serviceToast.tableId)}`} onClick={() => setServiceToast(null)} className="text-xs font-bold text-emerald-800">Open table</Link>
+                    <Link href={`/admin/bill?tableId=${encodeURIComponent(serviceToast.tableId)}`} onClick={() => { setServiceToast(null); setOpen(false); }} className="inline-flex items-center rounded-lg bg-emerald-700 px-2.5 py-1.5 text-xs font-bold text-white">Open table bill</Link>
                   </div>
                 : <button type="button" onClick={() => { setOpen(true); setServiceToast(null); }} className="mt-2 text-xs font-bold text-emerald-800">Review request</button>}
             </div>
@@ -359,12 +392,14 @@ export default function AdminOrderNotifications() {
               <div key={request.id} className="border-b border-slate-100 px-4 py-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-800">Table {request.tableLabel}{request.requests.includes("pay_bill") ? " · Bill" : ""}</p>
+                    {request.requests.includes("pay_bill")
+                      ? <Link href={`/admin/bill?tableId=${encodeURIComponent(request.tableId)}`} onClick={() => setOpen(false)} className="text-sm font-semibold text-emerald-800 hover:underline">Bill requested · Table {request.tableLabel}</Link>
+                      : <p className="text-sm font-semibold text-slate-800">Table {request.tableLabel}</p>}
                     <p className="mt-1 text-xs text-slate-600">{request.requests.map((item) => SERVICE_LABELS[item] ?? item).join(", ")}</p>
                     {request.custom && <p className="mt-1 text-xs text-slate-500">{request.custom}</p>}
                     <p className="mt-1 text-[10px] text-slate-400">{formatTime(request.createdAt)}</p>
                   </div>
-                  {request.requests.includes("pay_bill") && <Link href={`/admin/bill?tableId=${encodeURIComponent(request.tableId)}`} onClick={() => setOpen(false)} className="shrink-0 text-xs font-bold text-emerald-800">Open table</Link>}
+                  {request.requests.includes("pay_bill") && <Link href={`/admin/bill?tableId=${encodeURIComponent(request.tableId)}`} onClick={() => setOpen(false)} className="shrink-0 text-xs font-bold text-emerald-800">Open bill</Link>}
                 </div>
                 <div className="mt-2 flex items-center gap-2">
                   {request.requests.includes("pay_bill") && (

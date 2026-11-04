@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { emitOrderEvent } from "@/lib/events";
+import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   NEW: ["ACCEPTED", "CANCELLED"],
@@ -27,45 +29,79 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     authMs = performance.now() - authStartedAt;
     const { status: nextStatus } = BodySchema.parse(await req.json());
 
-    // Scoped by restaurantId — staff at Restaurant A can never touch
-    // Restaurant B's order even if they had the raw order id.
-    const order = await db.order.findFirst({
-      where: { id: params.id, restaurantId },
-      select: { id: true, status: true, tableId: true, orderNumber: true },
-    });
-    if (!order) return Response.json({ error: "Order not found" }, { status: 404 });
-
-    const allowed = ALLOWED_TRANSITIONS[order.status] ?? [];
-    if (!allowed.includes(nextStatus)) {
-      return Response.json(
-        { error: `Cannot move order from ${order.status} to ${nextStatus}` },
-        { status: 409 }
-      );
-    }
-
+    // Update order, status history and billable item quantities in one
+    // transaction statement. This avoids serial database round trips and
+    // keeps final fulfillment serialized with table bill generation.
     const databaseStartedAt = performance.now();
-    const didUpdate = await db.$transaction(async (tx) => {
-      // Only final fulfillment changes can race with bill generation. Earlier
-      // kitchen transitions do not affect the bill and should not queue behind
-      // other actions on the same table.
-      if (order.tableId && (nextStatus === "COMPLETED" || nextStatus === "CANCELLED")) {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${order.tableId}))::text AS "locked"`;
-      }
-      const claimed = await tx.order.updateMany({
-        where: { id: order.id, restaurantId, status: order.status },
-        data: { status: nextStatus },
-      });
-      if (claimed.count !== 1) return false;
-      if (nextStatus === "COMPLETED") {
-        await tx.$executeRaw`UPDATE "OrderItem" SET "servedQuantity" = GREATEST(0, "quantity" - "cancelledQuantity") WHERE "orderId" = ${order.id}`;
-      } else if (nextStatus === "CANCELLED") {
-        await tx.$executeRaw`UPDATE "OrderItem" SET "servedQuantity" = 0, "cancelledQuantity" = "quantity" WHERE "orderId" = ${order.id}`;
-      }
-      await tx.orderStatusHistory.create({ data: { orderId: order.id, status: nextStatus, changedBy: userId } });
-      return true;
-    });
+    const allowedFrom = Object.entries(ALLOWED_TRANSITIONS)
+      .filter(([, allowedTo]) => allowedTo.includes(nextStatus))
+      .map(([status]) => status);
+    if (allowedFrom.length === 0) {
+      return Response.json({ error: "Orders cannot be moved back to New" }, { status: 409 });
+    }
+    const allowedSql = Prisma.join(allowedFrom.map((status) => Prisma.sql`${status}`));
+    const rows = await db.$queryRaw<Array<{
+      id: string;
+      orderNumber: number;
+      tableId: string | null;
+      previousStatus: string;
+      updated: boolean;
+    }>>(Prisma.sql`
+      WITH current_order AS MATERIALIZED (
+        SELECT "id", "status", "tableId", "orderNumber"
+        FROM "Order"
+        WHERE "id" = ${params.id} AND "restaurantId" = ${restaurantId}
+      ),
+      table_lock AS MATERIALIZED (
+        SELECT pg_advisory_xact_lock(hashtext(current_order."tableId"))
+        FROM current_order
+        WHERE current_order."tableId" IS NOT NULL
+          AND ${nextStatus} IN ('COMPLETED', 'CANCELLED')
+      ),
+      updated_order AS (
+        UPDATE "Order" AS target
+        SET "status" = ${nextStatus}::"OrderStatus"
+        FROM current_order
+        WHERE target."id" = current_order."id"
+          AND target."status" = current_order."status"
+          AND current_order."status"::text IN (${allowedSql})
+          AND (current_order."tableId" IS NULL OR ${nextStatus} NOT IN ('COMPLETED', 'CANCELLED') OR EXISTS (SELECT 1 FROM table_lock))
+        RETURNING target."id"
+      ),
+      status_history AS (
+        INSERT INTO "OrderStatusHistory" ("id", "orderId", "status", "changedBy", "createdAt")
+        SELECT ${randomUUID()}, updated_order."id", ${nextStatus}::"OrderStatus", ${userId}, NOW()
+        FROM updated_order
+        RETURNING "id"
+      ),
+      fulfilled_items AS (
+        UPDATE "OrderItem" AS item
+        SET "servedQuantity" = CASE WHEN ${nextStatus} = 'COMPLETED'
+          THEN GREATEST(0, item."quantity" - item."cancelledQuantity")
+          ELSE 0 END,
+          "cancelledQuantity" = CASE WHEN ${nextStatus} = 'CANCELLED'
+            THEN item."quantity" ELSE item."cancelledQuantity" END
+        FROM updated_order
+        WHERE item."orderId" = updated_order."id"
+          AND ${nextStatus} IN ('COMPLETED', 'CANCELLED')
+        RETURNING item."id"
+      )
+      SELECT current_order."id", current_order."orderNumber", current_order."tableId",
+        current_order."status"::text AS "previousStatus",
+        (updated_order."id" IS NOT NULL) AS "updated"
+      FROM current_order LEFT JOIN updated_order ON TRUE
+    `);
     databaseMs = performance.now() - databaseStartedAt;
-    if (!didUpdate) return Response.json({ error: "Order status changed while processing. Refresh and try again." }, { status: 409 });
+
+    const order = rows[0];
+    if (!order) return Response.json({ error: "Order not found" }, { status: 404 });
+    if (!order.updated) {
+      const allowedFromCurrent = ALLOWED_TRANSITIONS[order.previousStatus] ?? [];
+      const error = allowedFromCurrent.includes(nextStatus)
+        ? "Order status changed while processing. Refresh and try again."
+        : `Cannot move order from ${order.previousStatus} to ${nextStatus}`;
+      return Response.json({ error }, { status: 409 });
+    }
 
     const broadcastStartedAt = performance.now();
     await emitOrderEvent({
@@ -75,11 +111,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     });
     broadcastMs = performance.now() - broadcastStartedAt;
 
-    const totalMs = performance.now() - startedAt;
-    const serverTiming = `auth;dur=${authMs.toFixed(1)}, database;dur=${databaseMs.toFixed(1)}, broadcast;dur=${broadcastMs.toFixed(1)}, total;dur=${totalMs.toFixed(1)}`;
+    const serverTiming = `auth;dur=${authMs.toFixed(1)}, database;dur=${databaseMs.toFixed(1)}, broadcast;dur=${broadcastMs.toFixed(1)}, total;dur=${(performance.now() - startedAt).toFixed(1)}`;
     console.info("[order:status:timing]", serverTiming);
-    return Response.json({ order: { id: order.id, status: nextStatus } }, { headers: { "Server-Timing": serverTiming } });
-  } catch (err) {
-    return tenantErrorResponse(err);
+    return Response.json(
+      { order: { id: order.id, orderNumber: order.orderNumber, tableId: order.tableId, status: nextStatus } },
+      { headers: { "Server-Timing": serverTiming } },
+    );
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return Response.json({ error: error.issues[0]?.message ?? "Invalid status" }, { status: 400 });
+    }
+    return tenantErrorResponse(error);
   }
 }

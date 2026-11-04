@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import AdminSidebar from "@/components/AdminSidebar";
 import AdminOrderNotifications from "@/components/AdminOrderNotifications";
+import { AdminPanelContextProvider } from "@/components/AdminPanelContext";
 import { ForcePasswordChangeModal } from "@/components/ForcePasswordChangeModal";
 import { Ban } from "lucide-react";
 
@@ -12,18 +13,18 @@ export default async function AdminPanelLayout({ children }: { children: React.R
     redirect("/admin/login");
   }
 
-  const [restaurant, user] = await Promise.all([
-    db.restaurant.findUnique({
-      where: { id: session.restaurantId },
-      select: { name: true, openNow: true, slug: true, isActive: true },
-    }),
-    db.user.findUnique({
-      where: { id: session.userId },
-      select: { email: true, mustChangePassword: true },
-    }),
-  ]);
+  // Read the admin and tenant in one indexed query on every panel navigation.
+  const user = await db.user.findUnique({
+    where: { id: session.userId },
+    select: {
+      email: true,
+      mustChangePassword: true,
+      restaurant: { select: { id: true, name: true, openNow: true, slug: true, isActive: true } },
+    },
+  });
+  const restaurant = user?.restaurant;
 
-  if (!restaurant) {
+  if (!restaurant || restaurant.id !== session.restaurantId) {
     redirect("/admin/login");
   }
 
@@ -60,12 +61,14 @@ export default async function AdminPanelLayout({ children }: { children: React.R
   return (
     <div className="min-h-screen flex bg-gray-50 relative">
       <AdminSidebar restaurant={restaurant} userRole={session.role} />
-      <AdminOrderNotifications />
+      <AdminOrderNotifications realtimeTransport={process.env.VERCEL && process.env.REDIS_URL ? "redis-ws" : "sse"} />
       {/* On mobile: full width (sidebar is overlay). On desktop: sidebar takes 256px */}
       <main className="admin-panel-main flex-1 overflow-y-auto min-w-0 lg:pl-0 pl-0">
         {/* Mobile top padding so hamburger button doesn't cover content */}
         <div className="lg:hidden h-14" />
-        {children}
+        <AdminPanelContextProvider value={{ restaurantName: restaurant.name, userRole: session.role }}>
+          {children}
+        </AdminPanelContextProvider>
       </main>
 
       {/* Forced password setup modal overlay rendered directly on the dashboard */}

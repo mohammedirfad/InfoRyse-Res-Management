@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { formatRupees } from "@/lib/utils";
 import { cachedJson } from "@/lib/cachedFetch";
+import { useAdminPanelContext } from "@/components/AdminPanelContext";
 
 type Order = {
   id: string; status: string; totalCents: number; orderNumber: number;
@@ -66,9 +67,10 @@ function buildHourlySales(orders: Order[]) {
 }
 
 export default function DashboardPage() {
+  const panel = useAdminPanelContext();
   const [orders, setOrders] = useState<Order[]>(() => readSnapshot()?.orders ?? []);
-  const [restaurantName, setRestaurantName] = useState(() => readSnapshot()?.restaurantName ?? "Your Restaurant");
-  const [userRole, setUserRole] = useState(() => readSnapshot()?.userRole ?? "OWNER");
+  const [restaurantName, setRestaurantName] = useState(panel.restaurantName);
+  const [userRole, setUserRole] = useState(panel.userRole);
 
   // Paint from the previous snapshot instantly, refresh in the background.
   const [loading, setLoading] = useState(true);
@@ -76,15 +78,12 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
 
-    Promise.all([
-      cachedJson<{ orders?: Order[] }>("admin:" + DASHBOARD_ORDERS_URL, DASHBOARD_ORDERS_URL, { ttlMs: 20_000 }),
-      cachedJson<{ restaurant?: { name?: string }; role?: string }>("admin:/api/admin/me", "/api/admin/me"),
-    ])
-      .then(([ordersData, meData]) => {
+    cachedJson<{ orders?: Order[] }>("admin:" + DASHBOARD_ORDERS_URL, DASHBOARD_ORDERS_URL, { ttlMs: 20_000 })
+      .then((ordersData) => {
         if (cancelled) return;
         const nextOrders = ordersData.data.orders ?? [];
-        const nextName = meData.data.restaurant?.name || "Your Restaurant";
-        const nextRole = meData.data.role || "OWNER";
+        const nextName = panel.restaurantName;
+        const nextRole = panel.userRole;
         setOrders(nextOrders);
         setRestaurantName(nextName);
         setUserRole(nextRole);
@@ -96,7 +95,7 @@ export default function DashboardPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [panel.restaurantName, panel.userRole]);
 
   const today = orders.filter(
     (o) => new Date(o.createdAt).toDateString() === new Date().toDateString()
@@ -290,6 +289,7 @@ export default function DashboardPage() {
                 <Link
                   key={a.href + a.label}
                   href={a.href}
+                  prefetch={false}
                   className={`flex flex-col items-center gap-1.5 rounded-xl p-2.5 border text-center hover:opacity-80 transition-opacity ${a.color}`}
                 >
                   <a.icon className="h-4 w-4" />

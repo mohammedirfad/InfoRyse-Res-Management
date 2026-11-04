@@ -248,32 +248,28 @@ export default function BillPage() {
   // Initial load
   useEffect(() => {
     fetchTablesAndRestaurant(true);
-    fetchBills(1);
-  }, [fetchTablesAndRestaurant, fetchBills]);
+  }, [fetchTablesAndRestaurant]);
 
-  // When the guest taps "Request bill" on their table screen, open that table
-  // automatically so the cashier only has to press "Generate bill".
+  // Load history only when the cashier opens that tab. Live billing should not
+  // wait on a separate paginated history query.
   useEffect(() => {
-    const onServiceRequest = (event: Event) => {
-      const payload = (event as CustomEvent).detail;
-      if (payload?.type !== "service_request_created") return;
-      const request = payload?.data?.request;
-      if (!request?.requests?.includes("pay_bill")) return;
-      const table = tablesRef.current.find((item) => item.id === request.tableId);
-      if (!table) return;
-      setActiveTab("live");
-      if (selectedTableRef.current?.id !== table.id) void loadBill(table);
-      else void loadBill(table, true);
-    };
-    window.addEventListener("inforyse:restaurant-event", onServiceRequest);
-    return () => window.removeEventListener("inforyse:restaurant-event", onServiceRequest);
-  }, [loadBill]);
+    if (activeTab === "history") void fetchBills(billsPage);
+  }, [activeTab, billsPage, billsSearch, billsMethodFilter, fetchBills]);
 
   useEffect(() => {
     const onRestaurantEvent = (event: Event) => {
       const payload = (event as CustomEvent).detail;
       invalidateCache("admin:/api/admin/table-bill");
       invalidateCache("admin:/api/admin/bills");
+      if (payload?.type === "service_request_created") {
+        const request = payload.data?.request;
+        if (!request?.requests?.includes("pay_bill")) return;
+        const requestedTable = tablesRef.current.find((item) => item.id === request.tableId);
+        if (!requestedTable) return;
+        setActiveTab("live");
+        void loadBill(requestedTable, selectedTableRef.current?.id === requestedTable.id);
+        return;
+      }
       if (payload?.type === "resync" || payload?.type === "bill_updated" || payload?.type === "order_updated") {
         void fetchTablesAndRestaurant(false);
         const selected = selectedTableRef.current;
@@ -446,7 +442,6 @@ export default function BillPage() {
           : null
       );
       await fetchTablesAndRestaurant(false);
-      fetchBills(1);
     } catch (err) {
       console.error("Failed to store bill:", err);
       setBillSubmitError("Could not settle this table session. Check your connection and refresh before retrying.");
@@ -657,10 +652,7 @@ export default function BillPage() {
             </button>
 
             <button
-              onClick={() => {
-                setActiveTab("history");
-                fetchBills(1);
-              }}
+              onClick={() => setActiveTab("history")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
                 activeTab === "history"
                   ? "bg-amber-400 text-gray-950 font-black shadow-xs"
