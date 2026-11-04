@@ -114,7 +114,8 @@ export function createRealtimeEventStream(
   const sse = (event: string, data: unknown) =>
     write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
-  write("retry: 30000\n\n");
+  // Let EventSource reconnect soon after a transient upstream WebSocket outage.
+  write("retry: 10000\n\n");
 
   let sequence = 0;
   let closed = false;
@@ -127,10 +128,14 @@ export function createRealtimeEventStream(
     if (joined || closed || realtimeUnavailable) return;
     realtimeUnavailable = true;
     clearTimeout(connectTimeout);
+    console.error(`[realtime:stream] Supabase channel did not join within 5s (topic=${topic})`);
     sse("realtime_unavailable", { ok: false });
     try { if (socket.readyState < WebSocket.CLOSING) socket.close(1011, "realtime join timed out"); } catch { /* already closed */ }
+    // Close the SSE response too. Leaving it open strands the browser on a
+    // dead stream forever, which previously forced the admin into 8s polling.
+    cleanup();
   };
-  const connectTimeout = setTimeout(markRealtimeUnavailable, 8000);
+  const connectTimeout = setTimeout(markRealtimeUnavailable, 5000);
   const send = (event: string, payload: unknown, ref = String(++sequence)) => {
     if (socket.readyState !== WebSocket.OPEN) return;
     socket.send(JSON.stringify([ref, ref, channelTopic, event, payload]));
@@ -178,6 +183,10 @@ export function createRealtimeEventStream(
           if (initialSnapshot !== undefined) sse("snapshot", initialSnapshot);
           sse("connected", { ok: true });
         } else {
+          console.error("[realtime:stream] Supabase channel join rejected", {
+            topic,
+            response: frame[4]?.response ?? null,
+          });
           markRealtimeUnavailable();
         }
         return;

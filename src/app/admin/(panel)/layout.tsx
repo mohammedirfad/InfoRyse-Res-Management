@@ -3,7 +3,6 @@ import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import AdminSidebar from "@/components/AdminSidebar";
 import AdminOrderNotifications from "@/components/AdminOrderNotifications";
-import AdminNavPrefetch from "@/components/AdminNavPrefetch";
 import { ForcePasswordChangeModal } from "@/components/ForcePasswordChangeModal";
 import { Ban } from "lucide-react";
 
@@ -61,7 +60,6 @@ export default async function AdminPanelLayout({ children }: { children: React.R
   return (
     <div className="min-h-screen flex bg-gray-50 relative">
       <AdminSidebar restaurant={restaurant} userRole={session.role} />
-      <AdminNavPrefetch />
       <AdminOrderNotifications />
       {/* On mobile: full width (sidebar is overlay). On desktop: sidebar takes 256px */}
       <main className="admin-panel-main flex-1 overflow-y-auto min-w-0 lg:pl-0 pl-0">

@@ -2,7 +2,6 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { emitOrderEvent } from "@/lib/events";
-import type { Prisma } from "@prisma/client";
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   NEW: ["ACCEPTED", "CANCELLED"],
@@ -18,13 +17,22 @@ const BodySchema = z.object({
 });
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const startedAt = performance.now();
+  let authMs = 0;
+  let databaseMs = 0;
+  let broadcastMs = 0;
   try {
+    const authStartedAt = performance.now();
     const { restaurantId, userId } = await requireRestaurantUser();
+    authMs = performance.now() - authStartedAt;
     const { status: nextStatus } = BodySchema.parse(await req.json());
 
     // Scoped by restaurantId — staff at Restaurant A can never touch
     // Restaurant B's order even if they had the raw order id.
-    const order = await db.order.findFirst({ where: { id: params.id, restaurantId } });
+    const order = await db.order.findFirst({
+      where: { id: params.id, restaurantId },
+      select: { id: true, status: true, tableId: true, orderNumber: true },
+    });
     if (!order) return Response.json({ error: "Order not found" }, { status: 404 });
 
     const allowed = ALLOWED_TRANSITIONS[order.status] ?? [];
@@ -35,8 +43,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       );
     }
 
+    const databaseStartedAt = performance.now();
     const didUpdate = await db.$transaction(async (tx) => {
-      if (order.tableId) {
+      // Only final fulfillment changes can race with bill generation. Earlier
+      // kitchen transitions do not affect the bill and should not queue behind
+      // other actions on the same table.
+      if (order.tableId && (nextStatus === "COMPLETED" || nextStatus === "CANCELLED")) {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${order.tableId}))::text AS "locked"`;
       }
       const claimed = await tx.order.updateMany({
@@ -52,16 +64,21 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       await tx.orderStatusHistory.create({ data: { orderId: order.id, status: nextStatus, changedBy: userId } });
       return true;
     });
+    databaseMs = performance.now() - databaseStartedAt;
     if (!didUpdate) return Response.json({ error: "Order status changed while processing. Refresh and try again." }, { status: 409 });
-    const updated = await db.order.findUnique({ where: { id: order.id } });
 
+    const broadcastStartedAt = performance.now();
     await emitOrderEvent({
       restaurantId,
       type: "order_updated",
       data: { orderId: order.id, orderNumber: order.orderNumber, tableId: order.tableId, status: nextStatus },
     });
+    broadcastMs = performance.now() - broadcastStartedAt;
 
-    return Response.json({ order: updated });
+    const totalMs = performance.now() - startedAt;
+    const serverTiming = `auth;dur=${authMs.toFixed(1)}, database;dur=${databaseMs.toFixed(1)}, broadcast;dur=${broadcastMs.toFixed(1)}, total;dur=${totalMs.toFixed(1)}`;
+    console.info("[order:status:timing]", serverTiming);
+    return Response.json({ order: { id: order.id, status: nextStatus } }, { headers: { "Server-Timing": serverTiming } });
   } catch (err) {
     return tenantErrorResponse(err);
   }

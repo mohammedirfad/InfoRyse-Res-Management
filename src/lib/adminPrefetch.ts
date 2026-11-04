@@ -2,7 +2,6 @@
 
 import {
   adminCacheKey,
-  fetchJsonCached,
   peekCache,
   writeCache,
 } from "@/lib/cachedFetch";
@@ -43,46 +42,6 @@ export const ADMIN_ROUTE_ENDPOINTS: Record<string, string[]> = {
   "/admin/profile": ["/api/admin/restaurant", "/api/admin/me"],
   "/admin/settings": ["/api/admin/me"],
 };
-
-const inFlightRoutes = new Set<string>();
-
-export function prefetchAdminRoute(href: string) {
-  const endpoints = ADMIN_ROUTE_ENDPOINTS[href];
-  if (!endpoints || inFlightRoutes.has(href)) return;
-  inFlightRoutes.add(href);
-  Promise.all(
-    endpoints.map((url) => {
-      const key = adminCacheKey(url);
-      const cached = peekCache(key, 10_000);
-      if (cached) return Promise.resolve(cached);
-      return fetchJsonCached(key, url).catch(() => null);
-    }),
-  ).finally(() => {
-    setTimeout(() => inFlightRoutes.delete(href), 2500);
-  });
-}
-
-/** Warm every tab in the background, one route at a time, while the panel idles. */
-export function prefetchAllAdminRoutes(hrefs: string[]) {
-  if (typeof window === "undefined") return;
-  let cancelled = false;
-  const run = () => {
-    if (!cancelled) hrefs.forEach(prefetchAdminRoute);
-  };
-  const idle = (
-    window as unknown as {
-      requestIdleCallback?: (
-        cb: () => void,
-        opts?: { timeout: number },
-      ) => number;
-    }
-  ).requestIdleCallback;
-  if (idle) idle(run, { timeout: 3000 });
-  else window.setTimeout(run, 1200);
-  return () => {
-    cancelled = true;
-  };
-}
 
 /** Read the warm snapshot for a route without touching the network. */
 export function readAdminRouteData(href: string): AdminRouteData {

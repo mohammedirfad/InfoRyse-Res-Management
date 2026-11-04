@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Check, ReceiptText, Volume2, VolumeX, X } from "lucide-react";
-import { formatRupees, formatTime } from "@/lib/utils";
+import { formatDate, formatRupees, formatTime } from "@/lib/utils";
 
 type IncomingOrder = {
   id: string;
@@ -116,11 +116,12 @@ export default function AdminOrderNotifications() {
     } catch { /* Ignore unavailable browser storage. */ }
     cursor.current = new Date(Date.now() - 60000).toISOString();
     let disposed = false;
-    let connectedBefore = false;
-    let streamConnected = false;
+    let needsResync = false;
     let snapshotBusy = false;
     let authorized = true;
-    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+    let reconnectAttempt = 0;
+    let reconnectTimer: number | null = null;
+    let wasVisible = document.visibilityState === "visible";
     let source: EventSource | null = null;
     const remember = (order: IncomingOrder) => {
       if (!order?.id || seen.current.has(order.id)) return;
@@ -145,81 +146,94 @@ export default function AdminOrderNotifications() {
         if (response.status === 401) {
           authorized = false;
           source?.close();
-          if (fallbackTimer) clearInterval(fallbackTimer);
-          fallbackTimer = null;
           router.replace("/admin/login");
           return;
         }
         if (!response.ok || disposed) return;
         const data = await response.json();
-        for (const order of data.orders ?? []) remember(order);
+        let discoveredOrder = false;
+        for (const order of data.orders ?? []) {
+          if (order?.id && !seen.current.has(order.id)) discoveredOrder = true;
+          remember(order);
+        }
         setServiceRequests(data.serviceRequests ?? []);
         cursor.current = new Date(Date.now() - 2000).toISOString();
+        // Reconcile after reconnect so events missed during a disconnect are
+        // shown once, without polling while the stream is unavailable.
+        if (discoveredOrder) window.dispatchEvent(new CustomEvent("inforyse:restaurant-event", { detail: { type: "resync" } }));
         if (emitResync) window.dispatchEvent(new CustomEvent("inforyse:restaurant-event", { detail: { type: "resync" } }));
       } catch { /* The realtime stream remains active; retry on reconnect/focus. */ }
       finally { snapshotBusy = false; }
     };
-    source = new EventSource("/api/admin/events");
-    source.addEventListener("connected", () => {
-      streamConnected = true;
-      if (fallbackTimer) clearInterval(fallbackTimer);
-      fallbackTimer = null;
-      if (connectedBefore && document.visibilityState === "visible") void loadSnapshot(true);
-      connectedBefore = true;
-    });
-    source.addEventListener("restaurant_event", (rawEvent) => {
-      try {
-        const event = JSON.parse((rawEvent as MessageEvent).data);
-        window.dispatchEvent(new CustomEvent("inforyse:restaurant-event", { detail: event }));
-        if (event.type === "service_request_created" || event.type === "service_request_updated") {
-          const request = event.data?.request as ServiceRequest | undefined;
-          if (!request?.id) return;
-          setServiceRequests((current) => {
-            const remaining = current.filter((item) => item.id !== request.id);
-            return request.status === "PENDING" || request.status === "IN_PROGRESS"
-              ? [request, ...remaining].slice(0, 50)
-              : remaining;
-          });
-          if (event.type === "service_request_created") {
-            setServiceToast(request);
-            window.setTimeout(() => setServiceToast((current) => current?.id === request.id ? null : current), 8000);
-            if (soundEnabledRef.current) chime();
+    const connectStream = () => {
+      if (disposed || !authorized) return;
+      source = new EventSource("/api/admin/events");
+      source.addEventListener("connected", () => {
+        const reconnected = needsResync;
+        needsResync = false;
+        reconnectAttempt = 0;
+        if (reconnected && document.visibilityState === "visible") void loadSnapshot(true);
+      });
+      source.addEventListener("restaurant_event", (rawEvent) => {
+        try {
+          const event = JSON.parse((rawEvent as MessageEvent).data);
+          window.dispatchEvent(new CustomEvent("inforyse:restaurant-event", { detail: event }));
+          if (event.type === "service_request_created" || event.type === "service_request_updated") {
+            const request = event.data?.request as ServiceRequest | undefined;
+            if (!request?.id) return;
+            setServiceRequests((current) => {
+              const remaining = current.filter((item) => item.id !== request.id);
+              return request.status === "PENDING" || request.status === "IN_PROGRESS"
+                ? [request, ...remaining].slice(0, 50)
+                : remaining;
+            });
+            if (event.type === "service_request_created") {
+              setServiceToast(request);
+              window.setTimeout(() => setServiceToast((current) => current?.id === request.id ? null : current), 8000);
+              if (soundEnabledRef.current) chime();
+            }
+            return;
           }
-          return;
-        }
-        if (event.type !== "order_created") return;
-        const data = event.data ?? {};
-        const order = data.order ?? data;
-        const orderNumber = order.orderNumber ?? data.orderNumber;
-        remember({
-          id: order.id ?? data.orderId ?? `${event.restaurantId}-${orderNumber}`,
-          orderNumber,
-          customerName: order.customerName ?? data.customerName ?? null,
-          totalCents: order.totalCents ?? data.totalCents ?? 0,
-          createdAt: order.createdAt ?? data.createdAt ?? new Date().toISOString(),
-          table: order.table ?? (data.tableLabel ? { label: data.tableLabel } : null),
-        });
-      } catch { /* Ignore malformed realtime events. */ }
-    });
-    const startFallback = () => {
-      if (!authorized) return;
-      streamConnected = false;
-      if (!fallbackTimer) {
-        void loadSnapshot(true);
-        fallbackTimer = setInterval(() => {
-          if (!streamConnected && document.visibilityState === "visible") void loadSnapshot(true);
-        }, 8000);
-      }
+          if (event.type !== "order_created") return;
+          const data = event.data ?? {};
+          const order = data.order ?? data;
+          const orderNumber = order.orderNumber ?? data.orderNumber;
+          remember({
+            id: order.id ?? data.orderId ?? `${event.restaurantId}-${orderNumber}`,
+            orderNumber,
+            customerName: order.customerName ?? data.customerName ?? null,
+            totalCents: order.totalCents ?? data.totalCents ?? 0,
+            createdAt: order.createdAt ?? data.createdAt ?? new Date().toISOString(),
+            table: order.table ?? (data.tableLabel ? { label: data.tableLabel } : null),
+          });
+        } catch { /* Ignore malformed realtime events. */ }
+      });
+      source.onerror = () => {
+        // Disable EventSource's fixed rapid retry loop. Reopen with capped
+        // exponential backoff; reconcile missed events once after it recovers.
+        source?.close();
+        source = null;
+        needsResync = true;
+        if (disposed || !authorized || reconnectTimer !== null) return;
+        const delay = Math.min(30000, 1000 * 2 ** reconnectAttempt++);
+        reconnectTimer = window.setTimeout(() => {
+          reconnectTimer = null;
+          connectStream();
+        }, delay);
+      };
     };
-    source.addEventListener("realtime_unavailable", startFallback);
-    source.onerror = startFallback;
+    connectStream();
     void loadSnapshot();
-    const onVisible = () => { if (document.visibilityState === "visible") void loadSnapshot(); };
+    const onVisible = () => {
+      const visible = document.visibilityState === "visible";
+      if (visible && !wasVisible) void loadSnapshot(true);
+      wasVisible = visible;
+    };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       disposed = true;
       source?.close();
-      if (fallbackTimer) clearInterval(fallbackTimer);
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       document.removeEventListener("visibilitychange", onVisible);
       if (audio.current) void audio.current.close();
     };
@@ -322,6 +336,7 @@ export default function AdminOrderNotifications() {
             <div className="min-w-0 flex-1">
               <p className="font-bold text-slate-900">New order #{toast.orderNumber}</p>
               <p className="mt-0.5 truncate text-xs text-slate-500">{toast.table?.label ?? "Takeaway"} · {toast.customerName || "Guest"} · {formatRupees(toast.totalCents)}</p>
+              <p className="mt-1 text-[11px] text-slate-400">{formatDate(toast.createdAt)} · {formatTime(toast.createdAt)}</p>
               <Link href="/admin/orders" onClick={() => setToast(null)} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-emerald-800">Open order <span aria-hidden>→</span></Link>
             </div>
             <button aria-label="Dismiss notification" onClick={() => setToast(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button>
@@ -367,6 +382,7 @@ export default function AdminOrderNotifications() {
               <Link key={order.id} href="/admin/orders" onClick={() => { setOpen(false); setOrders((current) => current.filter((item) => item.id !== order.id)); }} className="block border-b border-slate-50 px-4 py-3 transition hover:bg-emerald-50/60">
                 <div className="flex items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Order #{order.orderNumber}</p><span className="text-xs font-bold text-emerald-800">{formatRupees(order.totalCents)}</span></div>
                 <p className="mt-1 text-xs text-slate-500">{order.table?.label ?? "Takeaway"} · {order.customerName || "Guest"}</p>
+                <p className="mt-1 text-[10px] text-slate-400">{formatDate(order.createdAt)} · {formatTime(order.createdAt)}</p>
               </Link>
             )) : serviceRequests.length === 0 ? <p className="px-4 py-8 text-center text-sm text-slate-500">You’re all caught up.</p> : null}
           </div>

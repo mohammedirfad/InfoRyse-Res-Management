@@ -308,21 +308,22 @@ export default function OrdersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      if (res.ok) {
-        setOrders((prev) =>
-          prev.map((o) => (o.id === order.id ? { ...o, status: nextStatus } : o))
-        );
-        setSelected((prev) =>
-          prev?.id === order.id ? { ...prev, status: nextStatus } : prev
-        );
-        if (arrivalToastOrder?.id === order.id) {
-          setArrivalToastOrder(null);
-        }
-        invalidateCache("admin:/api/admin/orders");
+      if (!res.ok) {
+        await load();
+        return;
       }
+      setOrders((prev) =>
+        prev.map((o) => (o.id === order.id ? { ...o, status: nextStatus } : o))
+      );
+      setSelected((prev) =>
+        prev?.id === order.id ? { ...prev, status: nextStatus } : prev
+      );
+      if (arrivalToastOrder?.id === order.id) {
+        setArrivalToastOrder(null);
+      }
+      invalidateCache("admin:/api/admin/orders");
     } finally {
       setUpdatingId(null);
-      load();
     }
   }
 

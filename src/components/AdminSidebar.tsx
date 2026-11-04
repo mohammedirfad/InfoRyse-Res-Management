@@ -8,7 +8,6 @@ import {
   Tag, Users, BarChart2, User, Settings, ChefHat, Bell, Menu, X, Receipt, History
 } from "lucide-react";
 import LogoutButton from "./LogoutButton";
-import { prefetchAdminRoute } from "@/lib/adminPrefetch";
 import { invalidateCache } from "@/lib/cachedFetch";
 
 const NAV = [
@@ -52,22 +51,6 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
     return true;
   });
 
-  // Prefetch the RSC payload for every visible tab once the shell is idle.
-  useEffect(() => {
-    const hrefs = visibleNav.map((item) => item.href);
-    const timer = window.setTimeout(() => hrefs.forEach((href) => router.prefetch(href)), 600);
-    return () => window.clearTimeout(timer);
-  // The nav list only depends on the role, which cannot change during a session.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userRole, router]);
-
-  // Warm the first tab's data immediately so the landing screen is instant.
-  useEffect(() => {
-    const first = visibleNav[0]?.href;
-    if (first) prefetchAdminRoute(first);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // Next 14 does not intercept clicks inside an <aside> that sits outside the
   // router's client boundary reliably; navigate explicitly so the click always
   // lands on the prefetched route instead of a full page load.
@@ -77,11 +60,6 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
     setOpen(false);
     if (href === pathname) return;
     router.push(href);
-  }
-
-  function warm(href: string) {
-    router.prefetch(href);
-    prefetchAdminRoute(href);
   }
 
   const sidebarContent = (
@@ -134,11 +112,8 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
             <Link
               key={href}
               href={href}
-              prefetch={true}
+              prefetch={false}
               onClick={(event) => go(href, event)}
-              onPointerEnter={() => warm(href)}
-              onFocus={() => warm(href)}
-              onPointerDown={() => warm(href)}
               className={`${
                 active ? "admin-nav-item-active" : "admin-nav-item"
               } active:scale-[0.98] transition-all`}
@@ -154,8 +129,8 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
       <div className="p-3 border-t border-white/10 flex-shrink-0 space-y-1">
         <Link
           href="/admin/dashboard"
+          prefetch={false}
           onClick={(event) => go("/admin/dashboard", event)}
-          onPointerEnter={() => warm("/admin/dashboard")}
           className="admin-nav-item text-sm">
           <Bell className="h-4 w-4" />Notifications
         </Link>
