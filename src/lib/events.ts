@@ -18,9 +18,13 @@ export function emitOrderEvent(payload: OrderEventPayload): Promise<void> {
   const delivery = broadcastOrderEvent(payload).catch((err) => {
     console.error("Failed to broadcast restaurant event", err);
   });
-  // Keep notification delivery out of the order/status response path on Vercel.
-  // Local development awaits delivery so same-process behavior stays predictable.
-  if (process.env.VERCEL) {
+  // New orders and guest service requests must be published before their API
+  // response succeeds; otherwise a serverless instance can finish the request
+  // before the live notification has actually left the function. Keep routine
+  // status updates off the response path.
+  const mustDeliverBeforeResponse =
+    payload.type === "order_created" || payload.type === "service_request_created";
+  if (process.env.VERCEL && !mustDeliverBeforeResponse) {
     waitUntil(delivery);
     return Promise.resolve();
   }
