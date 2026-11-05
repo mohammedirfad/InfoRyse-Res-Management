@@ -124,6 +124,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
     let wasVisible = document.visibilityState === "visible";
     let source: EventSource | null = null;
     let socket: WebSocket | null = null;
+    let redisFallback = false;
     const useRedisWebSocket = realtimeTransport === "redis-ws";
     const remember = (order: IncomingOrder) => {
       if (!order?.id || seen.current.has(order.id)) return;
@@ -214,9 +215,26 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
         connectStream();
       }, delay);
     };
+    const connectSse = () => {
+      if (disposed || !authorized || source) return;
+      source = new EventSource("/api/admin/events");
+      source.addEventListener("connected", onConnected);
+      source.addEventListener("restaurant_event", (rawEvent) => {
+        try {
+          onRestaurantEvent(JSON.parse((rawEvent as MessageEvent).data));
+        } catch { /* Ignore malformed realtime events. */ }
+      });
+      source.onerror = () => {
+        // Disable EventSource's fixed rapid retry loop. Reopen with capped
+        // exponential backoff; reconcile missed events once after it recovers.
+        source?.close();
+        source = null;
+        scheduleReconnect();
+      };
+    };
     const connectStream = () => {
       if (disposed || !authorized) return;
-      if (useRedisWebSocket) {
+      if (useRedisWebSocket && !redisFallback) {
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         socket = new WebSocket(`${protocol}//${window.location.host}/api/admin/ws`);
         socket.onmessage = (rawEvent) => {
@@ -233,26 +251,17 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
             router.replace("/admin/login");
             return;
           }
-          scheduleReconnect();
+          // A configured REDIS_URL does not guarantee that a WebSocket upgrade
+          // or Redis subscription works in every deployment. Fall back to the
+          // authenticated SSE channel, which is also published server-side.
+          redisFallback = true;
+          needsResync = true;
+          connectSse();
         };
         socket.onerror = () => socket?.close();
         return;
       }
-
-      source = new EventSource("/api/admin/events");
-      source.addEventListener("connected", onConnected);
-      source.addEventListener("restaurant_event", (rawEvent) => {
-        try {
-          onRestaurantEvent(JSON.parse((rawEvent as MessageEvent).data));
-        } catch { /* Ignore malformed realtime events. */ }
-      });
-      source.onerror = () => {
-        // Disable EventSource's fixed rapid retry loop. Reopen with capped
-        // exponential backoff; reconcile missed events once after it recovers.
-        source?.close();
-        source = null;
-        scheduleReconnect();
-      };
+      connectSse();
     };
     connectStream();
     void loadSnapshot();

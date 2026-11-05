@@ -62,7 +62,10 @@ export async function broadcastOrderEvent(payload: {
       };
 
   const messages = [
-    ...(!useRedisForAdmin && hasSupabaseRealtime ? [{ topic: `restaurant:${payload.restaurantId}`, private: true, payload }] : []),
+    // Keep the authenticated SSE channel as a fallback when Redis/WebSocket
+    // is unavailable for a particular Vercel instance or deployment. Admin
+    // clients use exactly one transport, so this does not duplicate alerts.
+    ...(hasSupabaseRealtime ? [{ topic: `restaurant:${payload.restaurantId}`, private: true, payload }] : []),
     ...(hasSupabaseRealtime && tableId ? [{
       topic: `table:${payload.restaurantId}:${tableId}`,
       private: true,
