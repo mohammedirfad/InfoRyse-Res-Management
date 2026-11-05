@@ -61,7 +61,7 @@ export default async function AdminPanelLayout({ children }: { children: React.R
   return (
     <div className="min-h-screen flex bg-gray-50 relative">
       <AdminSidebar restaurant={restaurant} userRole={session.role} />
-      <AdminOrderNotifications realtimeTransport={process.env.VERCEL && process.env.REDIS_URL ? "redis-ws" : "sse"} />
+      <AdminOrderNotifications realtimeTransport={process.env.NODE_ENV === "production" && process.env.REDIS_URL ? "redis-ws" : "sse"} />
       {/* On mobile: full width (sidebar is overlay). On desktop: sidebar takes 256px */}
       <main className="admin-panel-main flex-1 overflow-y-auto min-w-0 lg:pl-0 pl-0">
         {/* Mobile top padding so hamburger button doesn't cover content */}

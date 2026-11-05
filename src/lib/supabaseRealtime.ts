@@ -127,6 +127,9 @@ export function createRealtimeEventStream(
   let closed = false;
   let joined = false;
   let opened = false;
+  let joinSent = false;
+  let receivedFrames = 0;
+  let lastFrameShape: string | null = null;
   let realtimeUnavailable = false;
   let joinRef = "";
   const channelTopic = `realtime:${topic}`;
@@ -135,7 +138,7 @@ export function createRealtimeEventStream(
     if (joined || closed || realtimeUnavailable) return;
     realtimeUnavailable = true;
     clearTimeout(connectTimeout);
-    console.error(`[realtime:stream] Supabase channel did not join within 5s (topic=${topic}, socketOpened=${opened})`);
+    console.error(`[realtime:stream] Supabase channel did not join within 5s (topic=${topic}, socketOpened=${opened}, joinSent=${joinSent}, receivedFrames=${receivedFrames}, lastFrame=${lastFrameShape ?? "none"})`);
     sse("realtime_unavailable", { ok: false });
     try { if (socket.readyState < WebSocket.CLOSING) socket.close(1011, "realtime join timed out"); } catch { /* already closed */ }
     // Close the SSE response too. Leaving it open strands the browser on a
@@ -146,6 +149,7 @@ export function createRealtimeEventStream(
   const send = (event: string, payload: unknown, ref = String(++sequence)) => {
     if (socket.readyState !== WebSocket.OPEN) return;
     socket.send(JSON.stringify([ref, ref, channelTopic, event, payload]));
+    if (event === "phx_join") joinSent = true;
   };
 
   const heartbeat = setInterval(() => {
@@ -183,6 +187,10 @@ export function createRealtimeEventStream(
   socket.addEventListener("message", (message) => {
     try {
       const frame = JSON.parse(String(message.data));
+      receivedFrames += 1;
+      lastFrameShape = Array.isArray(frame)
+        ? `array:${String(frame[3] ?? "unknown")}`
+        : `object:${Object.keys(frame ?? {}).slice(0, 5).join(",")}`;
       if (!Array.isArray(frame)) return;
       if (frame[3] === "phx_reply" && frame[1] === joinRef) {
         if (frame[4]?.status === "ok") {

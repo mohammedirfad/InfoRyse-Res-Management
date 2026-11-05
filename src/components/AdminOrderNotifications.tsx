@@ -121,6 +121,8 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
     let authorized = true;
     let reconnectAttempt = 0;
     let reconnectTimer: number | null = null;
+    let redisRetryAttempt = 0;
+    let redisRetryTimer: number | null = null;
     let wasVisible = document.visibilityState === "visible";
     let source: EventSource | null = null;
     let socket: WebSocket | null = null;
@@ -173,6 +175,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       const reconnected = needsResync;
       needsResync = false;
       reconnectAttempt = 0;
+      if (useRedisWebSocket && !redisFallback) redisRetryAttempt = 0;
       if (reconnected && document.visibilityState === "visible") void loadSnapshot(true);
     };
     const onRestaurantEvent = (event: any) => {
@@ -215,6 +218,18 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
         connectStream();
       }, delay);
     };
+    const scheduleRedisRetry = () => {
+      if (disposed || !authorized || redisRetryTimer !== null) return;
+      const delay = Math.min(30000, 1000 * 2 ** redisRetryAttempt++);
+      redisRetryTimer = window.setTimeout(() => {
+        redisRetryTimer = null;
+        if (disposed || !authorized) return;
+        redisFallback = false;
+        source?.close();
+        source = null;
+        connectStream();
+      }, delay);
+    };
     const connectSse = () => {
       if (disposed || !authorized || source) return;
       source = new EventSource("/api/admin/events");
@@ -229,6 +244,12 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
         // exponential backoff; reconcile missed events once after it recovers.
         source?.close();
         source = null;
+        // When Redis is configured, Redis retries are also the recovery path;
+        // don't keep reopening a Supabase stream that failed to join.
+        if (useRedisWebSocket && redisFallback) {
+          scheduleRedisRetry();
+          return;
+        }
         scheduleReconnect();
       };
     };
@@ -257,6 +278,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
           redisFallback = true;
           needsResync = true;
           connectSse();
+          scheduleRedisRetry();
         };
         socket.onerror = () => socket?.close();
         return;
@@ -276,6 +298,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       source?.close();
       socket?.close(1000, "admin panel closed");
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (redisRetryTimer !== null) window.clearTimeout(redisRetryTimer);
       document.removeEventListener("visibilitychange", onVisible);
       if (audio.current) void audio.current.close();
     };
