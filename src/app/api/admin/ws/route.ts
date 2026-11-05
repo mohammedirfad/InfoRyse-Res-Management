@@ -16,5 +16,10 @@ export async function GET() {
   } catch (error) {
     return tenantErrorResponse(error);
   }
-  return upgradeWebSocket((socket) => attachAdminRealtimeSocket(socket, restaurantId), { maxPayload: 1024 });
+  try {
+    return await upgradeWebSocket((socket) => attachAdminRealtimeSocket(socket, restaurantId), { maxPayload: 1024 });
+  } catch (error) {
+    console.error("[admin-realtime:websocket] upgrade failed", error);
+    return Response.json({ error: "Realtime connection could not be started" }, { status: 503 });
+  }
 }

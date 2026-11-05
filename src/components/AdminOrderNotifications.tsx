@@ -123,10 +123,13 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
     let reconnectTimer: number | null = null;
     let redisRetryAttempt = 0;
     let redisRetryTimer: number | null = null;
+    let snapshotFallbackTimer: number | null = null;
+    let snapshotInitialized = false;
     let wasVisible = document.visibilityState === "visible";
     let source: EventSource | null = null;
     let socket: WebSocket | null = null;
     let redisFallback = false;
+    const knownServiceRequestIds = new Set<string>();
     const useRedisWebSocket = realtimeTransport === "redis-ws";
     const remember = (order: IncomingOrder) => {
       if (!order?.id || seen.current.has(order.id)) return;
@@ -162,7 +165,25 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
           if (order?.id && !seen.current.has(order.id)) discoveredOrder = true;
           remember(order);
         }
-        setServiceRequests(data.serviceRequests ?? []);
+        const activeRequests = (data.serviceRequests ?? []) as ServiceRequest[];
+        const newlyFoundRequest = snapshotInitialized
+          ? activeRequests.find((request) => request.id && !knownServiceRequestIds.has(request.id))
+          : undefined;
+        for (const request of activeRequests) {
+          if (request.id) knownServiceRequestIds.add(request.id);
+        }
+        if (knownServiceRequestIds.size > 300) {
+          const keep = [...knownServiceRequestIds].slice(-200);
+          knownServiceRequestIds.clear();
+          keep.forEach((id) => knownServiceRequestIds.add(id));
+        }
+        if (newlyFoundRequest) {
+          setServiceToast(newlyFoundRequest);
+          window.setTimeout(() => setServiceToast((current) => current?.id === newlyFoundRequest.id ? null : current), 8000);
+          if (soundEnabledRef.current) chime();
+        }
+        snapshotInitialized = true;
+        setServiceRequests(activeRequests);
         cursor.current = new Date(Date.now() - 2000).toISOString();
         // Reconcile after reconnect so events missed during a disconnect are
         // shown once, without polling while the stream is unavailable.
@@ -171,10 +192,23 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       } catch { /* The realtime stream remains active; retry on reconnect/focus. */ }
       finally { snapshotBusy = false; }
     };
+    const startSnapshotFallback = () => {
+      if (disposed || snapshotFallbackTimer !== null) return;
+      // Use snapshots only while push is disconnected; stop as soon as a live
+      // Redis or Supabase subscription confirms it has joined.
+      void loadSnapshot();
+      snapshotFallbackTimer = window.setInterval(() => void loadSnapshot(), 3000);
+    };
+    const stopSnapshotFallback = () => {
+      if (snapshotFallbackTimer === null) return;
+      window.clearInterval(snapshotFallbackTimer);
+      snapshotFallbackTimer = null;
+    };
     const onConnected = () => {
       const reconnected = needsResync;
       needsResync = false;
       reconnectAttempt = 0;
+      stopSnapshotFallback();
       if (useRedisWebSocket && !redisFallback) redisRetryAttempt = 0;
       if (reconnected && document.visibilityState === "visible") void loadSnapshot(true);
     };
@@ -183,6 +217,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       if (event.type === "service_request_created" || event.type === "service_request_updated") {
         const request = event.data?.request as ServiceRequest | undefined;
         if (!request?.id) return;
+        knownServiceRequestIds.add(request.id);
         setServiceRequests((current) => {
           const remaining = current.filter((item) => item.id !== request.id);
           return request.status === "PENDING" || request.status === "IN_PROGRESS"
@@ -244,6 +279,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
         // exponential backoff; reconcile missed events once after it recovers.
         source?.close();
         source = null;
+        startSnapshotFallback();
         // When Redis is configured, Redis retries are also the recovery path;
         // don't keep reopening a Supabase stream that failed to join.
         if (useRedisWebSocket && redisFallback) {
@@ -256,6 +292,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
     const connectStream = () => {
       if (disposed || !authorized) return;
       if (useRedisWebSocket && !redisFallback) {
+        stopSnapshotFallback();
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         socket = new WebSocket(`${protocol}//${window.location.host}/api/admin/ws`);
         socket.onmessage = (rawEvent) => {
@@ -277,6 +314,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
           // authenticated SSE channel, which is also published server-side.
           redisFallback = true;
           needsResync = true;
+          startSnapshotFallback();
           connectSse();
           scheduleRedisRetry();
         };
@@ -299,6 +337,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       socket?.close(1000, "admin panel closed");
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       if (redisRetryTimer !== null) window.clearTimeout(redisRetryTimer);
+      if (snapshotFallbackTimer !== null) window.clearInterval(snapshotFallbackTimer);
       document.removeEventListener("visibilitychange", onVisible);
       if (audio.current) void audio.current.close();
     };

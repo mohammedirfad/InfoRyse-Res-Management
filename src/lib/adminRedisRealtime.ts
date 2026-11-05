@@ -53,6 +53,7 @@ async function subscribeToAdminEvents() {
       });
       await subscriber.connect();
       await subscriber.psubscribe(`${CHANNEL_PREFIX}*`);
+      console.info("[admin-realtime:redis] subscriber ready");
     })().catch((error) => {
       runtimeGlobal.__inforyseRedisSubscribePromise = undefined;
       runtimeGlobal.__inforyseRedisSubscriber = undefined;
@@ -64,9 +65,9 @@ async function subscribeToAdminEvents() {
 }
 
 export function isAdminRedisRealtimeConfigured() {
-  // Next dev serves the existing SSE endpoint; Vercel's upgrade API only runs
-  // on Vercel Functions, where this transport is enabled.
-  return Boolean(process.env.VERCEL && REDIS_URL);
+  // Use the same condition in the admin layout, publisher, and WS route.
+  // Local `next dev` uses SSE; Production with REDIS_URL uses Redis WebSockets.
+  return process.env.NODE_ENV === "production" && Boolean(REDIS_URL);
 }
 
 export async function publishAdminRestaurantEvent(event: {
@@ -77,7 +78,8 @@ export async function publishAdminRestaurantEvent(event: {
   const client = publisher();
   if (!client) return false;
   if (client.status === "wait") await client.connect();
-  await client.publish(`${CHANNEL_PREFIX}${event.restaurantId}`, JSON.stringify(event));
+  const subscriberCount = await client.publish(`${CHANNEL_PREFIX}${event.restaurantId}`, JSON.stringify(event));
+  console.info("[admin-realtime:redis] event published", { type: event.type, subscriberCount });
   return true;
 }
 

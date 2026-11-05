@@ -23,6 +23,13 @@ export async function broadcastOrderEvent(payload: {
   const base = SUPABASE_URL;
   const hasSupabaseRealtime = /^https:\/\//i.test(base) && Boolean(SUPABASE_KEY);
   const useRedisForAdmin = isAdminRedisRealtimeConfigured();
+  if (payload.type === "order_created" || payload.type === "service_request_created") {
+    console.info("[realtime:broadcast] transport selection", {
+      type: payload.type,
+      redisConfigured: useRedisForAdmin,
+      supabaseConfigured: hasSupabaseRealtime,
+    });
+  }
   if (!hasSupabaseRealtime && !useRedisForAdmin) return;
 
   const data = payload.data ?? {};
@@ -96,7 +103,7 @@ export async function broadcastOrderEvent(payload: {
   const results = await Promise.allSettled(tasks);
   for (const result of results) {
     if (result.status === "rejected") {
-      console.error("[realtime:broadcast] Supabase publish failed", result.reason);
+      console.error("[realtime:broadcast] transport publish failed", result.reason);
     }
   }
 }
