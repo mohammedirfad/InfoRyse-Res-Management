@@ -1,4 +1,5 @@
 import { isAdminRedisRealtimeConfigured, publishAdminRestaurantEvent } from "@/lib/adminRedisRealtime";
+import WebSocket from "ws";
 
 const SUPABASE_URL = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -110,10 +111,6 @@ export function createRealtimeEventStream(
   if (!url) {
     return Response.json({ error: "Realtime is not configured" }, { status: 503 });
   }
-  if (typeof WebSocket === "undefined") {
-    return Response.json({ error: "This runtime does not support realtime streams" }, { status: 503 });
-  }
-
   const stream = new TransformStream<Uint8Array, Uint8Array>();
   const writer = stream.writable.getWriter();
   const encoder = new TextEncoder();
@@ -129,6 +126,7 @@ export function createRealtimeEventStream(
   let sequence = 0;
   let closed = false;
   let joined = false;
+  let opened = false;
   let realtimeUnavailable = false;
   let joinRef = "";
   const channelTopic = `realtime:${topic}`;
@@ -137,7 +135,7 @@ export function createRealtimeEventStream(
     if (joined || closed || realtimeUnavailable) return;
     realtimeUnavailable = true;
     clearTimeout(connectTimeout);
-    console.error(`[realtime:stream] Supabase channel did not join within 5s (topic=${topic})`);
+    console.error(`[realtime:stream] Supabase channel did not join within 5s (topic=${topic}, socketOpened=${opened})`);
     sse("realtime_unavailable", { ok: false });
     try { if (socket.readyState < WebSocket.CLOSING) socket.close(1011, "realtime join timed out"); } catch { /* already closed */ }
     // Close the SSE response too. Leaving it open strands the browser on a
@@ -169,6 +167,7 @@ export function createRealtimeEventStream(
   };
 
   socket.addEventListener("open", () => {
+    opened = true;
     joinRef = String(++sequence);
     send("phx_join", {
       config: {
@@ -206,11 +205,20 @@ export function createRealtimeEventStream(
       sse("restaurant_event", payload);
     } catch { /* Ignore non-JSON protocol frames. */ }
   });
-  socket.addEventListener("error", () => {
+  socket.addEventListener("error", (event) => {
+    console.error("[realtime:stream] Supabase WebSocket error", {
+      topic,
+      message: event instanceof Error ? event.message : "WebSocket connection error",
+    });
     if (joined) cleanup();
     else markRealtimeUnavailable();
   });
-  socket.addEventListener("close", () => {
+  socket.addEventListener("close", (event) => {
+    console.warn("[realtime:stream] Supabase WebSocket closed", {
+      topic,
+      code: event.code,
+      reason: event.reason,
+    });
     if (joined) cleanup();
     else markRealtimeUnavailable();
   });
