@@ -45,6 +45,7 @@ interface LandingProps {
   categories:      number;
   cartCount:       number;
   cartTotalCents?: number;
+  hasActiveDiningSession?: boolean;
   slug:            string;
   qrToken:         string;
   discountActive?: boolean;
@@ -69,6 +70,7 @@ export function LandingPage({
   categories,
   cartCount,
   cartTotalCents = 0,
+  hasActiveDiningSession = false,
   slug,
   qrToken,
   discountActive,
@@ -378,6 +380,17 @@ export function LandingPage({
               </div>
             </div>
           </button>
+
+          {hasActiveDiningSession && (
+            <Link
+              href={`/r/${slug}/${qrToken}/cart?tab=confirmed`}
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-white/25 bg-white/10 px-5 py-3 text-sm font-bold text-white backdrop-blur-xl hover:bg-white/15"
+            >
+              <ShoppingCart className="h-4 w-4 text-amber-300" />
+              View your active orders and order status
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          )}
 
           {/* Cart Bar if Items Exist */}
           {cartCount > 0 && (

@@ -700,6 +700,12 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                           <span className="text-gray-500">Round subtotal</span>
                           <span>{formatRupees(order.subtotalCents ?? order.totalCents)}</span>
                         </div>
+                        <Link
+                          href={`${base}/confirmation?orderNumber=${encodeURIComponent(String(orderNum))}&name=${encodeURIComponent(customer)}`}
+                          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-gray-200 px-3 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                        >
+                          View order status
+                        </Link>
                       </div>
                     );
                   })}

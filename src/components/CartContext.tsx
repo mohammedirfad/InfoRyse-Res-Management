@@ -74,9 +74,13 @@ export function CartProvider({
 
         // Support both modern { lines, updatedAt, sessionId } and legacy CartLine[] format
         if (Array.isArray(parsed)) {
-          setLines(parsed);
+          // Legacy carts have no reliable timestamp, so expire them rather
+          // than allowing abandoned drafts to remain forever.
+          localStorage.removeItem(storageKey);
+          setLines([]);
         } else if (parsed && Array.isArray(parsed.lines)) {
-          const isExpired = parsed.updatedAt && (now - parsed.updatedAt > CART_TTL_MS);
+          const hasValidTimestamp = Number.isFinite(parsed.updatedAt) && parsed.updatedAt > 0;
+          const isExpired = !hasValidTimestamp || now - parsed.updatedAt > CART_TTL_MS;
           if (isExpired) {
             localStorage.removeItem(storageKey);
             setLines([]);
@@ -225,7 +229,7 @@ export function getStoredOrders(qrToken: string, activeSessionId?: string | null
     if (parsed && Array.isArray(parsed.orders)) {
       const container = parsed as StoredOrdersContainer;
       // If older than 2.5 hours, dining session has ended -> wipe
-      if (now - container.updatedAt > ORDERS_TTL_MS) {
+      if (!Number.isFinite(container.updatedAt) || container.updatedAt <= 0 || now - container.updatedAt > ORDERS_TTL_MS) {
         localStorage.removeItem(key);
         return [];
       }
@@ -239,9 +243,10 @@ export function getStoredOrders(qrToken: string, activeSessionId?: string | null
 
     // Support legacy array format
     if (Array.isArray(parsed)) {
-      // Check oldest order timestamp if available
+      // Legacy snapshots have no expiry metadata. Keep only recent entries.
       const first = parsed[0];
-      if (first?.createdAt && (now - new Date(first.createdAt).getTime() > ORDERS_TTL_MS)) {
+      const createdAt = first?.createdAt ? new Date(first.createdAt).getTime() : 0;
+      if (!Number.isFinite(createdAt) || createdAt <= 0 || now - createdAt > ORDERS_TTL_MS) {
         localStorage.removeItem(key);
         return [];
       }

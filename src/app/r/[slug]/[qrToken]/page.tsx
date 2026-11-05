@@ -581,6 +581,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
       categories={d.categories.length}
       cartCount={totalCount}
       cartTotalCents={totalCents}
+      hasActiveDiningSession={hasActiveDiningSession}
       slug={params.slug}
       qrToken={params.qrToken}
       discountActive={d.restaurant.discountActive}

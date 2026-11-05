@@ -430,9 +430,9 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
               <Link href={`/bill/${encodeURIComponent(billShareToken)}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#132A1E] px-3 py-2 text-sm font-semibold text-white">
                 <ReceiptText className="h-4 w-4" /> View bill
               </Link>
-              <Link href={`/bill/${encodeURIComponent(billShareToken)}/pdf`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#132A1E]/20 px-3 py-2 text-sm font-semibold text-[#132A1E]">
+              <a href={`/bill/${encodeURIComponent(billShareToken)}/pdf`} download className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#132A1E]/20 px-3 py-2 text-sm font-semibold text-[#132A1E]">
                 <Download className="h-4 w-4" /> Download PDF
-              </Link>
+              </a>
             </div>
           ) : hasBillableItems && tableSessionOpen && status !== "CANCELLED" ? (
             <button type="button" onClick={requestBill} disabled={!tableSessionId || billRequestState === "sending" || billRequestState === "sent" || status === "CANCELLED"}
