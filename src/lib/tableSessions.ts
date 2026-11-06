@@ -39,6 +39,10 @@ export async function getCurrentTableSession(
     }
   }
 
+  // Most first orders arrive at a table with no open session. Avoid a second
+  // identical open-session lookup in that common case before creating one.
+  if (!newest) return null;
+
   const sessions = await client.tableSession.findMany({
     where: { tableId, restaurantId, status: "OPEN" },
     orderBy: { createdAt: "desc" },

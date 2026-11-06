@@ -18,15 +18,13 @@ export function emitOrderEvent(payload: OrderEventPayload): Promise<void> {
   const delivery = broadcastOrderEvent(payload).catch((err) => {
     console.error("Failed to broadcast restaurant event", err);
   });
-  // New orders and guest service requests must be published before their API
-  // response succeeds; otherwise a serverless instance can finish the request
-  // before the live notification has actually left the function. Keep routine
-  // status updates off the response path.
-  const mustDeliverBeforeResponse =
-    payload.type === "order_created" || payload.type === "service_request_created";
-  if (process.env.VERCEL && !mustDeliverBeforeResponse) {
+  // Do not hold guest checkout or service-request responses open for a realtime
+  // provider. On Vercel, waitUntil keeps the bounded publish alive after the
+  // response; in local Node, the caught promise continues in the background.
+  if (process.env.VERCEL) {
     waitUntil(delivery);
     return Promise.resolve();
   }
-  return delivery;
+  void delivery;
+  return Promise.resolve();
 }

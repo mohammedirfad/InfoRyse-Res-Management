@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   let tableLookupMs = 0;
   let itemValidationMs = 0;
   let writeTransactionMs = 0;
-  let realtimeBroadcastMs = 0;
+  let realtimeDispatchMs = 0;
   try {
     const body = BodySchema.parse(await req.json());
 
@@ -250,10 +250,10 @@ export async function POST(req: Request) {
         totalCents: session.order.totalCents,
       },
     });
-    realtimeBroadcastMs = performance.now() - realtimeStartedAt;
+    realtimeDispatchMs = performance.now() - realtimeStartedAt;
 
     const totalMs = performance.now() - requestStartedAt;
-    const serverTiming = `qr_table;dur=${tableLookupMs.toFixed(1)}, item_validation;dur=${itemValidationMs.toFixed(1)}, order_write;dur=${writeTransactionMs.toFixed(1)}, realtime_broadcast;dur=${realtimeBroadcastMs.toFixed(1)}, total;dur=${totalMs.toFixed(1)}`;
+    const serverTiming = `qr_table;dur=${tableLookupMs.toFixed(1)}, item_validation;dur=${itemValidationMs.toFixed(1)}, order_write;dur=${writeTransactionMs.toFixed(1)}, realtime_dispatch;dur=${realtimeDispatchMs.toFixed(1)}, total;dur=${totalMs.toFixed(1)}`;
     console.info("[order:create:timing]", serverTiming);
     return Response.json(
       { order: session.order, tableSessionId: session.tableSessionId },
