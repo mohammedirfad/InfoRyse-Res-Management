@@ -105,6 +105,9 @@ export default function DashboardPage() {
   const preparing = today.filter((o) => o.status === "PREPARING");
   const completed = today.filter((o) => o.status === "COMPLETED");
   const salesCents = today.reduce((s, o) => s + o.totalCents, 0);
+  const yesterday = orders.filter((o) => { const d = new Date(o.createdAt); const now = new Date(); const prior = new Date(now); prior.setDate(now.getDate() - 1); return d.toDateString() === prior.toDateString(); });
+  const yesterdaySales = yesterday.reduce((sum, o) => sum + o.totalCents, 0);
+  const changeText = (current: number, previous: number) => previous === 0 ? (current ? "New activity" : "No change") : `${current >= previous ? "+" : ""}${Math.round((current - previous) / previous * 100)}% vs yesterday`;
 
   const statusDistribution = Object.entries(
     today.reduce((acc, o) => { acc[o.status] = (acc[o.status] ?? 0) + 1; return acc; }, {} as Record<string, number>)
@@ -142,8 +145,8 @@ export default function DashboardPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {[
-          { label: "Total Orders", value: today.length, icon: ShoppingBag, color: "text-[#132A1E]", bg: "bg-[#132A1E]/10", change: "+12% vs yesterday" },
-          { label: "Total Sales", value: formatRupees(salesCents), icon: TrendingUp, color: "text-amber-600", bg: "bg-amber-50", change: "+18% vs yesterday" },
+          { label: "Total Orders", value: today.length, icon: ShoppingBag, color: "text-[#132A1E]", bg: "bg-[#132A1E]/10", change: changeText(today.length, yesterday.length) },
+          { label: "Total Sales", value: formatRupees(salesCents), icon: TrendingUp, color: "text-amber-600", bg: "bg-amber-50", change: `${changeText(salesCents, yesterdaySales)} · today` },
           { label: "Pending Orders", value: pending.length, icon: Clock, color: "text-orange-600", bg: "bg-orange-50", change: `${pending.length} awaiting` },
           { label: "Completed", value: completed.length, icon: CheckCircle, color: "text-green-600", bg: "bg-green-50", change: `${preparing.length} preparing` },
         ].map((c) => (

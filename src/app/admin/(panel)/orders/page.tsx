@@ -10,8 +10,11 @@ import {
 import { formatRupees, formatTime } from "@/lib/utils";
 import { fetchJsonCached, invalidateCache, peekCache } from "@/lib/cachedFetch";
 import { saveAdminRouteData } from "@/lib/adminPrefetch";
+import OrderMenuPicker from "@/components/OrderMenuPicker";
 
-type OrderItem = { id: string; nameSnapshot: string; priceCentsSnapshot: number; quantity: number; servedQuantity: number; cancelledQuantity: number };
+type OrderItem = { id: string; menuItemId: string | null; nameSnapshot: string; priceCentsSnapshot: number; quantity: number; servedQuantity: number; cancelledQuantity: number };
+type MenuCategory = { id: string; name: string };
+type PickerLine = { itemId: string; qty: number; name: string; price: number };
 type Order = {
   id: string;
   orderNumber: number;
@@ -21,6 +24,7 @@ type Order = {
   items: OrderItem[];
   customerName: string | null;
   customerPhone: string | null;
+  customerEmail?: string | null;
   notes: string | null;
   orderType: string | null;
   paymentMethod: string | null;
@@ -120,7 +124,9 @@ export default function OrdersPage() {
   // Manual order modal state
   const [showCreate, setShowCreate] = useState(false);
   const [tables, setTables] = useState<{ id: string; label: string; section: string | null }[]>([]);
-  const [menuItems, setMenuItems] = useState<{ id: string; name: string; priceCents: number; category: { name: string } }[]>([]);
+  const [menuItems, setMenuItems] = useState<{ id: string; name: string; priceCents: number; isVeg?: boolean; isAvailable?: boolean; category: MenuCategory }[]>([]);
+  const [categories, setCategories] = useState<MenuCategory[]>([]);
+  const [pickerTarget, setPickerTarget] = useState<"edit" | "create" | null>(null);
   const [manualForm, setManualForm] = useState({
     tableId: "",
     customerName: "",
@@ -131,6 +137,12 @@ export default function OrdersPage() {
   });
   const [manualLines, setManualLines] = useState<{ itemId: string; qty: number; name: string; price: number }[]>([]);
   const [creating, setCreating] = useState(false);
+  const [editingOrder, setEditingOrder] = useState(false);
+  const [editCustomerName, setEditCustomerName] = useState("");
+  const [editCustomerPhone, setEditCustomerPhone] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editLines, setEditLines] = useState<{ itemId: string; qty: number; name: string; price: number }[]>([]);
+  const [editError, setEditError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
 
   const prevNewCount = useRef(-1);
@@ -250,9 +262,11 @@ export default function OrdersPage() {
     Promise.all([
       fetch("/api/admin/tables").then((r) => r.json()),
       fetch("/api/admin/menu-items").then((r) => r.json()),
-    ]).then(([t, m]) => {
+      fetch("/api/admin/categories").then((r) => r.json()),
+    ]).then(([t, m, c]) => {
       setTables(t.tables ?? []);
       setMenuItems(m.items ?? []);
+      setCategories(c.categories ?? []);
     });
   }, [showCreate]);
 
@@ -379,13 +393,6 @@ export default function OrdersPage() {
   }
 
   // Manual order helpers
-  function addManualLine(item: { id: string; name: string; priceCents: number }) {
-    setManualLines((p) => {
-      const ex = p.find((l) => l.itemId === item.id);
-      if (ex) return p.map((l) => (l.itemId === item.id ? { ...l, qty: l.qty + 1 } : l));
-      return [...p, { itemId: item.id, qty: 1, name: item.name, price: item.priceCents }];
-    });
-  }
   function removeManualLine(itemId: string) {
     setManualLines((p) => p.filter((l) => l.itemId !== itemId));
   }
@@ -431,6 +438,23 @@ export default function OrdersPage() {
     } finally {
       setCreating(false);
     }
+  }
+
+  function beginEdit(order: Order) {
+    setEditCustomerName(order.customerName ?? ""); setEditCustomerPhone(order.customerPhone ?? ""); setEditNotes(order.notes ?? "");
+    setEditLines(order.items.flatMap((item) => item.menuItemId ? [{ itemId: item.menuItemId, qty: item.quantity, name: item.nameSnapshot, price: item.priceCentsSnapshot }] : []));
+    setEditError(null); setEditingOrder(true); setPickerTarget("edit");
+    Promise.all([fetch("/api/admin/menu-items").then((r) => r.json()), fetch("/api/admin/categories").then((r) => r.json())]).then(([m, c]) => { setMenuItems(m.items ?? []); setCategories(c.categories ?? []); });
+  }
+  async function saveEdit() {
+    if (!selected || editLines.length === 0) return setEditError("Add at least one menu item.");
+    setUpdatingId(selected.id); setEditError(null);
+    try {
+      const response = await fetch(`/api/admin/orders/${selected.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customerName: editCustomerName, customerPhone: editCustomerPhone, notes: editNotes, items: editLines.map((line) => ({ menuItemId: line.itemId, quantity: line.qty })) }) });
+      const data = await response.json();
+      if (!response.ok) return setEditError(data.error ?? "Could not update order.");
+      setEditingOrder(false); invalidateCache("admin:/api/admin/orders"); await load();
+    } finally { setUpdatingId(null); }
   }
 
   return (
@@ -908,6 +932,7 @@ export default function OrdersPage() {
               </span>
             </div>
             <div className="flex items-center gap-1">
+              {!["COMPLETED", "CANCELLED"].includes(selected.status) && <button onClick={() => beginEdit(selected)} title="Edit order" className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Edit Order</button>}
               <button
                 onClick={() => printBill(selected)}
                 title="Print KOT Receipt"
@@ -950,6 +975,19 @@ export default function OrdersPage() {
                 </span>
               </div>
             </div>
+
+            {editingOrder ? (
+              <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/50 p-3 text-xs">
+                <strong className="block text-slate-800">Edit customer and items</strong>
+                <input className="input w-full" placeholder="Customer name" value={editCustomerName} onChange={(e) => setEditCustomerName(e.target.value)} />
+                <input className="input w-full" placeholder="Phone number" value={editCustomerPhone} onChange={(e) => setEditCustomerPhone(e.target.value)} />
+                <textarea className="input w-full" placeholder="Kitchen notes" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+                <button type="button" onClick={() => setPickerTarget("edit")} className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-left text-xs font-bold text-emerald-950">Browse categories, search dishes, or add a new menu dish</button>
+                {editLines.map((line) => <div key={line.itemId} className="flex items-center justify-between"><span>{line.name}</span><div className="flex items-center gap-2"><button onClick={() => setEditLines((lines) => lines.flatMap((x) => x.itemId !== line.itemId ? [x] : x.qty <= 1 ? [] : [{ ...x, qty: x.qty - 1 }]))}>−</button><span>{line.qty}</span><button onClick={() => setEditLines((lines) => lines.map((x) => x.itemId === line.itemId ? { ...x, qty: x.qty + 1 } : x))}>+</button></div></div>)}
+                {editError && <p className="text-rose-700">{editError}</p>}
+                <div className="flex gap-2"><button onClick={() => setEditingOrder(false)} className="rounded-lg border bg-white px-3 py-2">Cancel</button><button onClick={() => void saveEdit()} disabled={updatingId !== null} className="rounded-lg bg-emerald-950 px-3 py-2 font-bold text-white disabled:opacity-50">Save order</button></div>
+              </div>
+            ) : null}
 
             {/* Customer info */}
             {(selected.customerName || selected.customerPhone) && (
@@ -1105,29 +1143,7 @@ export default function OrdersPage() {
               </div>
 
               {/* Order items selection */}
-              <div>
-                <span className="font-bold text-slate-700 mb-2 block uppercase tracking-wider text-[10px]">
-                  Menu Items
-                </span>
-                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1">
-                  {menuItems.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => addManualLine(item)}
-                      className="p-2.5 rounded-xl border border-slate-200 hover:border-slate-400 text-left flex justify-between items-center transition-all"
-                    >
-                      <div className="truncate pr-1">
-                        <p className="font-bold text-slate-800 text-xs truncate">{item.name}</p>
-                        <p className="text-[10px] text-slate-400">{item.category?.name}</p>
-                      </div>
-                      <span className="font-bold text-slate-900 font-mono text-xs flex-shrink-0">
-                        {formatRupees(item.priceCents)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <div><span className="font-bold text-slate-700 mb-2 block uppercase tracking-wider text-[10px]">Menu Items</span><button type="button" onClick={() => setPickerTarget("create")} className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-left text-xs font-bold text-emerald-950">Browse categories, search dishes, or add a new menu dish</button></div>
 
               {/* Selected items */}
               {manualLines.length > 0 && (
@@ -1199,6 +1215,16 @@ export default function OrdersPage() {
           </div>
         </div>
       )}
+      <OrderMenuPicker
+        open={pickerTarget !== null}
+        onClose={() => setPickerTarget(null)}
+        items={menuItems}
+        categories={categories}
+        lines={pickerTarget === "edit" ? editLines : manualLines}
+        onLinesChange={(lines: PickerLine[]) => pickerTarget === "edit" ? setEditLines(lines) : setManualLines(lines)}
+        onDishCreated={(item) => setMenuItems((current) => [item, ...current.filter((existing) => existing.id !== item.id)])}
+        onCategoryCreated={(category) => setCategories((current) => current.some((existing) => existing.id === category.id) ? current : [...current, category])}
+      />
     </div>
   );
 }

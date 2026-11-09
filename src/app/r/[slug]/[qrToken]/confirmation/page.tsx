@@ -1,11 +1,14 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { UtensilsCrossed, RefreshCw, X, AlertTriangle, ReceiptText, Download } from "lucide-react";
+import { UtensilsCrossed, RefreshCw, X, AlertTriangle, ReceiptText, Download, Gamepad2 } from "lucide-react";
 import { getStoredOrders, saveStoredOrders } from "@/components/CartContext";
 import { requestTableBill } from "@/lib/guestBill";
+
+const GameCenter = dynamic(() => import("./game-center"), { ssr: false });
 
 const STEPS: { label: string; subLabel: string; key: string }[] = [
   { label: "Order Placed",         subLabel: "We received your order",       key: "NEW"       },
@@ -39,6 +42,9 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   const [tableSessionOpen, setTableSessionOpen] = useState(false);
   const [billRequestState, setBillRequestState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [billRequestMessage, setBillRequestMessage] = useState("");
+  const [gameInviteVisible, setGameInviteVisible] = useState(false);
+  const [gameIconVisible, setGameIconVisible] = useState(false);
+  const [gameCenterOpen, setGameCenterOpen] = useState(false);
 
   const nudgeTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const statusRef = useRef(status);
@@ -48,6 +54,29 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   const isDone      = status === "COMPLETED" || status === "CANCELLED";
   const canCancel   = CANCELLABLE.includes(status) && !cancelled;
   const currentIdx  = STATUS_ORDER.indexOf(status);
+  const gamePromptKey = `inforyse_game_prompt_${params.qrToken}_${orderNumber}`;
+
+  useEffect(() => {
+    if (!orderNumber) return;
+    try {
+      const chosenAt = Number(localStorage.getItem(gamePromptKey));
+      if (chosenAt > 0 && Date.now() - chosenAt < 2.5 * 60 * 60 * 1000) {
+        setGameIconVisible(true);
+      } else {
+        setGameInviteVisible(true);
+        setGameIconVisible(true);
+      }
+    } catch {
+      setGameInviteVisible(true);
+      setGameIconVisible(true);
+    }
+  }, [gamePromptKey, orderNumber]);
+
+  function rememberGameChoice() {
+    try { localStorage.setItem(gamePromptKey, String(Date.now())); } catch { /* Games work without browser storage. */ }
+    setGameInviteVisible(false);
+    setGameIconVisible(true);
+  }
 
   // The SSE response carries the initial status snapshot and then only pushes
   // changes. Reopening the stream on resume gets one fresh snapshot.
@@ -220,10 +249,9 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       } catch { /* Keep the live event stream as the primary status source. */ }
     };
     void hydrate();
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") void hydrate();
-    }, 8000);
-    return () => { stopped = true; clearInterval(timer); };
+    // The SSE stream above carries live order and bill updates. Keep only this
+    // one initial snapshot instead of polling this endpoint every eight seconds.
+    return () => { stopped = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderNumber, params.slug, params.qrToken]);
 
@@ -232,7 +260,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   }
 
   return (
-    <div className="min-h-screen bg-[#FBF7F1] pb-12">
+    <div id="order-status" className="min-h-screen bg-[#FBF7F1] pb-12">
 
       {/* Hero */}
       <div className="relative bg-gradient-to-br from-[#0D1F15] to-[#132A1E] text-white px-5 pt-10 pb-8 rounded-b-3xl shadow-md overflow-hidden">
@@ -461,6 +489,29 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
 
         <p className="text-center text-xs text-gray-300 mt-4 italic">— Good Food · Brighter Moments —</p>
       </div>
+      {gameIconVisible && !isDone && status !== "READY" && (
+        <div className="fixed bottom-5 right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2 sm:bottom-6 sm:right-6">
+          {gameInviteVisible && (
+            <div className="w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-emerald-100 bg-white p-4 shadow-xl" role="status" style={{ fontFamily: "inherit" }}>
+              <div className="mb-2 flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-xl" aria-hidden="true">🧑‍🍳</span>
+                <div><p className="text-sm font-extrabold text-emerald-950">A little game?</p><p className="text-[11px] text-gray-500">Your order is with the kitchen.</p></div>
+              </div>
+              <p className="text-xs leading-relaxed text-gray-600">Want to play while you wait? Your order status will keep updating.</p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => { rememberGameChoice(); setGameCenterOpen(true); }} className="min-h-10 rounded-xl bg-emerald-950 px-3 text-xs font-bold text-white">Let’s play</button>
+                <button type="button" onClick={rememberGameChoice} className="min-h-10 rounded-xl border border-gray-200 px-3 text-xs font-semibold text-gray-600">Not now</button>
+              </div>
+            </div>
+          )}
+          <button type="button" onClick={() => { rememberGameChoice(); setGameCenterOpen(true); }} aria-label="Open games while you wait" className="flex min-h-12 items-center gap-2 rounded-full bg-amber-300 px-4 text-sm font-extrabold text-emerald-950 shadow-lg ring-4 ring-white/80 transition hover:scale-105 motion-reduce:animate-none">
+            <Gamepad2 className="h-5 w-5 animate-bounce motion-reduce:animate-none" />
+            <span>Games</span>
+          </button>
+        </div>
+      )}
+
+      {gameCenterOpen && <GameCenter orderStatus={status} onClose={() => setGameCenterOpen(false)} />}
     </div>
   );
 }
