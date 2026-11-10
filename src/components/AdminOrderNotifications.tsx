@@ -197,7 +197,10 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       // Use snapshots only while push is disconnected; stop as soon as a live
       // Redis or Supabase subscription confirms it has joined.
       void loadSnapshot();
-      snapshotFallbackTimer = window.setInterval(() => void loadSnapshot(), 3000);
+      // Keep a low-frequency reconciliation while push is unavailable. A
+      // short interval can occupy the database pool and make admin navigation
+      // feel frozen during transient realtime or database slowness.
+      snapshotFallbackTimer = window.setInterval(() => void loadSnapshot(), 15000);
     };
     const stopSnapshotFallback = () => {
       if (snapshotFallbackTimer === null) return;

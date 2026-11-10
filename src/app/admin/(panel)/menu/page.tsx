@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, List, Plus, Search, X, Pencil, Trash2, Star, Flame, ChefHat, Sparkles } from "lucide-react";
 import { formatRupees } from "@/lib/utils";
 import ImageUpload from "@/components/ImageUpload";
@@ -24,6 +24,7 @@ const BLANK_FORM: EditForm = {
   isAvailable: true, isBestseller: false, isPopular: false, isChefsPick: false,
   isTodaySpecial: false, imageUrl: "",
 };
+const MENU_PAGE_SIZE = 30;
 
 const FOOD_EMOJIS_BY_CAT: Record<string, string> = {
   breakfast: "🥞", starters: "🥗", "main course": "🍛", beverages: "🥤",
@@ -37,7 +38,7 @@ function catEmoji(name: string) {
 }
 
 export default function MenuManagementPage() {
-  const [items, setItems]               = useState<MenuItem[]>(() => (peekCache<{ items?: MenuItem[] }>("admin:/api/admin/menu-items")?.items ?? []));
+  const [items, setItems]               = useState<MenuItem[]>([]);
   const [categories, setCategories]     = useState<Category[]>(() => (peekCache<{ categories?: Category[] }>("admin:/api/admin/categories")?.categories ?? []));
   const [loading, setLoading]           = useState(true);
   const [loadError, setLoadError]       = useState<string | null>(null);
@@ -56,18 +57,37 @@ export default function MenuManagementPage() {
   const [savingCategory, setSavingCategory] = useState(false);
   const [saving, setSaving]             = useState(false);
   const [saveError, setSaveError]       = useState<string | null>(null);
+  const [loadingMore, setLoadingMore]   = useState(false);
+  const [hasMore, setHasMore]           = useState(false);
+  const [totalCount, setTotalCount]     = useState(0);
+  const pageRef = useRef(1);
+  const queryVersionRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  function pageUrl(page: number) {
+    const params = new URLSearchParams({ page: String(page), limit: String(MENU_PAGE_SIZE) });
+    if (search.trim()) params.set("search", search.trim());
+    if (activeFilter !== "all") params.set("categoryId", activeFilter);
+    return `/api/admin/menu-items?${params.toString()}`;
+  }
 
   async function load() {
+    const requestVersion = ++queryVersionRef.current;
     try {
       const [itemsPayload, categoriesPayload] = await Promise.all([
-        fetchJsonCached<{ items?: MenuItem[]; error?: string }>("admin:/api/admin/menu-items", "/api/admin/menu-items").catch((error): { items?: MenuItem[]; error?: string } => ({ error: error instanceof Error ? error.message : "Menu items could not be loaded." })),
+        fetchJsonCached<{ items?: MenuItem[]; pagination?: { hasMore: boolean; total: number }; error?: string }>(`admin:${pageUrl(1)}`, pageUrl(1)).catch((error): { items?: MenuItem[]; pagination?: { hasMore: boolean; total: number }; error?: string } => ({ error: error instanceof Error ? error.message : "Menu items could not be loaded." })),
         fetchJsonCached<{ categories?: Category[]; error?: string }>("admin:/api/admin/categories", "/api/admin/categories").catch((error): { categories?: Category[]; error?: string } => ({ error: error instanceof Error ? error.message : "Categories could not be loaded." })),
       ]);
+      if (requestVersion !== queryVersionRef.current) return;
       const errors: string[] = [];
       if (itemsPayload.items) {
         const itemsData = itemsPayload.items ?? [];
         setItems(itemsData);
-        writeCache("admin:/api/admin/menu-items", itemsPayload);
+        writeCache(`admin:${pageUrl(1)}`, itemsPayload);
+        setHasMore(itemsPayload.pagination?.hasMore ?? false);
+        setTotalCount(itemsPayload.pagination?.total ?? itemsData.length);
+        pageRef.current = 1;
       } else {
         errors.push(itemsPayload.error || "Menu items could not be loaded.");
       }
@@ -90,17 +110,54 @@ export default function MenuManagementPage() {
   }
 
   useEffect(() => {
-    // Instant cache-first load: the list is already on screen, refresh silently.
-    const cachedItems = peekCache<{ items?: MenuItem[] }>("admin:/api/admin/menu-items");
     const cachedCats = peekCache<{ categories?: Category[] }>("admin:/api/admin/categories");
-    if (cachedItems?.items && cachedCats?.categories) {
+    if (cachedCats?.categories) {
       const firstCategoryId = cachedCats.categories[0]?.id;
-      setLoading(false);
       if (firstCategoryId) setForm((f) => (f.categoryId ? f : { ...f, categoryId: firstCategoryId }));
     }
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    setItems([]);
+    const timer = setTimeout(() => { void load(); }, search.trim() ? 250 : 0);
+    return () => clearTimeout(timer);
+    // Query inputs intentionally define the server-side menu result set.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilter, search]);
+
+  async function loadMore() {
+    if (!hasMore || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const requestVersion = queryVersionRef.current;
+    const nextPage = pageRef.current + 1;
+    const url = pageUrl(nextPage);
+    try {
+      const result = await fetchJsonCached<{ items?: MenuItem[]; pagination?: { hasMore: boolean; total: number } }>(`admin:${url}`, url);
+      if (requestVersion !== queryVersionRef.current) return;
+      const nextItems = result.items ?? [];
+      setItems((current) => [...current, ...nextItems.filter((item) => !current.some((existing) => existing.id === item.id))]);
+      pageRef.current = nextPage;
+      setHasMore(result.pagination?.hasMore ?? false);
+      setTotalCount(result.pagination?.total ?? totalCount);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "More menu items could not be loaded.");
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }
+
+  useEffect(() => {
+    const root = scrollRef.current;
+    const target = root?.querySelector("[data-menu-load-more]");
+    if (!root || !target || !hasMore || loading) return;
+    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) void loadMore(); }, { root, rootMargin: "300px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasMore, loading, loadingMore, items.length]);
 
   function openEdit(item: MenuItem) {
     setEditItem(item);
@@ -323,7 +380,7 @@ export default function MenuManagementPage() {
               className={`flex-shrink-0 flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-medium transition-all ${activeFilter === "all" ? "bg-[#132A1E] text-white" : "bg-white border border-black/8 text-gray-600"}`}
             >
               All Items
-              <span className={`text-xs rounded-full px-1.5 ${activeFilter === "all" ? "bg-white/20" : "bg-gray-100 text-gray-400"}`}>{items.length}</span>
+              {activeFilter === "all" && !search && <span className={`text-xs rounded-full px-1.5 ${activeFilter === "all" ? "bg-white/20" : "bg-gray-100 text-gray-400"}`}>{totalCount}</span>}
             </button>
                   {categories.map((c) => (
               <button
@@ -332,9 +389,6 @@ export default function MenuManagementPage() {
                 className={`flex-shrink-0 flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-medium transition-all ${activeFilter === c.id ? "bg-[#132A1E] text-white" : "bg-white border border-black/8 text-gray-600"}`}
               >
                 <span>{catEmoji(c.name)}</span> {c.name}
-                <span className={`text-xs rounded-full px-1.5 ${activeFilter === c.id ? "bg-white/20" : "bg-gray-100 text-gray-400"}`}>
-                  {items.filter((i) => i.category.id === c.id).length}
-                </span>
               </button>
             ))}
           </div>
@@ -356,7 +410,7 @@ export default function MenuManagementPage() {
           </div>
 
           {/* Items */}
-          <div className="flex-1 overflow-y-auto">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto">
             {loading && items.length === 0 ? (
               <div className="grid grid-cols-2 xl:grid-cols-3 gap-3 pb-4 animate-pulse">
                 {[1, 2, 3, 4, 5, 6].map((n) => (
@@ -370,6 +424,8 @@ export default function MenuManagementPage() {
                   </div>
                 ))}
               </div>
+            ) : filtered.length === 0 ? (
+              <div className="py-14 text-center text-sm text-gray-500">{search ? "No dishes match your search." : "No dishes in this category yet."}</div>
             ) : viewMode === "grid" ? (
               <div className="grid grid-cols-2 xl:grid-cols-3 gap-3 pb-4">
                 {filtered.map((item) => (
@@ -457,6 +513,7 @@ export default function MenuManagementPage() {
                 </table>
               </div>
             )}
+            {hasMore && <div data-menu-load-more className="flex min-h-16 items-center justify-center text-xs font-medium text-slate-500">{loadingMore ? "Loading more menu items…" : "Scroll for more items"}</div>}
           </div>
         </div>
       </div>

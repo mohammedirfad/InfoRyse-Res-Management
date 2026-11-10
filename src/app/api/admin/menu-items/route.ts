@@ -5,11 +5,33 @@ import { invalidatePublicMenu } from "@/lib/publicMenuCache";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const { restaurantId } = await requireFastRestaurantUser();
+    const url = new URL(request.url);
+    const pageParam = url.searchParams.get("page");
+    const requestedLimit = Number.parseInt(url.searchParams.get("limit") ?? "30", 10);
+    const limit = Math.min(100, Math.max(1, Number.isFinite(requestedLimit) ? requestedLimit : 30));
+    const page = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
+    const search = url.searchParams.get("search")?.trim() ?? "";
+    const categoryId = url.searchParams.get("categoryId");
+    const paginated = pageParam !== null || url.searchParams.has("limit") || Boolean(search) || Boolean(categoryId);
+    const where: any = { restaurantId, deletedAt: null };
+    if (categoryId) where.categoryId = categoryId;
+    if (search) where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { description: { contains: search, mode: "insensitive" } },
+      { category: { name: { contains: search, mode: "insensitive" } } },
+    ];
+    if (paginated) {
+      const [items, total] = await Promise.all([
+        db.menuItem.findMany({ where, include: { category: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * limit, take: limit }),
+        db.menuItem.count({ where }),
+      ]);
+      return Response.json({ items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit), hasMore: page * limit < total } });
+    }
     const items = await db.menuItem.findMany({
-      where: { restaurantId, deletedAt: null },
+      where,
       include: { category: true },
       orderBy: { createdAt: "desc" },
     });

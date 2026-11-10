@@ -2,6 +2,7 @@
 
 import {
   adminCacheKey,
+  prefetchJson,
   peekCache,
   writeCache,
 } from "@/lib/cachedFetch";
@@ -32,16 +33,29 @@ export const ADMIN_ROUTE_ENDPOINTS: Record<string, string[]> = {
     "/api/admin/bills?page=1&limit=10&search=&paymentMethod=all",
     "/api/admin/me",
   ],
-  "/admin/menu": ["/api/admin/menu-items", "/api/admin/categories"],
+  "/admin/menu": ["/api/admin/menu-items?page=1&limit=30", "/api/admin/categories"],
   "/admin/tables": ["/api/admin/tables"],
   "/admin/qr-menu": ["/api/admin/tables", "/api/admin/me"],
   "/admin/customers": ["/api/admin/customers?page=1&limit=10&search="],
   "/admin/offers": ["/api/admin/me", "/api/admin/restaurant"],
-  "/admin/analytics": ["/api/admin/orders", "/api/admin/me"],
+  // Analytics pulls the full order and bill history; keep that heavy query
+  // scoped to the page itself instead of firing it on a sidebar hover.
+  "/admin/analytics": ["/api/admin/me"],
   "/admin/staff": ["/api/admin/staff", "/api/admin/me"],
   "/admin/profile": ["/api/admin/restaurant", "/api/admin/me"],
   "/admin/settings": ["/api/admin/me"],
 };
+
+const prefetchedRoutes = new Set<string>();
+
+/** Warm the page bundle and its small first-page API payload on link intent. */
+export function prefetchAdminRoute(href: string) {
+  if (prefetchedRoutes.has(href)) return;
+  prefetchedRoutes.add(href);
+  for (const url of ADMIN_ROUTE_ENDPOINTS[href] ?? []) {
+    prefetchJson(adminCacheKey(url), url);
+  }
+}
 
 /** Read the warm snapshot for a route without touching the network. */
 export function readAdminRouteData(href: string): AdminRouteData {

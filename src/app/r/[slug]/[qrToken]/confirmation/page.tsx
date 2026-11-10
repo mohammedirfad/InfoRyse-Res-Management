@@ -93,7 +93,9 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       if (nextStatus === "COMPLETED") setHasBillableItems(true);
       setLastUpdated(new Date());
       if (nextStatus === "CANCELLED") setCancelled(true);
-      if (nextStatus === "COMPLETED" || nextStatus === "CANCELLED") {
+      // Completion means the food was served; the cashier may settle the bill
+      // later, so keep listening for the bill_updated event.
+      if (nextStatus === "CANCELLED") {
         source?.close();
         if (fallbackTimer) clearInterval(fallbackTimer);
         fallbackTimer = null;
@@ -111,7 +113,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       source.onerror = () => {
         streamConnected = false;
         const pollStatus = () => {
-          if (stopped || streamConnected || document.visibilityState === "hidden" || ["COMPLETED", "CANCELLED"].includes(statusRef.current)) return;
+          if (stopped || streamConnected || document.visibilityState === "hidden" || statusRef.current === "CANCELLED") return;
           void fetch(`/api/public/order-status?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}&orderNumber=${encodeURIComponent(orderNumber)}`, { cache: "no-store" })
             .then((response) => response.ok ? response.json() : null)
             .then((data) => {
@@ -146,7 +148,8 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
         const event = JSON.parse((rawEvent as MessageEvent).data);
         if (event.type === "bill_updated") {
           const data = event.data ?? {};
-          if (data.shareToken && data.sessionId && data.sessionId === tableSessionIdRef.current) setBillShareToken(data.shareToken);
+          const eventSessionId = data.sessionId ?? data.tableSessionId;
+          if (data.shareToken && eventSessionId && eventSessionId === tableSessionIdRef.current) setBillShareToken(data.shareToken);
           return;
         }
         if (event.type !== "order_updated") return;
@@ -157,7 +160,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
     };
     openStream();
     const onVisible = () => {
-      if (document.visibilityState === "visible" && !["COMPLETED", "CANCELLED"].includes(statusRef.current)) openStream();
+      if (document.visibilityState === "visible" && statusRef.current !== "CANCELLED") openStream();
     };
     document.addEventListener("visibilitychange", onVisible);
 
@@ -456,7 +459,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
           {billShareToken ? (
             <div className="mt-3 grid grid-cols-2 gap-2">
               <Link href={`/bill/${encodeURIComponent(billShareToken)}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#132A1E] px-3 py-2 text-sm font-semibold text-white">
-                <ReceiptText className="h-4 w-4" /> View bill
+                <ReceiptText className="h-4 w-4" /> View / Download bill
               </Link>
               <a href={`/bill/${encodeURIComponent(billShareToken)}/pdf`} download className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#132A1E]/20 px-3 py-2 text-sm font-semibold text-[#132A1E]">
                 <Download className="h-4 w-4" /> Download PDF

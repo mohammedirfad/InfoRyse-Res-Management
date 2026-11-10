@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Plus, Search, X } from "lucide-react";
 import { formatRupees } from "@/lib/utils";
 import { invalidateCache } from "@/lib/cachedFetch";
@@ -25,8 +25,60 @@ export default function OrderMenuPicker({ open, onClose, items, categories, line
   const [newCategory, setNewCategory] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [visibleItems, setVisibleItems] = useState<MenuDish[]>(items);
+  const [menuLoading, setMenuLoading] = useState(false);
+  const [menuLoadingMore, setMenuLoadingMore] = useState(false);
+  const [menuHasMore, setMenuHasMore] = useState(false);
+  const queryVersionRef = useRef(0);
+  const pageRef = useRef(1);
+  const loadingMoreRef = useRef(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
-  const visible = useMemo(() => items.filter((item) => item.isAvailable !== false && (categoryId === "all" || item.category.id === categoryId) && (!search.trim() || `${item.name} ${item.description ?? ""} ${item.category.name}`.toLowerCase().includes(search.trim().toLowerCase()))), [items, categoryId, search]);
+  async function loadMenuPage(page: number, append: boolean, version: number) {
+    const params = new URLSearchParams({ page: String(page), limit: "30" });
+    if (categoryId !== "all") params.set("categoryId", categoryId);
+    if (search.trim()) params.set("search", search.trim());
+    try {
+      const response = await fetch(`/api/admin/menu-items?${params}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Menu items could not be loaded.");
+      if (version !== queryVersionRef.current) return;
+      const pageItems = (data.items ?? []).filter((item: MenuDish) => item.isAvailable !== false) as MenuDish[];
+      setVisibleItems((current) => append ? [...current, ...pageItems.filter((item) => !current.some((existing) => existing.id === item.id))] : pageItems);
+      setMenuHasMore(Boolean(data.pagination?.hasMore));
+      pageRef.current = page;
+    } catch (loadError) {
+      if (version === queryVersionRef.current) setError(loadError instanceof Error ? loadError.message : "Menu items could not be loaded.");
+    } finally {
+      if (version === queryVersionRef.current) setMenuLoading(false);
+      setMenuLoadingMore(false);
+      loadingMoreRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const version = ++queryVersionRef.current;
+    setVisibleItems([]); setMenuLoading(true); setError(null);
+    const timer = window.setTimeout(() => { void loadMenuPage(1, false, version); }, search.trim() ? 200 : 0);
+    return () => window.clearTimeout(timer);
+    // loadMenuPage reads only the active filter values from this render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, categoryId, search]);
+
+  useEffect(() => {
+    const root = listRef.current;
+    const target = root?.querySelector("[data-picker-load-more]");
+    if (!open || !root || !target || !menuHasMore || menuLoading) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting) || loadingMoreRef.current) return;
+      loadingMoreRef.current = true; setMenuLoadingMore(true);
+      void loadMenuPage(pageRef.current + 1, true, queryVersionRef.current);
+    }, { root, rootMargin: "220px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, menuHasMore, menuLoading, menuLoadingMore, visibleItems.length]);
   if (!open) return null;
 
   function changeQty(item: MenuDish, delta: number) {
@@ -56,7 +108,7 @@ export default function OrderMenuPicker({ open, onClose, items, categories, line
       if (!response.ok || !data.item) { setError(data.error ?? "Could not add dish."); return; }
       const category = categories.find((entry) => entry.id === dishCategoryId);
       const dish = { ...data.item, category } as MenuDish;
-      onDishCreated(dish); changeQty(dish, 1); invalidateCache("admin:/api/admin/menu-items");
+      onDishCreated(dish); setVisibleItems((current) => [dish, ...current.filter((entry) => entry.id !== dish.id)]); changeQty(dish, 1); invalidateCache("admin:/api/admin/menu-items");
       setName(""); setDescription(""); setPrice(""); setAdding(false);
     } catch { setError("Could not add dish. Please try again."); }
     finally { setSaving(false); }
@@ -82,7 +134,7 @@ export default function OrderMenuPicker({ open, onClose, items, categories, line
         </div>
         {adding && <form onSubmit={createDish} className="grid gap-2 border-b border-amber-100 bg-amber-50/60 p-4 sm:grid-cols-2"><div className="sm:col-span-2 flex items-center justify-between"><strong className="text-sm text-slate-800">Add a dish to your menu</strong><button type="button" onClick={() => setAdding(false)} aria-label="Close add dish form" className="rounded-lg p-1 text-slate-500 hover:bg-white"><X className="h-4 w-4" /></button></div><input required className="input" placeholder="Dish name" value={name} onChange={(event) => setName(event.target.value)} /><input required min="0" step="0.01" type="number" className="input" placeholder="Price (₹)" value={price} onChange={(event) => setPrice(event.target.value)} /><select required className="input" value={dishCategoryId} onChange={(event) => setDishCategoryId(event.target.value)}><option value="">Choose category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><div className="flex gap-1"><input className="input min-w-0 flex-1 bg-white" placeholder="New category" value={newCategory} onChange={(event) => setNewCategory(event.target.value)} /><button type="button" onClick={() => void addNewCategory()} className="rounded-xl border border-slate-200 bg-white px-2 text-xs font-semibold">Add</button></div><div className="flex gap-2"><button type="button" onClick={() => setIsVeg((current) => !current)} className="flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold">{isVeg ? "● Vegetarian" : "● Non-vegetarian"}</button></div><textarea className="input resize-none sm:col-span-2" rows={2} placeholder="Description (optional)" value={description} onChange={(event) => setDescription(event.target.value)} /><div className="flex justify-end sm:col-span-2"><button disabled={saving} className="rounded-xl bg-emerald-950 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50">{saving ? "Saving…" : "Save dish and add to order"}</button></div></form>}
         {error && <p role="alert" className="border-b border-rose-100 bg-rose-50 px-4 py-2 text-xs text-rose-700">{error}</p>}
-        <div className="min-h-0 flex-1 overflow-y-auto p-4"><div className="grid gap-2 sm:grid-cols-2">{visible.map((item) => { const qty = lines.find((line) => line.itemId === item.id)?.qty ?? 0; return <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3"><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{item.name}</p><p className="truncate text-xs text-slate-500">{item.category.name}{item.isVeg === false ? " · Non-veg" : " · Veg"}</p><p className="mt-1 text-xs font-bold text-emerald-900">{formatRupees(item.priceCents)}</p></div><div className="flex shrink-0 items-center gap-2"><button type="button" aria-label={`Remove one ${item.name}`} onClick={() => changeQty(item, -1)} disabled={!qty} className="h-9 w-9 rounded-lg border border-slate-200 font-bold disabled:opacity-40">−</button><span className="min-w-5 text-center text-sm font-bold">{qty}</span><button type="button" aria-label={`Add one ${item.name}`} onClick={() => changeQty(item, 1)} className="h-9 w-9 rounded-lg bg-emerald-950 font-bold text-white">+</button></div></div>; })}</div>{visible.length === 0 && <div className="py-12 text-center text-sm text-slate-500">No available dishes match. Try another category or add a new dish.</div>}</div>
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-4"><div className="grid gap-2 sm:grid-cols-2">{visibleItems.map((item) => { const qty = lines.find((line) => line.itemId === item.id)?.qty ?? 0; return <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3"><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{item.name}</p><p className="truncate text-xs text-slate-500">{item.category.name}{item.isVeg === false ? " · Non-veg" : " · Veg"}</p><p className="mt-1 text-xs font-bold text-emerald-900">{formatRupees(item.priceCents)}</p></div><div className="flex shrink-0 items-center gap-2"><button type="button" aria-label={`Remove one ${item.name}`} onClick={() => changeQty(item, -1)} disabled={!qty} className="h-9 w-9 rounded-lg border border-slate-200 font-bold disabled:opacity-40">−</button><span className="min-w-5 text-center text-sm font-bold">{qty}</span><button type="button" aria-label={`Add one ${item.name}`} onClick={() => changeQty(item, 1)} className="h-9 w-9 rounded-lg bg-emerald-950 font-bold text-white">+</button></div></div>; })}</div>{menuLoading && visibleItems.length === 0 && <div className="py-12 text-center text-sm text-slate-500">Loading menu…</div>}{!menuLoading && visibleItems.length === 0 && <div className="py-12 text-center text-sm text-slate-500">No available dishes match. Try another category or add a new dish.</div>}{menuHasMore && <div data-picker-load-more className="flex min-h-14 items-center justify-center text-xs text-slate-500">{menuLoadingMore ? "Loading more dishes…" : "Scroll for more dishes"}</div>}</div>
         <footer className="flex items-center justify-between border-t border-slate-200 p-4"><p className="text-xs text-slate-600">{lines.reduce((sum, line) => sum + line.qty, 0)} item(s) selected</p><button type="button" onClick={onClose} className="rounded-xl bg-emerald-950 px-5 py-2.5 text-sm font-bold text-white">Done</button></footer>
       </section>
     </div>

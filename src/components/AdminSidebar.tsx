@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import LogoutButton from "./LogoutButton";
 import { invalidateCache } from "@/lib/cachedFetch";
+import { prefetchAdminRoute } from "@/lib/adminPrefetch";
 
 const NAV = [
   { href: "/admin/dashboard",  label: "Dashboard",          icon: LayoutDashboard },
@@ -62,6 +63,11 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
     router.push(href);
   }
 
+  function warmRoute(href: string) {
+    router.prefetch(href);
+    prefetchAdminRoute(href);
+  }
+
   const sidebarContent = (
     <>
       {/* Logo */}
@@ -113,6 +119,9 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
               key={href}
               href={href}
               prefetch={false}
+              onMouseEnter={() => warmRoute(href)}
+              onFocus={() => warmRoute(href)}
+              onPointerDown={() => warmRoute(href)}
               onClick={(event) => go(href, event)}
               className={`${
                 active ? "admin-nav-item-active" : "admin-nav-item"

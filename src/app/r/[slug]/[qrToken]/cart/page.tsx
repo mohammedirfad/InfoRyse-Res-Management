@@ -596,7 +596,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
           {!isFetchingSession && !sessionData?.session && lastDigitalBill?.token && (
             <section className="flex items-center justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
               <div><p className="font-bold text-emerald-950">Your digital bill is ready</p><p className="mt-1 text-xs text-emerald-800">View, download, or share your bill.</p></div>
-              <Link href={`/bill/${lastDigitalBill.token}`} target="_blank" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-emerald-950 px-3 py-2 text-xs font-bold text-white"><Download className="h-4 w-4" /> View bill</Link>
+              <Link href={`/bill/${lastDigitalBill.token}`} target="_blank" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-emerald-950 px-3 py-2 text-xs font-bold text-white"><Download className="h-4 w-4" /> View / Download bill</Link>
             </section>
           )}
 

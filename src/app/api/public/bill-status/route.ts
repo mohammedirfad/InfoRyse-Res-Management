@@ -50,9 +50,9 @@ export async function GET(req: Request) {
             id: requestedSessionId,
             tableId: table.id,
             restaurantId: table.restaurantId,
-            status: "OPEN",
+            status: { in: ["OPEN", "FINALIZED"] },
           },
-          select: { id: true, createdAt: true, billRequestedAt: true },
+          select: { id: true, createdAt: true, billRequestedAt: true, status: true },
         })
       : null;
 
@@ -67,6 +67,7 @@ export async function GET(req: Request) {
           id: current.id,
           createdAt: current.createdAt,
           billRequestedAt: current.billRequestedAt ?? null,
+          status: "OPEN" as const,
         };
       }
     }

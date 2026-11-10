@@ -261,7 +261,7 @@ export default function OrdersPage() {
     if (!showCreate) return;
     Promise.all([
       fetch("/api/admin/tables").then((r) => r.json()),
-      fetch("/api/admin/menu-items").then((r) => r.json()),
+      fetch("/api/admin/menu-items?page=1&limit=30").then((r) => r.json()),
       fetch("/api/admin/categories").then((r) => r.json()),
     ]).then(([t, m, c]) => {
       setTables(t.tables ?? []);
@@ -444,7 +444,7 @@ export default function OrdersPage() {
     setEditCustomerName(order.customerName ?? ""); setEditCustomerPhone(order.customerPhone ?? ""); setEditNotes(order.notes ?? "");
     setEditLines(order.items.flatMap((item) => item.menuItemId ? [{ itemId: item.menuItemId, qty: item.quantity, name: item.nameSnapshot, price: item.priceCentsSnapshot }] : []));
     setEditError(null); setEditingOrder(true); setPickerTarget("edit");
-    Promise.all([fetch("/api/admin/menu-items").then((r) => r.json()), fetch("/api/admin/categories").then((r) => r.json())]).then(([m, c]) => { setMenuItems(m.items ?? []); setCategories(c.categories ?? []); });
+    Promise.all([fetch("/api/admin/menu-items?page=1&limit=30").then((r) => r.json()), fetch("/api/admin/categories").then((r) => r.json())]).then(([m, c]) => { setMenuItems(m.items ?? []); setCategories(c.categories ?? []); });
   }
   async function saveEdit() {
     if (!selected || editLines.length === 0) return setEditError("Add at least one menu item.");
