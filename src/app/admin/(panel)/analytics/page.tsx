@@ -22,15 +22,20 @@ type Order = {
 
 const COLORS = ["#132A1E", "#D4A94C", "#0284C7", "#9333EA", "#E11D48"];
 
+function dateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export default function AnalyticsPage() {
   const [orders, setOrders] = useState<Order[]>(() => peekCache<{ orders?: Order[] }>("admin:/api/admin/orders")?.orders ?? []);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
   const [bills, setBills] = useState<{ totalCents: number; taxCents: number; paymentStatus: string; paymentMethod: string; createdAt: string; paidAt: string | null; customerPhone: string | null; customerEmail: string | null }[]>([]);
-  const [from, setFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 29); return d.toISOString().slice(0, 10); });
-  const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
-  const [fromTime, setFromTime] = useState("00:00");
-  const [toTime, setToTime] = useState("23:59");
+  const [from, setFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 29); return dateInputValue(d); });
+  const [to, setTo] = useState(() => dateInputValue(new Date()));
 
   useEffect(() => {
     Promise.all([
@@ -50,11 +55,11 @@ export default function AnalyticsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const startDate = new Date(`${from}T${fromTime}:00`);
-  const endDate = new Date(`${to}T${toTime}:59.999`);
+  const startDate = new Date(`${from}T00:00:00`);
+  const endDate = new Date(`${to}T23:59:59.999`);
   const inRange = (value: string) => { const d = new Date(value); return d >= startDate && d <= endDate; };
-  const rangeOrders = useMemo(() => orders.filter((o) => inRange(o.createdAt)), [orders, from, to, fromTime, toTime]);
-  const rangeBills = useMemo(() => bills.filter((b) => inRange(b.paidAt ?? b.createdAt) && b.paymentStatus === "PAID"), [bills, from, to, fromTime, toTime]);
+  const rangeOrders = useMemo(() => orders.filter((o) => inRange(o.createdAt)), [orders, from, to]);
+  const rangeBills = useMemo(() => bills.filter((b) => inRange(b.paidAt ?? b.createdAt) && b.paymentStatus === "PAID"), [bills, from, to]);
 
   // Real Dynamic Top Items
   const topItems = useMemo(() => {
@@ -168,11 +173,9 @@ export default function AnalyticsPage() {
         </div>
       ) : (
         <>
-          <section className="card grid grid-cols-2 gap-3 p-4 md:grid-cols-4">
+          <section className="card grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
             <label className="text-xs font-semibold text-slate-600">From date<input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="input mt-1 w-full" /></label>
-            <label className="text-xs font-semibold text-slate-600">From time<input type="time" value={fromTime} onChange={(e) => setFromTime(e.target.value)} className="input mt-1 w-full" /></label>
             <label className="text-xs font-semibold text-slate-600">To date<input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="input mt-1 w-full" /></label>
-            <label className="text-xs font-semibold text-slate-600">To time<input type="time" value={toTime} onChange={(e) => setToTime(e.target.value)} className="input mt-1 w-full" /></label>
           </section>
           {/* Key Metrics */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

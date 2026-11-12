@@ -51,7 +51,10 @@ export async function POST(req: Request) {
     // Check if restaurant is suspended/blocked by Super Admin
     if (user.restaurant && !user.restaurant.isActive) {
       return Response.json(
-        { error: `Account Suspended: ${user.restaurant.name} has been deactivated or blocked by Super Administration. Please contact support@inforyse.com.` },
+        {
+          code: "RESTAURANT_BLOCKED",
+          error: `Sign-in is disabled because ${user.restaurant.name} has been blocked by InfoRyse administration. Contact support@inforyse.com for help.`,
+        },
         { status: 403 }
       );
     }

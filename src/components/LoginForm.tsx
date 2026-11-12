@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Lock, Mail, KeyRound, CheckCircle2, ArrowLeft, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, KeyRound, CheckCircle2, ArrowLeft, Loader2, ShieldAlert } from "lucide-react";
 
 export function LoginForm({
   redirectTo,
@@ -31,6 +31,7 @@ export function LoginForm({
 
   // UI state
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const isForest = theme === "forest";
@@ -43,6 +44,7 @@ export function LoginForm({
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setErrorCode(null);
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
@@ -52,6 +54,7 @@ export function LoginForm({
       const json = await res.json();
       if (!res.ok) {
         setError(json.error || "Invalid email or password");
+        setErrorCode(json.code ?? null);
         setLoading(false);
         return;
       }
@@ -204,9 +207,9 @@ export function LoginForm({
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl p-3 flex items-start gap-2 leading-relaxed">
-                <span className="flex-shrink-0 mt-0.5">⚠️</span>
-                <span>{error}</span>
+              <div className={`${errorCode === "RESTAURANT_BLOCKED" ? "bg-amber-50 border-amber-300 text-amber-950" : "bg-red-50 border-red-200 text-red-700"} border text-xs rounded-xl p-3 flex items-start gap-2 leading-relaxed`} role="alert">
+                {errorCode === "RESTAURANT_BLOCKED" ? <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0" /> : <span className="flex-shrink-0 mt-0.5">⚠️</span>}
+                <span>{errorCode === "RESTAURANT_BLOCKED" && <strong className="mb-0.5 block">Restaurant access is blocked</strong>}{error}</span>
               </div>
             )}
 

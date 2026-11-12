@@ -57,6 +57,8 @@ export default function RestaurantsPage() {
 
   // Selected restaurant drawer
   const [selected, setSelected] = useState<Restaurant | null>(null);
+  const [statusNotice, setStatusNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   // Send Email modal
   const [emailModalResto, setEmailModalResto] = useState<Restaurant | null>(null);
@@ -167,12 +169,21 @@ export default function RestaurantsPage() {
   async function toggleStatus(r: Restaurant) {
     const action = r.isActive ? "Block / Suspend" : "Unblock / Reactivate";
     if (!confirm(`Are you sure you want to ${action} ${r.name}?`)) return;
-
-    await fetch(`/api/super/restaurants/${r.id}/toggle-active`, { method: "POST" });
-    if (selected?.id === r.id) {
-      setSelected({ ...selected, isActive: !selected.isActive });
-    }
-    load();
+    setTogglingId(r.id); setStatusNotice(null);
+    try {
+      const response = await fetch(`/api/super/restaurants/${r.id}/toggle-active`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok || typeof data.restaurant?.isActive !== "boolean") throw new Error(data.error || "Could not update restaurant access.");
+      const updated = { ...r, isActive: data.restaurant.isActive };
+      setRestaurants((current) => current.map((item) => item.id === r.id ? { ...item, isActive: updated.isActive } : item));
+      setSelected((current) => current?.id === r.id ? { ...current, isActive: updated.isActive } : current);
+      const message = updated.isActive
+        ? `${r.name} is active again. Its admin users can sign in.`
+        : `${r.name} is blocked. Its admin users cannot sign in and active sessions are denied access.`;
+      setStatusNotice({ kind: "success", message });
+    } catch (error) {
+      setStatusNotice({ kind: "error", message: error instanceof Error ? error.message : "Could not update restaurant access." });
+    } finally { setTogglingId(null); }
   }
 
 
@@ -319,6 +330,8 @@ export default function RestaurantsPage() {
               </button>
             </div>
           </div>
+
+          {statusNotice && <div role={statusNotice.kind === "error" ? "alert" : "status"} className={`mb-4 rounded-xl border px-4 py-3 text-sm font-medium ${statusNotice.kind === "error" ? "border-rose-200 bg-rose-50 text-rose-800" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`}>{statusNotice.message}</div>}
 
           {/* Quick Stats */}
           <div className="grid grid-cols-3 gap-4 mb-4">
@@ -478,8 +491,9 @@ export default function RestaurantsPage() {
                           </button>
                           <button
                             onClick={() => toggleStatus(r)}
+                            disabled={togglingId === r.id}
                             title={r.isActive ? "Block Restaurant" : "Unblock Restaurant"}
-                            className={`p-1.5 rounded-lg border transition-colors ${
+                            className={`p-1.5 rounded-lg border transition-colors disabled:cursor-wait disabled:opacity-50 ${
                               r.isActive
                                 ? "border-slate-200 text-slate-600 hover:text-red-600 hover:border-red-300 hover:bg-red-50"
                                 : "border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
@@ -1005,13 +1019,14 @@ export default function RestaurantsPage() {
 
               <button
                 onClick={() => toggleStatus(selected)}
-                className={`w-full rounded-xl py-2.5 text-xs font-bold transition-colors ${
+                disabled={togglingId === selected.id}
+                className={`w-full rounded-xl py-2.5 text-xs font-bold transition-colors disabled:cursor-wait disabled:opacity-50 ${
                   selected.isActive
                     ? "bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200"
                     : "bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200"
                 }`}
               >
-                {selected.isActive ? "Block / Suspend Restaurant" : "Unblock / Reactivate Restaurant"}
+                {togglingId === selected.id ? "Updating access…" : selected.isActive ? "Block / Suspend Restaurant" : "Unblock / Reactivate Restaurant"}
               </button>
             </div>
           </div>

@@ -42,6 +42,18 @@ const catEmoji = (n: string) => {
   return "🍽️";
 };
 
+function menuBadge(item: MenuItem) {
+  if (item.isBestseller) return { label: "Bestseller", style: "bg-amber-500 text-white" };
+  if (item.isPopular) return { label: "Popular", style: "bg-rose-600 text-white" };
+  if (item.isChefsPick) return { label: "Chef's Pick", style: "bg-sky-700 text-white" };
+  if (item.isTodaySpecial) return { label: "Today's Special", style: "bg-emerald-700 text-white" };
+  return null;
+}
+
+function menuBadgeScore(item: MenuItem) {
+  return Number(Boolean(item.isBestseller)) * 4 + Number(Boolean(item.isPopular)) * 3 + Number(Boolean(item.isChefsPick)) * 2 + Number(Boolean(item.isTodaySpecial));
+}
+
 const GRAD = [
   "from-orange-100 to-amber-200","from-rose-100 to-pink-200",
   "from-green-100 to-emerald-200","from-purple-100 to-violet-200",
@@ -239,6 +251,7 @@ function ItemCard({
   const { t, tDish } = useLanguage();
   const [imgErr, setImgErr] = useState(false);
   const imageUrl = getDishImageUrl(item.name, categoryName, item.imageUrl);
+  const badge = menuBadge(item);
 
   const hasDiscount = Boolean(discountActive && (discountPercent ?? 0) > 0);
   const discountedPrice = hasDiscount
@@ -273,6 +286,7 @@ function ItemCard({
         <div className="absolute top-2 left-2 z-10 bg-white/95 backdrop-blur-md rounded-md p-1 shadow-xs">
           <VegDot isVeg={item.isVeg} size="sm" />
         </div>
+        {badge && <span className={`absolute bottom-2 left-2 z-10 rounded-full px-2.5 py-1 text-[9px] font-black shadow ${badge.style}`}>{badge.label}</span>}
 
         {/* Discount Badge on Image */}
         {hasDiscount && (
@@ -521,7 +535,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
     if (search.trim()) items = allItems.filter(i=>i.name.toLowerCase().includes(search.toLowerCase()));
     if (vegFilter==="veg")    items=items.filter(i=>i.isVeg);
     if (vegFilter==="nonveg") items=items.filter(i=>!i.isVeg);
-    return items;
+    return items.map((item, index) => ({ item, index })).sort((a, b) => menuBadgeScore(b.item) - menuBadgeScore(a.item) || a.index - b.index).map(({ item }) => item);
   }, [data, activeCat, search, vegFilter, allItems]);
 
   function addToCart(item:MenuItem, e?:React.MouseEvent) {
@@ -718,6 +732,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                         onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
                       />
                     )}
+                    {menuBadge(item) && <span className={`absolute left-2 top-2 z-20 rounded-full px-2.5 py-1 text-[9px] font-black shadow ${menuBadge(item)!.style}`}>{menuBadge(item)!.label}</span>}
                   </div>
                 </div>
               );
@@ -727,6 +742,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
           {/* Active item info — below carousel, no layout shift */}
           {featuredItems[heroIdx] && (
             <div className="text-center px-8 mt-2 min-h-[72px]">
+              {menuBadge(featuredItems[heroIdx]) && <span className={`mb-1 inline-flex rounded-full px-2.5 py-1 text-[9px] font-black ${menuBadge(featuredItems[heroIdx])!.style}`}>{menuBadge(featuredItems[heroIdx])!.label}</span>}
               <p className="font-bold text-gray-900 text-base leading-snug">{featuredItems[heroIdx].name}</p>
               {featuredItems[heroIdx].description && (
                 <p className="text-xs text-gray-400 mt-0.5 line-clamp-2 leading-relaxed">{featuredItems[heroIdx].description}</p>
