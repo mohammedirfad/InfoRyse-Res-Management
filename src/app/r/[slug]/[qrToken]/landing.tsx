@@ -17,8 +17,6 @@ import {
   Coffee,
   CheckCircle2,
 } from "lucide-react";
-import { useLanguage } from "@/lib/i18n";
-import { LanguageSelector } from "@/components/LanguageSelector";
 import { getDishImageUrl } from "@/lib/dishImages";
 
 type FoodItem = {
@@ -79,7 +77,7 @@ export function LandingPage({
   onEnterMenu,
   onOpenAssist,
 }: LandingProps) {
-  const { t, tDish } = useLanguage();
+
   const [activeSlide, setActiveSlide] = useState(0);
   const [likedDishes, setLikedDishes] = useState<Record<string, boolean>>({});
 
@@ -166,7 +164,7 @@ export function LandingPage({
           <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 shadow-md">
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
             <span className="text-white text-xs font-bold tracking-wide">
-              {t("table", "Table")} <span className="text-amber-400 font-extrabold">{tableLabel}</span>
+              {"Table"} <span className="text-amber-400 font-extrabold">{tableLabel}</span>
             </span>
           </div>
 
@@ -174,11 +172,10 @@ export function LandingPage({
           <div className="flex items-center gap-2">
             <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-[11px] text-white/80">
               <span className={`w-2 h-2 rounded-full ${isOpen ? "bg-emerald-400" : "bg-rose-400"}`} />
-              <span>{isOpen ? t("kitchenActive", "Kitchen Active") : t("closed", "Closed")}</span>
+              <span>{isOpen ? "Kitchen Active" : "Closed"}</span>
             </div>
 
             {/* Zero-delay language switcher pill */}
-            <LanguageSelector variant="pill" />
           </div>
         </motion.header>
 
@@ -231,7 +228,7 @@ export function LandingPage({
             >
               <Sparkles className="w-4 h-4 text-emerald-300 animate-spin" />
               <span className="text-emerald-200 text-xs font-extrabold tracking-wide">
-                {discountName || t("specialOffer", "Special Festive Offer")}: {t("flatDiscount", "Flat")} {discountPercent}% {t("offApplied", "OFF applied!")}
+                {discountName || "Special Festive Offer"}: {"Flat"} {discountPercent}% {"OFF applied!"}
               </span>
             </motion.div>
           ) : (
@@ -242,7 +239,7 @@ export function LandingPage({
               className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/70 text-xs font-semibold mb-4"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span>{t("dineIn", "Dine In")} · {t("fastKitchen", "Fast Kitchen")}</span>
+              <span>{"Dine In"} · {"Fast Kitchen"}</span>
             </motion.div>
           )}
 
@@ -289,12 +286,12 @@ export function LandingPage({
                   <div className="flex items-center gap-1.5 mb-1">
                     <span className="text-[10px] font-black text-amber-300 uppercase tracking-widest flex items-center gap-1">
                       <Flame className="w-3 h-3 text-amber-400 fill-amber-400" />
-                      {t("chefsSpecial", "Chef's Special")}
+                      {"Chef's Special"}
                     </span>
                   </div>
 
                   <h3 className="text-white font-extrabold text-sm truncate leading-snug">
-                    {tDish(currentItem.name)}
+                    {currentItem.name}
                   </h3>
 
                   <div className="flex items-center justify-between mt-1.5">
@@ -302,7 +299,7 @@ export function LandingPage({
                       {formatRupees(currentItem.priceCents)}
                     </span>
                     <span className="text-white/50 text-[11px] group-hover:text-amber-300 flex items-center gap-0.5 transition-colors font-semibold">
-                      {t("add", "ADD")} +
+                      {"ADD"} +
                     </span>
                   </div>
                 </div>
@@ -338,13 +335,13 @@ export function LandingPage({
             <div className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl py-2 px-1 text-center">
               <p className="text-white font-black text-lg leading-tight">{totalItems}</p>
               <p className="text-white/45 text-[10px] uppercase tracking-wider font-bold">
-                {t("dishes", "Dishes")}
+                {"Dishes"}
               </p>
             </div>
             <div className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl py-2 px-1 text-center">
               <p className="text-white font-black text-lg leading-tight">{categories}</p>
               <p className="text-white/45 text-[10px] uppercase tracking-wider font-bold">
-                {t("sections", "Sections")}
+                {"Sections"}
               </p>
             </div>
             <div className="bg-white/[0.06] backdrop-blur-md border border-white/10 rounded-2xl py-2 px-1 text-center flex flex-col items-center justify-center">
@@ -352,7 +349,7 @@ export function LandingPage({
                 <Clock className="w-3.5 h-3.5" /> 15m
               </div>
               <p className="text-white/45 text-[10px] uppercase tracking-wider font-bold">
-                {t("fastKitchen", "Fast Kitchen")}
+                {"Fast Kitchen"}
               </p>
             </div>
           </motion.div>
@@ -373,7 +370,7 @@ export function LandingPage({
             <div className="relative w-full bg-gradient-to-r from-[#0d281a] via-[#143e28] to-[#0d281a] text-white py-4 px-6 rounded-2xl flex items-center justify-between font-extrabold text-base transition-all group-hover:bg-opacity-90">
               <span className="flex items-center gap-2.5">
                 <span className="text-xl">🍽️</span>
-                <span>{t("exploreMenu", "Explore Full Menu")}</span>
+                <span>{"Explore Full Menu"}</span>
               </span>
               <div className="w-8 h-8 rounded-full bg-amber-400 text-gray-950 flex items-center justify-center font-bold shadow-md group-hover:translate-x-1 transition-transform">
                 <ArrowRight className="w-4 h-4 stroke-[3]" />
@@ -405,7 +402,7 @@ export function LandingPage({
                     {cartCount}
                   </span>
                 </div>
-                <span>{t("viewTableCart", "View Table Cart")}</span>
+                <span>{"View Table Cart"}</span>
               </div>
               <div className="flex items-center gap-1.5 text-amber-300 font-extrabold text-sm">
                 {cartTotalCents > 0 && <span>{formatRupees(cartTotalCents)}</span>}
@@ -421,7 +418,7 @@ export function LandingPage({
               className="w-full flex items-center justify-center gap-2 text-white/60 hover:text-white text-xs font-semibold py-1.5 transition-colors"
             >
               <BellRing className="w-3.5 h-3.5 text-amber-400" />
-              <span>{t("needAssistance", "Need water, extra cutlery or waiter? Tap here")}</span>
+              <span>{"Need water, extra cutlery or waiter? Tap here"}</span>
             </button>
           )}
         </motion.footer>
@@ -502,7 +499,7 @@ export function LandingPage({
                 {/* Details */}
                 <div className="px-1 pb-1">
                   <h4 className="text-white font-extrabold text-xs truncate group-hover:text-amber-300 transition-colors">
-                    {tDish(item.name)}
+                    {item.name}
                   </h4>
                   <p className="text-white/40 text-[10px] mt-0.5 font-medium">
                     {item.categoryName ?? "Menu highlight"}
@@ -540,7 +537,7 @@ export function LandingPage({
               onClick={onEnterMenu}
               className="w-full bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 text-gray-950 py-4 rounded-2xl font-black text-sm shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2"
             >
-              <span>{t("viewMenuAndOrder", "View Full Menu & Order")}</span>
+              <span>{"View Full Menu & Order"}</span>
               <ArrowRight className="w-4 h-4 stroke-[3]" />
             </button>
           </div>

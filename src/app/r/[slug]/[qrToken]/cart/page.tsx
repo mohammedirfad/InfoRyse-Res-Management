@@ -11,8 +11,6 @@ import {
   clearStoredOrders,
   type StoredPastOrder,
 } from "@/components/CartContext";
-import { useLanguage } from "@/lib/i18n";
-import { LanguageSelector } from "@/components/LanguageSelector";
 import {
   getGuestTableSession,
   guestSessionQuery,
@@ -104,7 +102,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string; bg: string; 
 
 function CartPageContent({ params }: { params: { slug: string; qrToken: string } }) {
   const { lines, setQuantity, removeItem, totalCents, syncSession } = useCart();
-  const { t, tDish } = useLanguage();
+
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab") === "confirmed" ? "confirmed" : "new";
 
@@ -335,13 +333,12 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               <ArrowLeft className="h-5 w-5 text-gray-700" />
             </Link>
             <div>
-              <h1 className="font-bold text-gray-900 text-base leading-tight">{t("orderAndTableTab", "Order & Table Tab")}</h1>
-              <p className="text-[11px] font-semibold text-emerald-700">{t("table", "Table")} {tableLabel}</p>
+              <h1 className="font-bold text-gray-900 text-base leading-tight">{"Order & Table Tab"}</h1>
+              <p className="text-[11px] font-semibold text-emerald-700">{"Table"} {tableLabel}</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <LanguageSelector variant="compact" />
             {tab === "confirmed" && (
               <button
                 onClick={refreshTableOrders}
@@ -364,7 +361,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               tab === "new" ? "text-gray-900" : "text-gray-400 hover:text-gray-600"
             }`}
           >
-            {t("newOrder", "Current Cart")} {lines.length > 0 && `(${lines.length})`}
+            {"Current Cart"} {lines.length > 0 && `(${lines.length})`}
             {tab === "new" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-900 rounded-full" />}
           </button>
           <button
@@ -373,7 +370,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               tab === "confirmed" ? "text-gray-900" : "text-gray-400 hover:text-gray-600"
             }`}
           >
-            {t("confirmedOrders", "Table Bill & Tab")} {confirmedCount > 0 && `(${confirmedCount})`}
+            {"Table Bill & Tab"} {confirmedCount > 0 && `(${confirmedCount})`}
             {tab === "confirmed" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600 rounded-full" />}
           </button>
         </div>
@@ -418,7 +415,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                         <div className={`w-2 h-2 rounded-full ${item.isVeg ? "bg-green-600" : "bg-red-600"}`} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900 text-sm truncate">{tDish(item.name)}</p>
+                        <p className="font-semibold text-gray-900 text-sm truncate">{item.name}</p>
                         <p className="text-xs text-gray-400 mt-0.5">{formatRupees(item.priceCents)} each</p>
                       </div>
                     </div>
@@ -463,11 +460,11 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               <div className="px-4 py-4 bg-white mt-3 border-y border-gray-100">
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between text-gray-500">
-                    <span>{t("subtotal", "Subtotal")}</span>
+                    <span>{"Subtotal"}</span>
                     <span className="font-semibold text-gray-800">{formatRupees(subtotal)}</span>
                   </div>
                   <div className="flex justify-between font-bold text-gray-900 pt-2 border-t border-gray-100 text-base">
-                    <span>{t("totalForOrder", "Total for this order")}</span>
+                    <span>{"Total for this order"}</span>
                     <span className="text-emerald-700">{formatRupees(grandTotal)}</span>
                   </div>
                 </div>
@@ -482,7 +479,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                 href={`${base}/checkout?note=${encodeURIComponent(note)}`}
                 className="flex items-center justify-between w-full bg-gray-900 text-white px-6 py-4 rounded-2xl font-bold text-base active:scale-[0.98] transition-all shadow-md"
               >
-                <span>{t("proceedToCheckout", "Proceed to checkout")}</span>
+                <span>{"Proceed to checkout"}</span>
                 <span className="bg-white/20 px-3 py-1 rounded-xl text-sm font-semibold">{formatRupees(grandTotal)}</span>
               </Link>
             </div>
@@ -579,7 +576,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
               </div>
               <div className="space-y-2 p-5">
                 <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-gray-100 pb-2 text-[11px] font-bold uppercase tracking-wide text-gray-400"><span>Items</span><span>Qty</span><span>Amount</span></div>
-                {(() => { try { return JSON.parse(sessionData.bill.itemsJson).map((item: {name:string;quantity:number;subtotal:number}, idx:number) => <div key={`${item.name}-${idx}`} className="grid grid-cols-[1fr_auto_auto] gap-3 py-1 text-sm"><span className="font-medium text-gray-800">{tDish(item.name)}</span><span className="text-gray-500">{item.quantity}</span><span className="font-semibold text-gray-900">{formatRupees(item.subtotal)}</span></div>); } catch { return <p className="text-sm text-gray-500">Bill items unavailable.</p>; } })()}
+                {(() => { try { return JSON.parse(sessionData.bill.itemsJson).map((item: {name:string;quantity:number;subtotal:number}, idx:number) => <div key={`${item.name}-${idx}`} className="grid grid-cols-[1fr_auto_auto] gap-3 py-1 text-sm"><span className="font-medium text-gray-800">{item.name}</span><span className="text-gray-500">{item.quantity}</span><span className="font-semibold text-gray-900">{formatRupees(item.subtotal)}</span></div>); } catch { return <p className="text-sm text-gray-500">Bill items unavailable.</p>; } })()}
                 <div className="space-y-2 border-t border-dashed border-gray-200 pt-3 text-sm">
                   <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{formatRupees(sessionData.bill.subtotalCents)}</span></div>
                   {sessionData.bill.discountCents > 0 && <div className="flex justify-between font-semibold text-emerald-700"><span>{sessionData.bill.discountName || "Discount"} ({sessionData.bill.discountPercent}%)</span><span>−{formatRupees(sessionData.bill.discountCents)}</span></div>}
@@ -686,7 +683,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                               <div key={iIdx} className="flex items-center justify-between py-1.5 text-xs">
                                 <div className="flex items-center gap-2 min-w-0">
                                   <span className="font-bold text-gray-900 w-5">{i.quantity}×</span>
-                                  <span className="text-gray-800 font-medium truncate">{tDish(name)}</span>
+                                  <span className="text-gray-800 font-medium truncate">{name}</span>
                                 </div>
                                 <span className="font-bold text-gray-900 text-right ml-2">
                                   {formatRupees(price * i.quantity)}
@@ -728,7 +725,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                         <div key={idx} className="flex items-center justify-between py-2 text-xs">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className="font-bold text-gray-900 w-5">{item.quantity}×</span>
-                            <span className="text-gray-800 font-medium truncate">{tDish(item.name)}</span>
+                            <span className="text-gray-800 font-medium truncate">{item.name}</span>
                           </div>
                           <span className="font-bold text-gray-900 text-right ml-2">
                             {formatRupees(item.subtotal)}
@@ -744,17 +741,17 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
                   {sessionData?.session && (
                     <div className="border-t border-gray-100 pt-3 space-y-1.5 text-xs text-gray-600">
                       <div className="flex justify-between">
-                        <span>{t("subtotal", "Items Subtotal")}</span>
+                        <span>{"Items Subtotal"}</span>
                         <span className="font-semibold text-gray-900">{formatRupees(sessionData.session.subtotalCents)}</span>
                       </div>
                       {(sessionData.session as any).discountCents > 0 && (
                         <div className="flex justify-between text-emerald-700 font-semibold">
-                          <span>{(sessionData.session as any).discountName || t("discount", "Discount")}</span>
+                          <span>{(sessionData.session as any).discountName || "Discount"}</span>
                           <span>−{formatRupees((sessionData.session as any).discountCents)}</span>
                         </div>
                       )}
                       <div className="flex justify-between font-black text-gray-900 text-sm pt-2 border-t border-gray-100">
-                        <span>{t("runningTotalBill", "Running Table Bill")}</span>
+                        <span>{"Running Table Bill"}</span>
                         <span className="text-emerald-700">{formatRupees(liveTableTotal)}</span>
                       </div>
                       <p className="text-[10px] text-gray-400 text-center pt-1">

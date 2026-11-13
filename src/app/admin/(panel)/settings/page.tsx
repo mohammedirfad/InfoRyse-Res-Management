@@ -189,10 +189,6 @@ export default function SettingsPage() {
                   <input className="input" value={restName} onChange={e => setRestName(e.target.value)} placeholder="Your restaurant name" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-gray-600 mb-1 block">Default Language</label>
-                  <select className="input"><option>English</option><option>Hindi</option><option>Kannada</option></select>
-                </div>
-                <div>
                   <label className="text-xs font-medium text-gray-600 mb-1 block">Time Zone</label>
                   <select className="input"><option>(GMT+5:30) Asia/Kolkata</option></select>
                 </div>

@@ -5,8 +5,6 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ChevronRight, Shield } from "lucide-react";
 import { useCart, formatRupees, getStoredOrders, saveStoredOrders } from "@/components/CartContext";
-import { useLanguage } from "@/lib/i18n";
-import { LanguageSelector } from "@/components/LanguageSelector";
 import { saveGuestTableSession } from "@/lib/guestTableSession";
 import { forgetBillLink, recallBillLink } from "@/lib/guestBill";
 import { capitalizeInitials } from "@/lib/nameFormat";
@@ -16,7 +14,7 @@ type PaymentMethod = "PAY_AT_RESTAURANT" | "UPI" | "CARD" | "WALLET";
 
 export default function CheckoutPage({ params }: { params: { slug: string; qrToken: string } }) {
   const { lines, totalCents, clear } = useCart();
-  const { t, tDish } = useLanguage();
+
   const router       = useRouter();
   const searchParams = useSearchParams();
   const noteFromCart = searchParams.get("note") ?? "";
@@ -245,10 +243,9 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <LanguageSelector variant="pill" />
         </div>
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight">{t("proceedToCheckout", "Almost There")}</h1>
+          <h1 className="text-xl font-extrabold tracking-tight">{"Almost There"}</h1>
           <p className="text-xs text-white/60 mt-0.5">Contactless, fast table order</p>
         </div>
       </div>
@@ -271,7 +268,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
               >
                 <div className="text-2xl mb-1.5">{ot === "DINE_IN" ? "🍽️" : "🛍️"}</div>
                 <p className="font-bold text-sm text-gray-900">
-                  {ot === "DINE_IN" ? t("dineIn", "Dine In") : "Takeaway"}
+                  {ot === "DINE_IN" ? "Dine In" : "Takeaway"}
                 </p>
                 <p className="text-xs text-gray-400 mt-0.5">
                   {ot === "DINE_IN" ? "Served at your table" : "Pick up at counter"}
@@ -286,7 +283,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
 
         {/* Customer details */}
         <div className="bg-white rounded-2xl border border-black/5 shadow-xs p-4 space-y-3">
-          <p className="text-sm font-bold text-gray-700">{t("contactDetails", "Your Details")}</p>
+          <p className="text-sm font-bold text-gray-700">{"Your Details"}</p>
 
           {/* Name */}
           <div>
@@ -294,7 +291,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
               className={`w-full bg-gray-50 rounded-xl px-4 py-3 text-sm border focus:outline-none focus:ring-1 focus:ring-emerald-700 ${
                 fieldErrors.name ? "border-red-400 ring-1 ring-red-400" : "border-gray-200"
               }`}
-              placeholder={t("yourName", "Your name *")}
+              placeholder={"Your name *"}
               autoCapitalize="words"
               value={name}
               onChange={(e) => {
@@ -314,7 +311,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
               className={`w-full bg-gray-50 rounded-xl px-4 py-3 text-sm border focus:outline-none focus:ring-1 focus:ring-emerald-700 ${
                 fieldErrors.phone ? "border-red-400 ring-1 ring-red-400" : "border-gray-200"
               }`}
-              placeholder={t("mobileNumber", "Phone number (optional if email is provided)")}
+              placeholder={"Phone number (optional if email is provided)"}
               type="tel"
               inputMode="numeric"
               maxLength={10}
@@ -343,7 +340,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
               className={`w-full bg-gray-50 rounded-xl px-4 py-3 text-sm border focus:outline-none focus:ring-1 focus:ring-emerald-700 ${
                 fieldErrors.email ? "border-red-400 ring-1 ring-red-400" : "border-gray-200"
               }`}
-              placeholder={t("emailAddress", "Email address")}
+              placeholder={"Email address"}
               type="email"
               value={email}
               onChange={(e) => {
@@ -361,18 +358,18 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
             className="w-full bg-gray-50 rounded-xl px-4 py-2.5 text-xs border border-gray-200 resize-none focus:outline-none focus:ring-1 focus:ring-emerald-700"
             rows={2}
             value={note}
-            placeholder={t("specialInstructionsPlaceholder", "Special instructions (less spicy, no onions…)")}
+            placeholder={"Special instructions (less spicy, no onions…)"}
             onChange={(e) => setNote(e.target.value)}
           />
         </div>
 
         {/* Payment method */}
         <div className="bg-white rounded-2xl border border-black/5 shadow-xs p-4">
-          <p className="text-sm font-bold text-gray-700 mb-3">{t("paymentMethod", "Payment Method")}</p>
+          <p className="text-sm font-bold text-gray-700 mb-3">{"Payment Method"}</p>
           <label className="flex items-center gap-3 p-3.5 rounded-2xl border-2 border-[#132A1E] bg-[#132A1E]/5 cursor-pointer">
             <span className="text-2xl">💵</span>
             <div className="flex-1">
-              <p className="text-sm font-bold text-gray-900">{t("payAtRestaurant", "Pay at Restaurant")}</p>
+              <p className="text-sm font-bold text-gray-900">{"Pay at Restaurant"}</p>
               <p className="text-xs text-gray-400">Settle your consolidated bill when you finish</p>
             </div>
             <div className="h-5 w-5 rounded-full border-2 border-[#132A1E] flex items-center justify-center flex-shrink-0">
@@ -383,12 +380,12 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
 
         {/* Order summary (Clean without CGST/taxes) */}
         <div className="bg-white rounded-2xl border border-black/5 shadow-xs p-4">
-          <p className="text-sm font-bold text-gray-700 mb-3">{t("orderSummary", "Order Summary")}</p>
+          <p className="text-sm font-bold text-gray-700 mb-3">{"Order Summary"}</p>
           <div className="space-y-1.5 divide-y divide-gray-50">
             {lines.map((l) => (
               <div key={l.item.id} className="flex justify-between text-xs py-1.5 text-gray-700">
                 <span className="truncate pr-3">
-                  <b className="text-gray-900 font-bold">{l.quantity}×</b> {tDish(l.item.name)}
+                  <b className="text-gray-900 font-bold">{l.quantity}×</b> {l.item.name}
                 </span>
                 <span className="font-semibold text-gray-900 flex-shrink-0">
                   {formatRupees(l.item.priceCents * l.quantity)}
@@ -399,7 +396,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
 
           <div className="pt-3 mt-2 border-t border-gray-100 space-y-2 text-sm">
             <div className="flex justify-between text-gray-500">
-              <span>{t("subtotal", "Subtotal")}</span>
+              <span>{"Subtotal"}</span>
               <span className="font-semibold text-gray-800">{formatRupees(subtotal)}</span>
             </div>
 
@@ -413,7 +410,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
             )}
 
             <div className="flex justify-between font-black text-gray-950 text-base pt-2 border-t border-gray-100">
-              <span>{t("total", "Total")}</span>
+              <span>{"Total"}</span>
               <span>{formatRupees(grandTotal)}</span>
             </div>
           </div>
@@ -445,7 +442,7 @@ export default function CheckoutPage({ params }: { params: { slug: string; qrTok
           disabled={submitting || lines.length === 0 || !idempotencyKey}
           className="w-full bg-[#132A1E] text-white flex items-center justify-between px-5 py-4 text-base shadow-xl rounded-2xl disabled:opacity-50 active:scale-[0.98] transition-all font-bold"
         >
-          <span>{submitting ? t("placingOrder", "Placing Order…") : t("placeOrder", "Place Order")}</span>
+          <span>{submitting ? "Placing Order…" : "Place Order"}</span>
           {!submitting && (
             <div className="flex items-center gap-2">
               <span>{formatRupees(grandTotal)}</span>

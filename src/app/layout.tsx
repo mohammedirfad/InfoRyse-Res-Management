@@ -17,15 +17,11 @@ export const metadata: Metadata = {
   },
 };
 
-import { LanguageProvider } from "@/lib/i18n";
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="min-h-screen bg-white text-gray-900 antialiased">
-        <LanguageProvider>
-          {children}
-        </LanguageProvider>
+        {children}
       </body>
     </html>
   );

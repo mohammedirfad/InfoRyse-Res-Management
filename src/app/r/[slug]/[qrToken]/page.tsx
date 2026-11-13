@@ -7,8 +7,6 @@ import { Search, X, ShoppingCart, Wifi, ChevronUp, ArrowLeft, ReceiptText } from
 import { LandingPage } from "./landing";
 import { useCart, formatRupees, type MenuItem } from "@/components/CartContext";
 import { getDishImageUrl } from "@/lib/dishImages";
-import { useLanguage } from "@/lib/i18n";
-import { LanguageSelector } from "@/components/LanguageSelector";
 import { clearGuestTableSession, guestSessionQuery, saveGuestTableSession } from "@/lib/guestTableSession";
 import { requestTableBill } from "@/lib/guestBill";
 
@@ -248,7 +246,7 @@ function ItemCard({
   onDecrease: (i: MenuItem, e: React.MouseEvent) => void;
   onView: (i: MenuItem) => void;
 }) {
-  const { t, tDish } = useLanguage();
+
   const [imgErr, setImgErr] = useState(false);
   const imageUrl = getDishImageUrl(item.name, categoryName, item.imageUrl);
   const badge = menuBadge(item);
@@ -305,7 +303,7 @@ function ItemCard({
               className="flex items-center gap-1 bg-white/95 hover:bg-white text-gray-900 border border-black/10 px-3 py-1.5 rounded-full font-extrabold text-xs shadow-md active:scale-90 transition-all hover:shadow-lg"
             >
               <span className="text-sm font-black text-emerald-700 leading-none">+</span>
-              <span className="text-[11px] font-black tracking-wide">{t("add", "ADD")}</span>
+              <span className="text-[11px] font-black tracking-wide">{"ADD"}</span>
             </button>
           ) : (
             <div className="flex items-center gap-1.5 bg-gray-900/95 backdrop-blur-md text-white border border-white/20 rounded-full px-2 py-1 shadow-lg animate-scale-in">
@@ -342,7 +340,7 @@ function ItemCard({
       {/* Dish Details */}
       <div className="flex flex-col flex-1 justify-between">
         <div>
-          <h3 className="font-bold text-gray-900 text-sm leading-snug line-clamp-1 h-5">{tDish(item.name)}</h3>
+          <h3 className="font-bold text-gray-900 text-sm leading-snug line-clamp-1 h-5">{item.name}</h3>
           <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5 leading-relaxed h-4">
             {item.description || "\u00A0"}
           </p>
@@ -390,7 +388,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
   const [visibleLimit, setVisibleLimit] = useState(16);
   const searchRef = useRef<HTMLInputElement>(null);
   const { lines, addItem, setQuantity, removeItem, totalCount, totalCents, syncSession } = useCart();
-  const { t, tDish, tCategory } = useLanguage();
+
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("view") === "menu") {
@@ -580,7 +578,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
   const isOccupied = d.table.status === "OCCUPIED";
   const hasActiveDiningSession = Boolean(d.table.activeSessionId);
   const cartHref = `/r/${params.slug}/${params.qrToken}/cart${totalCount === 0 && hasActiveDiningSession ? "?tab=confirmed" : ""}`;
-  const cartLabel = totalCount === 0 && hasActiveDiningSession ? "My Orders" : t("cart", "Cart");
+  const cartLabel = totalCount === 0 && hasActiveDiningSession ? "My Orders" : "Cart";
 
   /* ── LANDING SPLASH PAGE ──────────────────────────────────────────────────── */
   if (phase === "landing") return (
@@ -655,11 +653,10 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                 )}
                 <div className="min-w-0 text-center">
                   <p className="mx-auto line-clamp-2 max-w-full break-words font-bold text-gray-900 text-sm leading-snug sm:text-base">{d.restaurant.name}</p>
-                  <p className="text-[10px] text-gray-400">{t("table", "Table")} {d.table.label}</p>
+                  <p className="text-[10px] text-gray-400">{"Table"} {d.table.label}</p>
                 </div>
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
-                <LanguageSelector variant="compact" />
                 <button onClick={()=>setShowSearch(true)}
                   className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors">
                   <Search className="h-4 w-4 text-gray-600"/>
@@ -787,8 +784,8 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
               <div className={`w-full h-full flex flex-col items-start justify-end p-2.5
                 ${activeCat===c.id?"bg-gray-900":"bg-gradient-to-b from-[#2a3f6f] to-[#1a2a5e]"} text-white`}>
                 <span className="text-xl mb-1">{catEmoji(c.name)}</span>
-                <p className="text-[11px] font-bold leading-tight text-left">{tCategory(c.name)}</p>
-                <p className="text-[9px] text-white/50 mt-0.5">{c.menuItems.length} {t("items", "items")}</p>
+                <p className="text-[11px] font-bold leading-tight text-left">{c.name}</p>
+                <p className="text-[9px] text-white/50 mt-0.5">{c.menuItems.length} {"items"}</p>
               </div>
             </button>
           ))}
@@ -805,7 +802,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
               <button key={c.id} onClick={()=>setActiveCat(c.id)}
                 className={`flex-shrink-0 text-xs font-semibold px-4 py-2 border-b-2 transition-all whitespace-nowrap
                   ${activeCat===c.id?"border-gray-900 text-gray-900":"border-transparent text-gray-400"}`}>
-                {tCategory(c.name)}
+                {c.name}
               </button>
             ))}
           </div>
@@ -820,7 +817,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                   ? f==="veg"?"border-green-600 bg-green-600 text-white":"border-red-500 bg-red-500 text-white"
                   :"border-gray-200 text-gray-500"}`}>
               <VegDot isVeg={f==="veg"} size="sm"/>
-              {f==="veg"?t("veg", "Veg"):t("nonVeg", "Non-veg")}
+              {f==="veg"?"Veg":"Non-veg"}
             </button>
           ))}
           {search && <span className="ml-auto text-xs text-gray-400 flex-shrink-0">{catItems.length} found</span>}
@@ -931,7 +928,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                   </span>
                 )}
               </div>
-              <h2 className="text-xl font-bold text-gray-900 leading-snug">{tDish(selectedItem.name)}</h2>
+              <h2 className="text-xl font-bold text-gray-900 leading-snug">{selectedItem.name}</h2>
               {selectedItem.description && (
                 <p className="text-sm text-gray-500 mt-2 leading-relaxed">{selectedItem.description}</p>
               )}
@@ -1010,8 +1007,8 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
                 </span>
               </div>
               <div>
-                <p className="text-sm font-semibold">{totalCount} {totalCount>1?t("items", "items"):t("item", "item")} {t("inCart", "in cart")}</p>
-                <p className="text-[10px] text-white/50">{t("viewCart", "Tap to review")}</p>
+                <p className="text-sm font-semibold">{totalCount} {totalCount>1?"items":"item"} {"in cart"}</p>
+                <p className="text-[10px] text-white/50">{"Tap to review"}</p>
               </div>
             </div>
             <span className="font-bold">{formatRupees(totalCents)} ›</span>
@@ -1024,7 +1021,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-gray-100 px-3 py-2.5 flex items-center justify-around">
         <button className="flex flex-col items-center gap-0.5 text-gray-900">
           <span className="text-xl">🏠</span>
-          <span className="text-[10px] font-bold">{t("menu", "Menu")}</span>
+          <span className="text-[10px] font-bold">{"Menu"}</span>
         </button>
         <Link href={cartHref}
           className="flex flex-col items-center gap-0.5 text-gray-400 relative">
@@ -1044,7 +1041,7 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
         <button onClick={()=>setShowAssist(true)}
           className="flex flex-col items-center gap-0.5 text-gray-400 active:scale-90 transition-transform">
           <span className="text-xl">🔔</span>
-          <span className="text-[10px] font-medium">{t("callWaiter", "Waiter")}</span>
+          <span className="text-[10px] font-medium">{"Waiter"}</span>
         </button>
         <button onClick={()=>setShowAssist(true)}
           className="p-1.5 rounded-full border border-gray-200 text-gray-400 hover:bg-gray-100 transition-colors">
