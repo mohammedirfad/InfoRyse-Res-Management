@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, ShoppingBag, UtensilsCrossed, LayoutGrid, QrCode,
-  Tag, Users, BarChart2, User, Settings, ChefHat, Bell, Menu, X, Receipt, History
+  Tag, Users, BarChart2, User, Settings, ChefHat, Bell, Menu, X, Receipt, History, HeadphonesIcon
 } from "lucide-react";
 import LogoutButton from "./LogoutButton";
 import { invalidateCache } from "@/lib/cachedFetch";
@@ -25,6 +25,7 @@ const NAV = [
   { href: "/admin/staff",      label: "Staff Management",   icon: ChefHat,       ownerOnly: true },
   { href: "/admin/profile",    label: "Restaurant Profile", icon: User,          ownerOnly: true },
   { href: "/admin/settings",   label: "Settings",           icon: Settings,      ownerOnly: true },
+  { href: "/admin/support",    label: "Help & Support",     icon: HeadphonesIcon },
 ];
 
 interface Props {

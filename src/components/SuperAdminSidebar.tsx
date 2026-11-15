@@ -15,6 +15,7 @@ const NAV = [
   { href: "/super/restaurants", label: "Restaurants",       icon: Building2       },
   { href: "/super/orders",      label: "Orders",            icon: ShoppingBag     },
   { href: "/super/users",       label: "User Management",   icon: UserCog         },
+  { href: "/super/support",     label: "Support Tickets",   icon: HeadphonesIcon  },
   { href: "/super/audit-logs",  label: "Audit Logs",        icon: ClipboardList   },
   { href: "/super/settings",    label: "Settings",          icon: Settings        },
 ];
