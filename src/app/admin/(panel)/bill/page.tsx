@@ -121,6 +121,8 @@ export default function BillPage() {
   const [tables, setTables]                 = useState<Table[]>([]);
   const [selectedTable, setSelectedTable]   = useState<Table | null>(null);
   const [session, setSession]               = useState<Session | null>(null);
+  const [packingSaving, setPackingSaving] = useState(false);
+  const [packingError, setPackingError] = useState("");
   const [restaurantName, setRestaurantName] = useState("");
   const [taxName, setTaxName]               = useState("GST");
   const [taxPercent, setTaxPercent]         = useState(5);
@@ -357,8 +359,28 @@ export default function BillPage() {
     setSettlingPayment(true);
   }
 
+  async function savePackingCharge() {
+    if (!session || !selectedTable) return false;
+    setPackingSaving(true);
+    setPackingError("");
+    try {
+      const response = await fetch(`/api/admin/table-bill/${selectedTable.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableSessionId: session.id, packingCents: session.packingCents ?? 0 }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not save the optional charge.");
+      return true;
+    } catch (error) {
+      setPackingError(error instanceof Error ? error.message : "Could not save the optional charge.");
+      return false;
+    } finally { setPackingSaving(false); }
+  }
+
   async function prepareDigitalBill() {
     if (!session || !selectedTable) return;
+    if (!await savePackingCharge()) return;
     setIsSubmittingBill(true);
     setPrepareStatus("");
     try {
@@ -384,13 +406,14 @@ export default function BillPage() {
   // Confirm payment, store bill in database, and print
   async function confirmPaymentAndStoreBill() {
     if (!session || !selectedTable) return;
+    if (!await savePackingCharge()) return;
     setIsSubmittingBill(true);
 
     const subtotal = session.subtotalCents;
     const discount = session.discountCents ?? 0;
     const discounted = Math.max(0, subtotal - discount);
     const tax = session.taxCents ?? Math.round(discounted * taxPercent / 100);
-    const packing = session.packingCents ?? 2000;
+    const packing = session.packingCents ?? 0;
     const total = session.totalCents ?? (discounted + tax + packing);
 
     try {
@@ -457,7 +480,7 @@ export default function BillPage() {
     const discount = session.discountCents ?? 0;
     const discounted = Math.max(0, subtotal - discount);
     const tax = session.taxCents ?? Math.round(discounted * taxPercent / 100);
-    const packing = session.packingCents ?? 2000;
+    const packing = session.packingCents ?? 0;
     const total = session.totalCents ?? (discounted + tax + packing);
 
     const win = window.open("", "_blank", "width=400,height=700");
@@ -620,7 +643,7 @@ export default function BillPage() {
   const discount   = session?.discountCents ?? 0;
   const discounted = Math.max(0, subtotal - discount);
   const tax        = session?.taxCents ?? Math.round(discounted * taxPercent / 100);
-  const packing    = session?.packingCents ?? (subtotal > 0 ? 2000 : 0);
+  const packing    = session?.packingCents ?? 0;
   const grandTotal = session?.totalCents ?? (discounted + tax + packing);
 
   return (
@@ -988,10 +1011,18 @@ export default function BillPage() {
                             </div>
                           )}
                           {(session.taxBreakdown?.length ? session.taxBreakdown : [{ name: session.taxName || taxName, percent: session.taxPercent ?? taxPercent, amountCents: tax }]).filter((line) => line.amountCents > 0).map((line, index) => <div key={`${line.name}-${index}`} className="flex justify-between text-gray-600"><span>{line.name} ({line.percent}%)</span><span className="font-semibold text-gray-900">{formatRupees(line.amountCents)}</span></div>)}
-                          <div className="flex justify-between text-gray-600">
-                            <span>Packing & Service</span>
-                            <span className="font-semibold text-gray-900">{formatRupees(packing)}</span>
+                          <div className="flex items-center justify-between gap-3 text-gray-600">
+                            <label htmlFor="optional-packing-charge">Optional packing / service</label>
+                            <div className="flex items-center gap-2">
+                              <span>₹</span>
+                              <input id="optional-packing-charge" type="number" min="0" max="10000" step="1" value={(packing / 100).toFixed(2)} disabled={packingSaving} onChange={(event) => {
+                                const value = Math.min(1_000_000, Math.max(0, Math.round(Number(event.target.value || 0) * 100)));
+                                setSession((current) => current ? { ...current, packingCents: value, totalCents: discounted + tax + value } : current);
+                              }} onBlur={() => void savePackingCharge()} className="w-28 rounded-lg border border-gray-300 px-2 py-1.5 text-right font-semibold text-gray-900" />
+                              {packingSaving && <span className="text-[10px]">Saving…</span>}
+                            </div>
                           </div>
+                          {packingError && <p role="alert" className="text-xs text-rose-700">{packingError}</p>}
                           <div className="flex justify-between font-black text-[#132A1E] text-2xl pt-2 border-t border-gray-100">
                             <span>Total Payable</span>
                             <span>{formatRupees(grandTotal)}</span>

@@ -9,7 +9,6 @@ import { calculateTaxBreakdown, getTaxRates, taxSummary } from "@/lib/taxes";
 
 export const dynamic = "force-dynamic";
 
-const PACKING_CENTS = 2000;
 
 const Body = z.object({
   tableSessionId: z.string().uuid().optional(),
@@ -135,7 +134,7 @@ export async function POST(
           ),
         );
         const { taxPercent, taxName, taxCents } = taxSummary(taxBreakdown);
-        const packingCents = subtotalCents > 0 ? PACKING_CENTS : 0;
+        const packingCents = session.packingCents ?? 0;
         const totalCents = discountedSubtotal + taxCents + packingCents;
 
         const billData = {

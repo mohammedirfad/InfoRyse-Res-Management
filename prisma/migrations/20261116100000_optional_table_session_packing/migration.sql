@@ -1,0 +1,2 @@
+ALTER TABLE "TableSession"
+ADD COLUMN "packingCents" INTEGER NOT NULL DEFAULT 0;

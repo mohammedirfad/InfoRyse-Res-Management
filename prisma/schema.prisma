@@ -193,6 +193,7 @@ model TableSession {
   finalizedAt    DateTime?
   paidAt         DateTime?
   billRequestedAt DateTime?
+  packingCents   Int       @default(0)
   createdAt      DateTime  @default(now())
 
   orders         Order[]

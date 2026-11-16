@@ -2,10 +2,24 @@ import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
 import { getCurrentTableSession } from "@/lib/tableSessions";
 import { calculateTaxBreakdown, getTaxRates, taxSummary } from "@/lib/taxes";
+import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
-const PACKING_CENTS = 2000;
+const PackingBody = z.object({ tableSessionId: z.string().uuid(), packingCents: z.number().int().min(0).max(1_000_000) });
+
+export async function PATCH(req: Request, { params }: { params: { tableId: string } }) {
+  try {
+    const { restaurantId } = await requireRestaurantUser();
+    const body = PackingBody.parse(await req.json());
+    const result = await db.tableSession.updateMany({ where: { id: body.tableSessionId, tableId: params.tableId, restaurantId, status: "OPEN" }, data: { packingCents: body.packingCents } });
+    if (!result.count) return Response.json({ error: "This table session is no longer open." }, { status: 409 });
+    return Response.json({ packingCents: body.packingCents });
+  } catch (err) {
+    if (err instanceof z.ZodError) return Response.json({ error: "Enter a valid optional charge." }, { status: 400 });
+    return tenantErrorResponse(err);
+  }
+}
 
 /**
  * GET /api/admin/table-bill/{tableId}
@@ -163,7 +177,7 @@ export async function GET(
 
     const taxBreakdown = calculateTaxBreakdown(discountedSubtotal, getTaxRates(restaurant?.taxName, restaurant?.taxPercent, restaurant?.additionalTaxes));
     const { taxPercent, taxName, taxCents } = taxSummary(taxBreakdown);
-    const packingCents = subtotalCents > 0 ? PACKING_CENTS : 0;
+    const packingCents = session.packingCents ?? 0;
     const totalCents = discountedSubtotal + taxCents + packingCents;
 
     return new Response(

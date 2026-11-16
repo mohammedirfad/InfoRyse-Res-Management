@@ -5,7 +5,6 @@ import { calculateTaxBreakdown, getTaxRates, taxSummary } from "@/lib/taxes";
 export const dynamic = "force-dynamic";
 
 const TAX_RATE = 0.05;
-const PACKING_CENTS = 2000;
 
 /**
  * GET /api/public/table-orders?slug={slug}&qrToken={qrToken}
@@ -63,6 +62,7 @@ export async function GET(req: Request) {
         status: true,
         createdAt: true,
         billRequestedAt: true,
+        packingCents: true,
         orders: {
           where:   { status: { not: "CANCELLED" } },
           select: {
@@ -179,7 +179,8 @@ export async function GET(req: Request) {
     const discountedSubtotal = Math.max(0, subtotalCents - discountCents);
     const taxBreakdown = calculateTaxBreakdown(discountedSubtotal, getTaxRates(restaurant.taxName, restaurant.taxPercent, restaurant.additionalTaxes));
     const { taxCents, taxName, taxPercent } = taxSummary(taxBreakdown);
-    const totalCents = discountedSubtotal > 0 ? (discountedSubtotal + taxCents + PACKING_CENTS) : 0;
+    const packingCents = session.packingCents ?? 0;
+    const totalCents = discountedSubtotal > 0 ? discountedSubtotal + taxCents + packingCents : 0;
 
     return new Response(
       JSON.stringify({
@@ -212,7 +213,7 @@ export async function GET(req: Request) {
           taxName,
           taxPercent,
           taxBreakdown,
-          packingCents: subtotalCents > 0 ? PACKING_CENTS : 0,
+          packingCents,
           totalCents,
         },
         bill: activeBill,

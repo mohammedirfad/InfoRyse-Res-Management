@@ -157,7 +157,7 @@ export async function POST(req: Request) {
       const discountedSubtotal = Math.max(0, subtotalCents - discountCents);
       const taxBreakdown = calculateTaxBreakdown(discountedSubtotal, getTaxRates(restaurant.taxName, restaurant.taxPercent, restaurant.additionalTaxes));
       const { taxPercent, taxName, taxCents } = taxSummary(taxBreakdown);
-      const packingCents = subtotalCents > 0 ? 2000 : 0;
+      const packingCents = activeSession.packingCents ?? 0;
       const totalCents = discountedSubtotal + taxCents + packingCents;
 
       const previousBill = await tx.bill.findFirst({
