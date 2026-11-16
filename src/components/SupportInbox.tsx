@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, LifeBuoy, LoaderCircle, MessageCircle, Plus, RefreshCw, Send, TicketCheck } from "lucide-react";
 
 type Scope = "admin" | "super";
@@ -50,9 +50,13 @@ export default function SupportInbox({ scope }: { scope: Scope }) {
   const [subject, setSubject] = useState("");
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [newMessage, setNewMessage] = useState("");
+  const listRequestInFlight = useRef(false);
+  const detailRequestsInFlight = useRef(new Set<string>());
 
-  const loadTickets = useCallback(async () => {
-    setLoadingList(true);
+  const loadTickets = useCallback(async (quiet = false) => {
+    if (listRequestInFlight.current) return;
+    listRequestInFlight.current = true;
+    if (!quiet) setLoadingList(true);
     setError("");
     try {
       const params = new URLSearchParams({ page: String(page) });
@@ -66,13 +70,21 @@ export default function SupportInbox({ scope }: { scope: Scope }) {
       setSelectedId((current) => current && (data.tickets ?? []).some((ticket: Ticket) => ticket.id === current) ? current : "");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not load support tickets.");
-    } finally { setLoadingList(false); }
+    } finally { listRequestInFlight.current = false; setLoadingList(false); }
   }, [base, isSuper, page, search, statusFilter]);
 
-  useEffect(() => { void loadTickets(); }, [loadTickets]);
+  useEffect(() => {
+    void loadTickets();
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void loadTickets(true);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [loadTickets]);
 
   const loadDetail = useCallback(async (id: string) => {
     if (!id) { setSelected(null); return; }
+    if (detailRequestsInFlight.current.has(id)) return;
+    detailRequestsInFlight.current.add(id);
     setLoadingDetail(true);
     setError("");
     try {
@@ -83,10 +95,17 @@ export default function SupportInbox({ scope }: { scope: Scope }) {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not open this ticket.");
       setSelected(null);
-    } finally { setLoadingDetail(false); }
+    } finally { detailRequestsInFlight.current.delete(id); setLoadingDetail(false); }
   }, [base]);
 
-  useEffect(() => { void loadDetail(selectedId); }, [loadDetail, selectedId]);
+  useEffect(() => {
+    if (!selectedId) return;
+    void loadDetail(selectedId);
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void loadDetail(selectedId);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [loadDetail, selectedId]);
 
   async function createTicket(event: FormEvent) {
     event.preventDefault();
@@ -173,8 +192,9 @@ export default function SupportInbox({ scope }: { scope: Scope }) {
 
         <section className={`${selectedId ? "flex" : "hidden lg:flex"} min-w-0 flex-col`}>
           {!selectedId ? <div className="m-auto max-w-sm p-8 text-center"><MessageCircle className="mx-auto h-10 w-10 text-slate-300" /><p className="mt-3 font-bold text-slate-700">Select a ticket</p><p className="mt-1 text-sm text-slate-500">Open a support conversation to view details and replies.</p></div> : loadingDetail && !selected ? <div className="m-auto"><LoaderCircle className="h-6 w-6 animate-spin text-emerald-800" /></div> : selected ? <>
-            <header className="border-b border-slate-100 p-4 sm:p-5"><div className="flex items-start gap-3"><button onClick={() => setSelectedId("")} className="mt-0.5 rounded-lg p-1 text-slate-500 hover:bg-slate-100 lg:hidden" aria-label="Back to tickets"><ArrowLeft className="h-5 w-5" /></button><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-slate-500">{selected.category}</span><span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${STATUS_STYLE[selected.status]}`}>{STATUS_LABEL[selected.status]}</span></div><h2 className="mt-2 text-lg font-black text-slate-900">{selected.subject}</h2><p className="mt-1 text-xs text-slate-500">{isSuper ? `${selected.restaurant?.name || "Restaurant"} · ${selected.createdByName || selected.createdByEmail || "Restaurant user"}` : `Opened ${dateLabel(selected.createdAt)}`}</p></div>
-              {isSuper && <select value={selected.status} disabled={sending} onChange={(event) => void updateStatus(event.target.value as Status)} className="input h-10 w-auto min-w-36 text-xs font-bold">{STATUSES.map((status) => <option key={status} value={status}>{STATUS_LABEL[status]}</option>)}</select>}
+            <header className="border-b border-slate-100 p-4 sm:p-5"><div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start">
+              <div className="flex min-w-0 items-start gap-2 sm:flex-1"><button onClick={() => setSelectedId("")} className="mt-0.5 rounded-lg p-1 text-slate-500 hover:bg-slate-100 lg:hidden" aria-label="Back to tickets"><ArrowLeft className="h-5 w-5" /></button><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-slate-500">{selected.category}</span><span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${STATUS_STYLE[selected.status]}`}>{STATUS_LABEL[selected.status]}</span></div><h2 className="mt-2 break-words text-lg font-black text-slate-900">{selected.subject}</h2><p className="mt-1 break-words text-xs text-slate-500">{isSuper ? `${selected.restaurant?.name || "Restaurant"} · ${selected.createdByName || selected.createdByEmail || "Restaurant user"}` : `Opened ${dateLabel(selected.createdAt)}`}</p></div></div>
+              {isSuper && <select aria-label="Ticket status" value={selected.status} disabled={sending} onChange={(event) => void updateStatus(event.target.value as Status)} className="input h-10 !w-full min-w-0 shrink-0 text-xs font-bold sm:!w-52">{STATUSES.map((status) => <option key={status} value={status}>{STATUS_LABEL[status]}</option>)}</select>}
             </div></header>
             <div className="flex-1 space-y-4 overflow-y-auto bg-slate-50/60 p-4 sm:p-6">
               {selected.messages.map((message, index) => { const fromSupport = message.authorRole === "SUPER_ADMIN"; return <div key={(message as Message).id || `${message.createdAt}-${index}`} className={`flex ${fromSupport ? "justify-start" : "justify-end"}`}><article className={`max-w-[min(42rem,92%)] rounded-2xl border px-4 py-3 shadow-sm ${fromSupport ? "border-slate-200 bg-white" : "border-emerald-900/10 bg-emerald-950 text-white"}`}><div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1"><p className={`text-xs font-extrabold ${fromSupport ? "text-slate-800" : "text-emerald-100"}`}>{message.authorName}{fromSupport && <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] uppercase text-amber-900">InfoRyse Support</span>}</p><time className={`text-[10px] ${fromSupport ? "text-slate-400" : "text-emerald-200/70"}`}>{dateLabel(message.createdAt)}</time></div><p className={`mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed ${fromSupport ? "text-slate-700" : "text-white"}`}>{message.body}</p></article></div>; })}
