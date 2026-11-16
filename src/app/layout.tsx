@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
 
+// vie wport settings are required for proper scaling on mobile devices, especially for the QR ordering interface.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
