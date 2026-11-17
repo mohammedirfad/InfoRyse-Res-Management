@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Search, X, Users, Mail, Phone, Building2 } from "lucide-react";
+import { Search, X, Users, Mail, Phone, Building2, ChevronLeft, ChevronRight } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
 type UserRecord = {
@@ -21,40 +21,48 @@ const ROLE_META: Record<string, { bg: string; color: string; label: string }> = 
   STAFF:       { bg: "bg-emerald-100",  color: "text-emerald-800",  label: "Restaurant Staff" },
 };
 
+type UsersPayload = { users: UserRecord[]; pagination: { page: number; total: number; totalPages: number }; roleCounts: Record<string, number> };
+const usersPageCache = new Map<string, UsersPayload>();
+
 export default function SuperUsersPage() {
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, total: 0, totalPages: 1 });
+  const [roleCounts, setRoleCounts] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<UserRecord | null>(null);
 
-  async function load() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/super/users");
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data.users ?? []);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    load();
-  }, []);
-
-  const displayUsers = users.filter((u) => {
-    const matchRole = roleFilter === "all" || u.role === roleFilter;
-    const query = search.toLowerCase();
-    const matchSearch =
-      !search ||
-      (u.name && u.name.toLowerCase().includes(query)) ||
-      u.email.toLowerCase().includes(query) ||
-      (u.restaurant?.name && u.restaurant.name.toLowerCase().includes(query));
-    return matchRole && matchSearch;
-  });
+    const params = new URLSearchParams({ page: String(page), limit: "30", role: roleFilter, search: search.trim() });
+    const key = params.toString();
+    const cached = usersPageCache.get(key);
+    if (cached) {
+      setUsers(cached.users);
+      setPagination(cached.pagination);
+      setRoleCounts(cached.roleCounts);
+    } else {
+      setUsers([]);
+      setLoading(true);
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetch(`/api/super/users?${key}`, { cache: "no-store", signal: controller.signal })
+        .then(async (response) => {
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Unable to load user accounts.");
+          usersPageCache.set(key, data);
+          setUsers(data.users ?? []);
+          setPagination(data.pagination ?? { page, total: 0, totalPages: 1 });
+          setRoleCounts(data.roleCounts ?? {});
+          setSelected((current) => current ? (data.users ?? []).find((user: UserRecord) => user.id === current.id) ?? null : null);
+        })
+        .catch((error) => { if (error.name !== "AbortError") console.error("User accounts load failed", error); })
+        .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    }, search ? 250 : 0);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [page, roleFilter, search]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -77,7 +85,7 @@ export default function SuperUsersPage() {
               className="input pl-10 text-xs bg-slate-50 border-slate-200"
               placeholder="Search by name, email, restaurant..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             />
           </div>
         </div>
@@ -86,14 +94,14 @@ export default function SuperUsersPage() {
         <div className="flex-1 overflow-y-auto">
           <div className="flex gap-2 p-4 bg-white/60 border-b border-slate-200">
             {[
-              { id: "all", label: "All Roles", cnt: users.length },
-              { id: "SUPER_ADMIN", label: "Super Admins", cnt: users.filter((u) => u.role === "SUPER_ADMIN").length },
-              { id: "OWNER", label: "Owners", cnt: users.filter((u) => u.role === "OWNER").length },
-              { id: "STAFF", label: "Staff", cnt: users.filter((u) => u.role === "STAFF").length },
+              { id: "all", label: "All Roles", cnt: Object.values(roleCounts).reduce((sum, value) => sum + value, 0) },
+              { id: "SUPER_ADMIN", label: "Super Admins", cnt: roleCounts.SUPER_ADMIN ?? 0 },
+              { id: "OWNER", label: "Owners", cnt: roleCounts.OWNER ?? 0 },
+              { id: "STAFF", label: "Staff", cnt: roleCounts.STAFF ?? 0 },
             ].map(({ id, label, cnt }) => (
               <button
                 key={id}
-                onClick={() => setRoleFilter(id)}
+                onClick={() => { setRoleFilter(id); setPage(1); }}
                 className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all ${
                   roleFilter === id
                     ? "bg-[#0B1736] text-white shadow-xs"
@@ -121,7 +129,7 @@ export default function SuperUsersPage() {
                 </tr>
               </thead>
               <tbody>
-                {displayUsers.map((u, i) => {
+                {users.map((u, i) => {
                   const meta = ROLE_META[u.role] ?? ROLE_META.STAFF;
                   return (
                     <tr
@@ -129,7 +137,7 @@ export default function SuperUsersPage() {
                       className="cursor-pointer hover:bg-slate-50/80 transition-colors"
                       onClick={() => setSelected(u)}
                     >
-                      <td className="text-slate-400 font-mono text-xs">{i + 1}</td>
+                      <td className="text-slate-400 font-mono text-xs">{(page - 1) * 30 + i + 1}</td>
                       <td>
                         <div className="flex items-center gap-3">
                           <div className="h-8 w-8 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
@@ -167,7 +175,7 @@ export default function SuperUsersPage() {
                     </tr>
                   );
                 })}
-                {displayUsers.length === 0 && (
+                {users.length === 0 && !loading && (
                   <tr>
                     <td colSpan={7} className="text-center py-16 text-slate-400">
                       No matching users found
@@ -177,6 +185,10 @@ export default function SuperUsersPage() {
               </tbody>
             </table>
           )}
+          <div className="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+            <span>{pagination.total.toLocaleString("en-IN")} accounts · Page {page} of {pagination.totalPages}{loading ? " · Refreshing…" : ""}</span>
+            <div className="flex gap-2"><button aria-label="Previous page" disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="rounded-lg border p-2 disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button><button aria-label="Next page" disabled={page >= pagination.totalPages} onClick={() => setPage((value) => value + 1)} className="rounded-lg border p-2 disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button></div>
+          </div>
         </div>
       </div>
 

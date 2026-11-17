@@ -7,6 +7,7 @@ import {
   Ban, CheckCircle2, Lock, UserCheck, AlertTriangle
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { readSuperPageCache, writeSuperPageCache } from "@/lib/superPageCache";
 
 type Restaurant = {
   id: string;
@@ -33,8 +34,8 @@ type CreatedCredentials = {
 };
 
 export default function RestaurantsPage() {
-  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [restaurants, setRestaurants] = useState<Restaurant[]>(() => readSuperPageCache<Restaurant[]>("restaurants") ?? []);
+  const [loading, setLoading] = useState(() => !readSuperPageCache<Restaurant[]>("restaurants"));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
@@ -82,11 +83,13 @@ export default function RestaurantsPage() {
   const [savingEdit, setSavingEdit] = useState(false);
 
   async function load() {
-    setLoading(true);
+    if (restaurants.length === 0) setLoading(true);
     try {
       const res = await fetch("/api/super/restaurants");
       const data = await res.json();
-      setRestaurants(data.restaurants ?? []);
+      const list = data.restaurants ?? [];
+      writeSuperPageCache("restaurants", list);
+      setRestaurants(list);
     } finally {
       setLoading(false);
     }

@@ -125,6 +125,16 @@ export async function cachedJson<T>(
     return { data: entry!.data as T, fromCache: true };
   }
 
+  // If the browser has a usable older snapshot, never make an idle-resume
+  // navigation wait for the network before painting it. Refresh in the
+  // background so the next visit starts with newer data. Mutations invalidate
+  // these keys and therefore still require a fresh server response.
+  if (entry && Date.now() - entry.savedAt <= maxStaleMs) {
+    memory.set(key, entry);
+    void fetchJsonCached<T>(key, url, { maxStaleMs }).catch(() => {});
+    return { data: entry.data as T, fromCache: true };
+  }
+
   const data = await fetchJsonCached<T>(key, url, { maxStaleMs });
   return { data, fromCache: false };
 }

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Search, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { formatRupees, formatTime } from "@/lib/utils";
+import { readSuperPageCache, writeSuperPageCache } from "@/lib/superPageCache";
 
 type Order = {
   id: string; orderNumber: number; status: string; totalCents: number; customerName: string | null; createdAt: string;
@@ -14,22 +15,33 @@ type ResponseData = { orders: Order[]; pagination: { page: number; totalPages: n
 const STATUSES = ["NEW", "ACCEPTED", "PREPARING", "READY", "COMPLETED", "CANCELLED"];
 
 export default function SuperOrdersPage() {
-  const [data, setData] = useState<ResponseData | null>(null);
+  const [data, setData] = useState<ResponseData | null>(() => readSuperPageCache<ResponseData>("orders:1:50:all:") );
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Order | null>(null);
   const [error, setError] = useState("");
+  const activeRequest = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
     try {
       const query = new URLSearchParams({ page: String(page), limit: "50", search, status });
-      const response = await fetch(`/api/super/orders?${query}`, { cache: "no-store" });
+      const key = `orders:${page}:50:${status}:${search}`;
+      const cached = readSuperPageCache<ResponseData>(key);
+      if (cached) setData(cached);
+      activeRequest.current?.abort();
+      const controller = new AbortController();
+      activeRequest.current = controller;
+      const response = await fetch(`/api/super/orders?${query}`, { cache: "no-store", signal: controller.signal });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to load platform orders.");
+      writeSuperPageCache(key, body);
       setData(body); setError("");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to load platform orders."); }
+    } catch (cause) { if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(cause instanceof Error ? cause.message : "Unable to load platform orders."); }
   }, [page, search, status]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void load(); }, search ? 250 : 0);
+    return () => { window.clearTimeout(timer); activeRequest.current?.abort(); };
+  }, [load, search]);
 
   const metrics = [
     ["All orders", data?.stats.total], ["Completed", data?.stats.completed],

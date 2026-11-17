@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { CheckCircle2, Database, Mail, RefreshCw, XCircle } from "lucide-react";
+import { readSuperPageCache, writeSuperPageCache } from "@/lib/superPageCache";
 
 type Status = { database: "connected"; emailProvider: "Resend" | "SMTP" | null; checkedAt: string };
 
 export default function SuperSettingsPage() {
-  const [status, setStatus] = useState<Status | null>(null);
+  const [status, setStatus] = useState<Status | null>(() => readSuperPageCache<Status>("system-status"));
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   async function load() {
@@ -15,6 +16,7 @@ export default function SuperSettingsPage() {
       const response = await fetch("/api/super/system-status", { cache: "no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to check system configuration.");
+      writeSuperPageCache("system-status", data);
       setStatus(data);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to check system configuration."); }
     finally { setLoading(false); }

@@ -23,7 +23,13 @@ const NAV = [
 export default function SuperAdminSidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  useEffect(() => setOpen(false), [pathname]);
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  useEffect(() => { setOpen(false); setPendingHref(null); }, [pathname]);
+  useEffect(() => {
+    if (!pendingHref) return;
+    const timeout = window.setTimeout(() => setPendingHref(null), 15_000);
+    return () => window.clearTimeout(timeout);
+  }, [pendingHref]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
     window.addEventListener("keydown", onKeyDown);
@@ -36,7 +42,7 @@ export default function SuperAdminSidebar() {
         <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#D4A94C]/30 bg-[#132A1E] p-1.5"><img src="/icon.svg" alt="InfoRyse" className="h-full w-full object-contain" /></div><div><p className="font-bold text-white">Info<span className="text-[#D4A94C]">Ryse</span></p><p className="text-[10px] uppercase tracking-wider text-[#D4A94C]">Super Admin</p></div></div>
         <button onClick={() => setOpen(false)} aria-label="Close navigation" className="rounded-lg p-2 text-white/70 hover:bg-white/10 lg:hidden"><X className="h-5 w-5"/></button>
       </div>
-      <nav className="flex-1 space-y-1 overflow-y-auto p-3">{NAV.map(({ href, label, icon: Icon }) => { const active = pathname === href || (href !== "/super/dashboard" && pathname.startsWith(href)); return <Link key={href} href={href} className={active ? "super-nav-item-active" : "super-nav-item"}><Icon className="h-4 w-4 shrink-0"/><span>{label}</span></Link>; })}</nav>
+      <nav className="flex-1 space-y-1 overflow-y-auto p-3">{NAV.map(({ href, label, icon: Icon }) => { const active = pathname === href || (href !== "/super/dashboard" && pathname.startsWith(href)); const pending = pendingHref === href; return <Link key={href} href={href} onClick={() => { if (href !== pathname) setPendingHref(href); }} aria-busy={pending || undefined} className={active || pending ? "super-nav-item-active" : "super-nav-item"}><Icon className={`h-4 w-4 shrink-0 ${pending ? "animate-pulse" : ""}`}/><span>{label}</span></Link>; })}</nav>
       <div className="border-t border-white/10 p-3"><LogoutButton/></div>
     </>
   );
@@ -67,9 +73,10 @@ export default function SuperAdminSidebar() {
       <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== "/super/dashboard" && pathname.startsWith(href));
+          const pending = pendingHref === href;
           return (
-            <Link key={href} href={href} className={active ? "super-nav-item-active" : "super-nav-item"}>
-              <Icon className="h-4 w-4 flex-shrink-0" />
+            <Link key={href} href={href} onClick={() => { if (href !== pathname) setPendingHref(href); }} aria-busy={pending || undefined} className={active || pending ? "super-nav-item-active" : "super-nav-item"}>
+              <Icon className={`h-4 w-4 flex-shrink-0 ${pending ? "animate-pulse" : ""}`} />
               <span className="truncate">{label}</span>
             </Link>
           );

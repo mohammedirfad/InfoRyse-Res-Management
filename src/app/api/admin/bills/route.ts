@@ -37,10 +37,25 @@ export async function GET(req: Request) {
     if (paymentMethod && paymentMethod !== "all") {
       whereClause.paymentMethod = paymentMethod.toUpperCase();
     }
+    if (exportAll) {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      if (from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        const rangeStart = new Date(`${from}T00:00:00.000Z`);
+        const rangeEnd = new Date(`${to}T23:59:59.999Z`);
+        const rangeDays = (rangeEnd.getTime() - rangeStart.getTime()) / 86400000;
+        if (!Number.isFinite(rangeDays) || rangeDays < 0 || rangeDays > 366) return Response.json({ error: "Choose a date range of one year or less." }, { status: 400 });
+        whereClause.OR = [
+          { paidAt: { gte: rangeStart, lte: rangeEnd } },
+          { paidAt: null, createdAt: { gte: rangeStart, lte: rangeEnd } },
+        ];
+      }
+      whereClause.paymentStatus = "PAID";
+    }
 
     const totalBills = await db.bill.count({ where: whereClause });
     const totalRevenueAgg = await db.bill.aggregate({
-      where: { restaurantId, paymentStatus: "PAID" },
+      where: exportAll ? { ...whereClause, paymentStatus: "PAID" } : { restaurantId, paymentStatus: "PAID" },
       _sum: { totalCents: true },
     });
     const totalRevenueCents = totalRevenueAgg._sum.totalCents ?? 0;

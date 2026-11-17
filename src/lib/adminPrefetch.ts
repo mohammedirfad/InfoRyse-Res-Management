@@ -2,7 +2,6 @@
 
 import {
   adminCacheKey,
-  prefetchJson,
   peekCache,
   writeCache,
 } from "@/lib/cachedFetch";
@@ -45,17 +44,6 @@ export const ADMIN_ROUTE_ENDPOINTS: Record<string, string[]> = {
   "/admin/profile": ["/api/admin/restaurant", "/api/admin/me"],
   "/admin/settings": ["/api/admin/me"],
 };
-
-const prefetchedRoutes = new Set<string>();
-
-/** Warm the page bundle and its small first-page API payload on link intent. */
-export function prefetchAdminRoute(href: string) {
-  if (prefetchedRoutes.has(href)) return;
-  prefetchedRoutes.add(href);
-  for (const url of ADMIN_ROUTE_ENDPOINTS[href] ?? []) {
-    prefetchJson(adminCacheKey(url), url);
-  }
-}
 
 /** Read the warm snapshot for a route without touching the network. */
 export function readAdminRouteData(href: string): AdminRouteData {

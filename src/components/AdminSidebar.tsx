@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 import LogoutButton from "./LogoutButton";
 import { invalidateCache } from "@/lib/cachedFetch";
-import { prefetchAdminRoute } from "@/lib/adminPrefetch";
 
 const NAV = [
   { href: "/admin/dashboard",  label: "Dashboard",          icon: LayoutDashboard },
@@ -37,9 +36,15 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
   const pathname    = usePathname();
   const router      = useRouter();
   const [open, setOpen] = useState(false);
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
 
   // Close sidebar when route changes on mobile
-  useEffect(() => { setOpen(false); }, [pathname]);
+  useEffect(() => { setOpen(false); setPendingHref(null); }, [pathname]);
+  useEffect(() => {
+    if (!pendingHref) return;
+    const timeout = window.setTimeout(() => setPendingHref(null), 15_000);
+    return () => window.clearTimeout(timeout);
+  }, [pendingHref]);
 
   // Close on Escape key
   useEffect(() => {
@@ -61,12 +66,12 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
     event.preventDefault();
     setOpen(false);
     if (href === pathname) return;
+    setPendingHref(href);
     router.push(href);
   }
 
   function warmRoute(href: string) {
     router.prefetch(href);
-    prefetchAdminRoute(href);
   }
 
   const sidebarContent = (
@@ -115,6 +120,7 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
       <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
         {visibleNav.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== "/admin/dashboard" && pathname.startsWith(href));
+          const pending = pendingHref === href;
           return (
             <Link
               key={href}
@@ -125,10 +131,12 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
               onPointerDown={() => warmRoute(href)}
               onClick={(event) => go(href, event)}
               className={`${
-                active ? "admin-nav-item-active" : "admin-nav-item"
+                active || pending ? "admin-nav-item-active" : "admin-nav-item"
               } active:scale-[0.98] transition-all`}
+              aria-current={active ? "page" : undefined}
+              aria-busy={pending || undefined}
             >
-              <Icon className="h-4 w-4 flex-shrink-0" />
+              <Icon className={`h-4 w-4 flex-shrink-0 ${pending ? "animate-pulse" : ""}`} />
               <span className="truncate text-sm font-medium">{label}</span>
             </Link>
           );

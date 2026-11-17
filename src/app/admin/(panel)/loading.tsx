@@ -1,23 +1,11 @@
-export default function AdminLoading() {
+export default function AdminPanelLoading() {
   return (
-    <div className="flex-1 flex flex-col min-h-screen bg-gray-50/70 p-6 animate-pulse">
-      {/* Top Header Skeleton */}
-      <div className="h-16 bg-gray-200/80 rounded-2xl mb-6 w-full" />
-
-      {/* Grid cards skeleton */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="h-28 bg-gray-200/70 rounded-2xl" />
-        <div className="h-28 bg-gray-200/70 rounded-2xl" />
-        <div className="h-28 bg-gray-200/70 rounded-2xl" />
-        <div className="h-28 bg-gray-200/70 rounded-2xl" />
+    <div role="status" aria-label="Loading admin section" className="space-y-5 p-5 sm:p-7">
+      <div className="h-9 w-56 animate-pulse rounded-xl bg-slate-200" />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => <div key={index} className="h-24 animate-pulse rounded-2xl border border-slate-100 bg-white" />)}
       </div>
-
-      {/* Content panel skeleton */}
-      <div className="flex-1 bg-white rounded-3xl p-6 border border-gray-100 shadow-xs space-y-4">
-        <div className="h-8 bg-gray-200/70 rounded-xl w-1/3" />
-        <div className="h-4 bg-gray-100 rounded-lg w-1/2" />
-        <div className="h-40 bg-gray-100/60 rounded-2xl w-full" />
-      </div>
+      <div className="h-72 animate-pulse rounded-2xl border border-slate-100 bg-white" />
     </div>
   );
 }

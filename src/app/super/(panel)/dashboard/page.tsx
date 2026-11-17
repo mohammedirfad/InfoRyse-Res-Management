@@ -5,26 +5,29 @@ import Link from "next/link";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ArrowRight, Building2, ShoppingBag, Users, Utensils } from "lucide-react";
 import { formatRupees } from "@/lib/utils";
+import { readSuperPageCache, writeSuperPageCache } from "@/lib/superPageCache";
 
 type DashboardData = {
   stats: { restaurants: number; activeRestaurants: number; pausedRestaurants: number; users: number; activeTables: number; orders: number; paidRevenueCents: number };
   daily: { day: string; orders: number; paidCents: number }[];
+  topRestaurants?: Restaurant[];
   generatedAt: string;
 };
 type Restaurant = { id: string; name: string; slug: string; isActive: boolean; _count?: { orders: number; tables: number } };
 
 export default function SuperDashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  const [data, setData] = useState<DashboardData | null>(() => readSuperPageCache<DashboardData>("dashboard"));
+  const [restaurants, setRestaurants] = useState<Restaurant[]>(() => readSuperPageCache<DashboardData>("dashboard")?.topRestaurants ?? []);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let live = true;
-    Promise.all([fetch("/api/super/dashboard", { cache: "no-store" }), fetch("/api/super/restaurants", { cache: "no-store" })])
-      .then(async ([statsResponse, restaurantsResponse]) => {
-        if (!statsResponse.ok || !restaurantsResponse.ok) throw new Error("Could not load platform data. Please sign in again or retry.");
-        const [stats, partnerData] = await Promise.all([statsResponse.json(), restaurantsResponse.json()]);
-        if (live) { setData(stats); setRestaurants(partnerData.restaurants ?? []); }
+    fetch("/api/super/dashboard", { cache: "no-store" })
+      .then(async (statsResponse) => {
+        if (!statsResponse.ok) throw new Error("Could not load platform data. Please sign in again or retry.");
+        const stats = await statsResponse.json();
+        writeSuperPageCache("dashboard", stats);
+        if (live) { setData(stats); setRestaurants(stats.topRestaurants ?? []); }
       })
       .catch((cause) => { if (live) setError(cause instanceof Error ? cause.message : "Could not load platform data."); });
     return () => { live = false; };

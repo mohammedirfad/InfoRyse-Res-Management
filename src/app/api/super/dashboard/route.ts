@@ -3,14 +3,19 @@ import { requireSuperAdmin, tenantErrorResponse } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
+let dashboardCache: { expiresAt: number; payload: unknown } | null = null;
+
 export async function GET() {
   try {
     await requireSuperAdmin();
+    if (dashboardCache && dashboardCache.expiresAt > Date.now()) {
+      return Response.json(dashboardCache.payload, { headers: { "Cache-Control": "private, max-age=15, stale-while-revalidate=30" } });
+    }
     const since = new Date();
     since.setUTCDate(since.getUTCDate() - 29);
     since.setUTCHours(0, 0, 0, 0);
 
-    const [restaurants, activeRestaurants, users, activeTables, orders, bills, orderDays, revenueDays] = await Promise.all([
+    const [restaurants, activeRestaurants, users, activeTables, orders, bills, orderDays, revenueDays, topRestaurants] = await Promise.all([
       db.restaurant.count(),
       db.restaurant.count({ where: { isActive: true } }),
       db.user.count(),
@@ -25,6 +30,11 @@ export async function GET() {
         SELECT date_trunc('day', "paidAt") AS day, COALESCE(SUM("totalCents"), 0)::bigint AS total
         FROM "Bill" WHERE "paymentStatus" = 'PAID' AND "paidAt" >= ${since}
         GROUP BY 1 ORDER BY 1`,
+      db.restaurant.findMany({
+        take: 5,
+        orderBy: { orders: { _count: "desc" } },
+        select: { id: true, name: true, slug: true, isActive: true, _count: { select: { orders: true, tables: { where: { deletedAt: null } } } } },
+      }),
     ]);
 
     const dayKey = (value: Date) => value.toISOString().slice(0, 10);
@@ -37,11 +47,14 @@ export async function GET() {
       return { day, orders: orderMap.get(day) ?? 0, paidCents: revenueMap.get(day) ?? 0 };
     });
 
-    return Response.json({
+    const payload = {
       stats: { restaurants, activeRestaurants, pausedRestaurants: restaurants - activeRestaurants, users, activeTables, orders, paidRevenueCents: bills._sum.totalCents ?? 0 },
       daily,
+      topRestaurants,
       generatedAt: new Date().toISOString(),
-    }, { headers: { "Cache-Control": "private, no-store" } });
+    };
+    dashboardCache = { expiresAt: Date.now() + 30_000, payload };
+    return Response.json(payload, { headers: { "Cache-Control": "private, max-age=15, stale-while-revalidate=30" } });
   } catch (error) {
     return tenantErrorResponse(error);
   }

@@ -40,8 +40,8 @@ export default function AnalyticsPage() {
   useEffect(() => {
     Promise.all([
       cachedJson<{ role?: string }>("admin:/api/admin/me", "/api/admin/me"),
-      cachedJson<{ orders?: Order[] }>("admin:analytics-orders", "/api/admin/orders?view=analytics"),
-      cachedJson<{ bills?: typeof bills }>("admin:analytics-bills", "/api/admin/bills?export=true"),
+      cachedJson<{ orders?: Order[] }>(`admin:analytics-orders:${from}:${to}`, `/api/admin/orders?view=analytics&from=${from}&to=${to}`),
+      cachedJson<{ bills?: typeof bills }>(`admin:analytics-bills:${from}:${to}`, `/api/admin/bills?export=true&from=${from}&to=${to}`),
     ])
       .then(([me, orderData, billData]) => {
         if (me.data.role === "STAFF") {
@@ -53,7 +53,7 @@ export default function AnalyticsPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [from, to]);
 
   const startDate = new Date(`${from}T00:00:00`);
   const endDate = new Date(`${to}T23:59:59.999`);

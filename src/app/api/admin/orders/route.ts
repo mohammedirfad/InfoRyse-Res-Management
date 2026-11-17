@@ -11,15 +11,27 @@ export async function GET(request: Request) {
     const analyticsView = url.searchParams.get("view") === "analytics";
     // Dashboard only needs today's meals; the orders board needs the recent
     // window. Filtering in SQL keeps the payload small and the response fast.
-    const days = dashboardView ? 2 : analyticsView ? 3660 : 30;
-    const createdAfter = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const days = dashboardView ? 2 : 30;
+    const createdAt: { gte: Date; lte?: Date } = { gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) };
+    if (analyticsView) {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      if (from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        createdAt.gte = new Date(`${from}T00:00:00.000Z`);
+        createdAt.lte = new Date(`${to}T23:59:59.999Z`);
+        const rangeDays = (createdAt.lte.getTime() - createdAt.gte.getTime()) / 86400000;
+        if (!Number.isFinite(rangeDays) || rangeDays < 0 || rangeDays > 366) {
+          return Response.json({ error: "Choose a date range of one year or less." }, { status: 400 });
+        }
+      }
+    }
 
     const orders = await db.order.findMany({
       // Legacy assistance tickets were stored as zero-value placeholder orders.
       // Keep them out of the Orders tab; new assistance now uses ServiceRequest.
       where: {
         restaurantId,
-        createdAt: { gte: createdAfter },
+        createdAt,
         NOT: { idempotencyKey: { startsWith: "assist_" } },
       },
       select: dashboardView
@@ -36,28 +48,19 @@ export async function GET(request: Request) {
           }
         : {
             id: true,
-            orderNumber: true,
             status: true,
             totalCents: true,
+            orderType: true,
             customerName: true,
             customerPhone: true,
-            customerEmail: true,
-            notes: true,
-            orderType: true,
-            paymentMethod: true,
             createdAt: true,
             items: {
               select: {
-                id: true,
                 nameSnapshot: true,
-                priceCentsSnapshot: true,
                 quantity: true,
-                servedQuantity: true,
-                cancelledQuantity: true,
-                menuItemId: true,
+                priceCentsSnapshot: true,
               },
             },
-            table: { select: { label: true } },
           },
       orderBy: { createdAt: "desc" },
       take: analyticsView ? 10000 : 200,

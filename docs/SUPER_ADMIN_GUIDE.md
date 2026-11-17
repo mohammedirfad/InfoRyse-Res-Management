@@ -161,10 +161,10 @@ To guarantee emails land in the **Primary Inbox**:
    - Put `SMTP_PASS="xxxx xxxx xxxx xxxx"` in your `.env` file.
    - The platform automatically attaches anti-spam headers (`X-Priority: 1`, `Auto-Submitted: auto-generated`) and multi-part plain text alternatives to ensure high deliverability scores.
 
-### 2. Database Session Pooler (Supabase PostgreSQL)
+### 2. Database Connection Pooler (Supabase PostgreSQL)
 - InfoRyse uses Supabase managed PostgreSQL.
-- **DATABASE_URL**: Uses port `5432` with session pooler mode (`aws-0-ap-southeast-1.pooler.supabase.com:5432`).
-- This allows full support for Prisma prepared statements, transactions (`db.$transaction`), and high-concurrency table ordering without connection exhaustion.
+- **Vercel `DATABASE_URL`**: Use Supavisor Transaction pooler mode on port `6543`, with `pgbouncer=true` and a small Prisma `connection_limit` for serverless functions.
+- **`DIRECT_URL` / local migration connection**: Use the direct connection or Session pooler on port `5432` where supported. Do not point Vercel serverless runtime at the Session pooler by default.
 
 ### 3. Image Storage (Supabase Storage)
 - Menu dish photos, restaurant logos, and promotional banners are stored securely with automated size optimization.
