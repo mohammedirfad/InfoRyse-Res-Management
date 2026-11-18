@@ -60,7 +60,7 @@ export default async function DigitalBillPage({ params }: { params: { token: str
 
           <p className="text-center text-[11px] text-stone-400">Thank you for dining with us.</p>
         </section>
-        <footer className="border-t border-stone-100 bg-stone-50 p-4 text-center print:hidden"><BillPrintButton pdfUrl={`/bill/${encodeURIComponent(params.token)}/pdf`} /></footer>
+        <footer className="border-t border-stone-100 bg-stone-50 p-4 text-center print:hidden"><BillPrintButton pdfUrl={`/bill/${encodeURIComponent(params.token)}/pdf`} fileName={`bill-${bill.billNumber}.pdf`} /></footer>
       </article>
     </main>
   );

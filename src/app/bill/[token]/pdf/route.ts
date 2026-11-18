@@ -1,11 +1,12 @@
 import { db } from "@/lib/db";
 import { createBillPdf } from "@/lib/billPdf";
 import { getPublicAppUrl } from "@/lib/appUrl";
+import { randomUUID } from "node:crypto";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function billPdfError(message: string, status: number) {
+function billPdfError(message: string, status: number, details?: { id: string; stage: string }) {
   return new Response(message, {
     status,
     headers: {
@@ -13,6 +14,7 @@ function billPdfError(message: string, status: number) {
       "Content-Disposition": "inline",
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
+      ...(details ? { "X-Bill-Pdf-Error-Id": details.id, "X-Bill-Pdf-Stage": details.stage } : {}),
     },
   });
 }
@@ -38,7 +40,8 @@ export async function GET(_req: Request, { params }: { params: { token: string }
       },
     });
   } catch (error) {
-    console.error(`[bill:pdf] Failed during ${stage}`, error);
-    return billPdfError("Unable to generate this bill PDF. Please retry or use Print / Save as PDF.", 500);
+    const errorId = randomUUID();
+    console.error(`[bill:pdf:${errorId}] Failed during ${stage}`, error);
+    return billPdfError("Unable to generate this bill PDF. Please retry or use Print / Save as PDF.", 500, { id: errorId, stage });
   }
 }
