@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
+import { SpeedInsights } from '@vercel/speed-insights/next';
 
 // vie wport settings are required for proper scaling on mobile devices, especially for the QR ordering interface.
 export const viewport: Viewport = {
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="min-h-screen bg-white text-gray-900 antialiased">
         {children}
+        <SpeedInsights />
       </body>
     </html>
   );
