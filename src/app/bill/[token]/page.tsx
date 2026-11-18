@@ -4,6 +4,7 @@ import QRCode from "qrcode";
 import BillPrintButton from "./print-button";
 import { capitalizeInitials } from "@/lib/nameFormat";
 import { getPublicAppUrl } from "@/lib/appUrl";
+import type { BillPdfData, BillQrMatrix } from "@/lib/clientBillPdf";
 
 export const dynamic = "force-dynamic";
 
@@ -17,18 +18,53 @@ export default async function DigitalBillPage({ params }: { params: { token: str
   if (!bill) notFound();
 
   const billUrl = `${getPublicAppUrl()}/bill/${encodeURIComponent(params.token)}`;
+  const qr = QRCode.create(billUrl, { errorCorrectionLevel: "M" });
+  const billQr: BillQrMatrix = { size: qr.modules.size, data: Array.from(qr.modules.data) };
   const billQrSvg = await QRCode.toString(billUrl, {
     type: "svg",
     width: 120,
     margin: 1,
     errorCorrectionLevel: "M",
   });
+  const upiPaymentId = bill.restaurant.upiPaymentId?.trim() ?? "";
+  let upiQr: BillQrMatrix | null = null;
+  if (upiPaymentId && bill.paymentStatus !== "PAID") {
+    const upiUri = `upi://pay?pa=${encodeURIComponent(upiPaymentId)}&pn=${encodeURIComponent(bill.restaurant.name.slice(0, 40))}&am=${(bill.totalCents / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Bill ${bill.billNumber}`)}`;
+    const upi = QRCode.create(upiUri, { errorCorrectionLevel: "M" });
+    upiQr = { size: upi.modules.size, data: Array.from(upi.modules.data) };
+  }
 
   let items: { name: string; quantity: number; unitPrice: number; subtotal: number }[] = [];
   try { items = JSON.parse(bill.itemsJson); } catch { notFound(); }
   const taxLines = Array.isArray(bill.taxBreakdown)
     ? bill.taxBreakdown as { name: string; percent: number; amountCents: number }[]
     : [{ name: bill.taxName, percent: bill.taxPercent, amountCents: bill.taxCents }];
+  const pdfBill: BillPdfData = {
+    billNumber: bill.billNumber,
+    tableLabel: bill.tableLabel,
+    customerName: bill.customerName,
+    subtotalCents: bill.subtotalCents,
+    discountCents: bill.discountCents,
+    discountPercent: bill.discountPercent,
+    discountName: bill.discountName,
+    taxCents: bill.taxCents,
+    taxPercent: bill.taxPercent,
+    taxName: bill.taxName,
+    taxBreakdown: bill.taxBreakdown,
+    packingCents: bill.packingCents,
+    totalCents: bill.totalCents,
+    paymentMethod: bill.paymentMethod,
+    paymentStatus: bill.paymentStatus,
+    createdAt: bill.createdAt.toISOString(),
+    paidAt: bill.paidAt?.toISOString() ?? null,
+    itemsJson: bill.itemsJson,
+    restaurant: {
+      name: bill.restaurant.name,
+      contactPhone: bill.restaurant.contactPhone,
+      location: bill.restaurant.location,
+      upiPaymentId: bill.restaurant.upiPaymentId,
+    },
+  };
 
   return (
     <main className="min-h-screen bg-stone-100 px-3 py-6 sm:px-6 print:min-h-0 print:bg-white print:px-0 print:py-0">
@@ -74,7 +110,7 @@ export default async function DigitalBillPage({ params }: { params: { token: str
             <p className="text-center text-[10px] text-stone-500">Scan to open this digital bill</p>
           </div>
         </section>
-        <footer className="border-t border-stone-100 bg-stone-50 p-4 text-center print:hidden"><BillPrintButton fileName={`bill-${bill.billNumber}.pdf`} /></footer>
+        <footer className="border-t border-stone-100 bg-stone-50 p-4 text-center print:hidden"><BillPrintButton bill={pdfBill} billQr={billQr} upiQr={upiQr} fileName={`bill-${bill.billNumber}.pdf`} /></footer>
       </article>
     </main>
   );
