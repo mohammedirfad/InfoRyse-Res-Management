@@ -27,7 +27,16 @@ export type PdfBill = {
   restaurant: { name: string; contactPhone: string | null; location: string | null; upiPaymentId?: string | null };
 };
 
-const safe = (value: unknown) => String(value ?? "").replace(/[\u0000-\u001f]/g, " ").trim();
+// PDFKit's built-in Helvetica fonts only support WinAnsi. Restaurant names and
+// menu entries can contain emoji or scripts that make PDFKit throw. Keep the
+// printable Latin text and replace unsupported characters so one such name
+// cannot break bill downloads.
+const safe = (value: unknown) => String(value ?? "")
+  .normalize("NFKD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+  .replace(/[^\u0020-\u00ff]/g, "?")
+  .trim();
 const money = (cents: number) => `INR ${(cents / 100).toFixed(2)}`;
 
 export async function createBillPdf(bill: PdfBill, billUrl?: string) {
@@ -103,7 +112,10 @@ export async function createBillPdf(bill: PdfBill, billUrl?: string) {
   };
 
   let items: { name: string; quantity: number; unitPrice: number; subtotal: number }[] = [];
-  try { items = JSON.parse(bill.itemsJson); } catch { items = []; }
+  try {
+    const parsed: unknown = JSON.parse(bill.itemsJson);
+    if (Array.isArray(parsed)) items = parsed.filter((item): item is typeof items[number] => Boolean(item && typeof item === "object"));
+  } catch { items = []; }
   drawItemHeader();
   for (const item of items) {
     const name = safe(item.name) || "Item";
@@ -158,7 +170,7 @@ export async function createBillPdf(bill: PdfBill, billUrl?: string) {
     const qr = await QRCode.toBuffer(billUrl, { type: "png", width: 180, margin: 1, errorCorrectionLevel: "M" });
     if (doc.y + 145 > pageBottom()) doc.addPage();
     const qrY = doc.y + 10;
-    doc.image(qr, (595 - 100) / 2, qrY, { width: 100, height: 100 });
+    doc.image(Buffer.from(qr), (595 - 100) / 2, qrY, { width: 100, height: 100 });
     setCursor(qrY + 104);
     doc.font("Helvetica").fontSize(9).fillColor("#64748b")
       .text("Scan to open your digital bill", left, doc.y, { width: right - left, align: "center" });
@@ -167,17 +179,21 @@ export async function createBillPdf(bill: PdfBill, billUrl?: string) {
 
   if (bill.restaurant.upiPaymentId && bill.paymentStatus !== "PAID") {
     const upiUri = `upi://pay?pa=${encodeURIComponent(bill.restaurant.upiPaymentId)}&pn=${encodeURIComponent(bill.restaurant.name.slice(0, 40))}&am=${(bill.totalCents / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Bill ${bill.billNumber}`)}`;
-    const qr = await QRCode.toBuffer(upiUri, { type: "png", width: 180, margin: 1, errorCorrectionLevel: "M" });
-    if (doc.y + 130 > pageBottom()) doc.addPage();
-    const qrY = doc.y + 6;
-    doc.image(qr, (595 - 92) / 2, qrY, { width: 92, height: 92 });
-    setCursor(qrY + 96);
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#132a1e")
-      .text("Scan to pay this bill by UPI", left, doc.y, { width: right - left, align: "center" });
-    setCursor(doc.y + 12);
-    doc.font("Helvetica").fontSize(8).fillColor("#64748b")
-      .text("Payment is confirmed by restaurant staff.", left, doc.y, { width: right - left, align: "center" });
-    setCursor(doc.y + 14);
+    try {
+      const qr = await QRCode.toBuffer(upiUri, { type: "png", width: 180, margin: 1, errorCorrectionLevel: "M" });
+      if (doc.y + 130 > pageBottom()) doc.addPage();
+      const qrY = doc.y + 6;
+      doc.image(Buffer.from(qr), (595 - 92) / 2, qrY, { width: 92, height: 92 });
+      setCursor(qrY + 96);
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#132a1e")
+        .text("Scan to pay this bill by UPI", left, doc.y, { width: right - left, align: "center" });
+      setCursor(doc.y + 12);
+      doc.font("Helvetica").fontSize(8).fillColor("#64748b")
+        .text("Payment is confirmed by restaurant staff.", left, doc.y, { width: right - left, align: "center" });
+      setCursor(doc.y + 14);
+    } catch (error) {
+      console.error("[bill:pdf] UPI QR generation failed", error);
+    }
   }
 
   if (doc.y + 24 > pageBottom()) doc.addPage();
