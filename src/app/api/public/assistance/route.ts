@@ -59,16 +59,7 @@ export async function POST(req: Request) {
       // A bill request is a request to *see* the tab — it does not require the
       // kitchen to have marked items served. The cashier reviews the tab and
       // decides what gets billed. This keeps the guest action one tap.
-      if (requests.includes("pay_bill") && session) {
-        const existingBill = await tx.bill.findFirst({
-          where: { restaurantId: restaurant.id, tableSessionId: session.id },
-          orderBy: { createdAt: "desc" },
-          select: { shareToken: true, paymentStatus: true },
-        });
-        if (existingBill?.shareToken) {
-          return { error: "Your bill is already ready — open it from the table tab.", tableSessionId: session.id } as const;
-        }
-      }
+      // A pending draft does not satisfy a guest bill request; staff still need to receive it.
 
       if (session && requests.length === 1 && requests[0] === "pay_bill") {
         const existing = await tx.serviceRequest.findFirst({

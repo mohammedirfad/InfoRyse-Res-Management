@@ -276,6 +276,7 @@ export async function POST(req: Request) {
         tableId: createdBill.tableId,
         tableSessionId: createdBill.tableSessionId,
         shareToken: createdBill.shareToken,
+        paymentStatus: createdBill.paymentStatus,
       },
     });
     if (result.resolvedBillRequest) {

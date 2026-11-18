@@ -232,6 +232,7 @@ export async function POST(
         return {
           bill,
           tableId: table.id,
+          guestRequested: Boolean(session.billRequestedAt) || resolved.length > 0,
           resolved: resolved.map((request) => ({
             ...request,
             status: "COMPLETED" as const,
@@ -255,8 +256,9 @@ export async function POST(
         billNumber: result.bill.billNumber,
         tableId: result.tableId,
         tableSessionId: result.bill.tableSessionId,
-        shareToken: result.bill.shareToken,
+        shareToken: result.guestRequested ? result.bill.shareToken : null,
         totalCents: result.bill.totalCents,
+        paymentStatus: result.bill.paymentStatus,
       },
     });
     for (const request of result.resolved) {

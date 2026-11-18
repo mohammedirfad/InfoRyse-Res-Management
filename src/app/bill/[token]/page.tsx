@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
+import QRCode from "qrcode";
 import BillPrintButton from "./print-button";
 import { capitalizeInitials } from "@/lib/nameFormat";
+import { getPublicAppUrl } from "@/lib/appUrl";
 
 export const dynamic = "force-dynamic";
 
@@ -14,43 +16,23 @@ export default async function DigitalBillPage({ params }: { params: { token: str
   });
   if (!bill) notFound();
 
+  const billUrl = `${getPublicAppUrl()}/bill/${encodeURIComponent(params.token)}`;
+  const billQrSvg = await QRCode.toString(billUrl, {
+    type: "svg",
+    width: 120,
+    margin: 1,
+    errorCorrectionLevel: "M",
+  });
+
   let items: { name: string; quantity: number; unitPrice: number; subtotal: number }[] = [];
   try { items = JSON.parse(bill.itemsJson); } catch { notFound(); }
   const taxLines = Array.isArray(bill.taxBreakdown)
     ? bill.taxBreakdown as { name: string; percent: number; amountCents: number }[]
     : [{ name: bill.taxName, percent: bill.taxPercent, amountCents: bill.taxCents }];
-  const pdfBill = {
-    billNumber: bill.billNumber,
-    tableLabel: bill.tableLabel,
-    customerName: bill.customerName,
-    customerPhone: bill.customerPhone,
-    subtotalCents: bill.subtotalCents,
-    discountCents: bill.discountCents,
-    discountPercent: bill.discountPercent,
-    discountName: bill.discountName,
-    taxCents: bill.taxCents,
-    taxPercent: bill.taxPercent,
-    taxName: bill.taxName,
-    taxBreakdown: bill.taxBreakdown,
-    packingCents: bill.packingCents,
-    totalCents: bill.totalCents,
-    paymentMethod: bill.paymentMethod,
-    paymentStatus: bill.paymentStatus,
-    createdAt: bill.createdAt.toISOString(),
-    paidAt: bill.paidAt?.toISOString() ?? null,
-    itemsJson: bill.itemsJson,
-    shareToken: bill.shareToken,
-    restaurant: {
-      name: bill.restaurant.name,
-      contactPhone: bill.restaurant.contactPhone,
-      location: bill.restaurant.location,
-      upiPaymentId: bill.restaurant.upiPaymentId,
-    },
-  };
 
   return (
-    <main className="min-h-screen bg-stone-100 px-3 py-6 sm:px-6">
-      <article className="mx-auto max-w-xl overflow-hidden rounded-3xl bg-white shadow-xl print:max-w-none print:rounded-none print:shadow-none">
+    <main className="min-h-screen bg-stone-100 px-3 py-6 sm:px-6 print:min-h-0 print:bg-white print:px-0 print:py-0">
+      <article className="mx-auto max-w-xl overflow-hidden rounded-3xl bg-white shadow-xl print:w-full print:max-w-none print:rounded-none print:shadow-none">
         <header className="bg-[#132A1E] px-6 py-7 text-center text-white print:bg-white print:text-black">
           {bill.restaurant.logoUrl && <img src={bill.restaurant.logoUrl} alt="" className="mx-auto mb-3 h-14 w-14 rounded-xl object-cover" />}
           <h1 className="text-2xl font-black">{capitalizeInitials(bill.restaurant.name)}</h1>
@@ -87,8 +69,12 @@ export default async function DigitalBillPage({ params }: { params: { token: str
           </div>
 
           <p className="text-center text-[11px] text-stone-400">Thank you for dining with us.</p>
+          <div className="hidden print:flex print:flex-col print:items-center print:gap-2 print:border-t print:border-stone-200 print:pt-4">
+            <div aria-label="QR code linking to this digital bill" dangerouslySetInnerHTML={{ __html: billQrSvg }} />
+            <p className="text-center text-[10px] text-stone-500">Scan to open this digital bill</p>
+          </div>
         </section>
-        <footer className="border-t border-stone-100 bg-stone-50 p-4 text-center print:hidden"><BillPrintButton pdfUrl={`/bill/${encodeURIComponent(params.token)}/pdf`} bill={pdfBill} fileName={`bill-${bill.billNumber}.pdf`} /></footer>
+        <footer className="border-t border-stone-100 bg-stone-50 p-4 text-center print:hidden"><BillPrintButton fileName={`bill-${bill.billNumber}.pdf`} /></footer>
       </article>
     </main>
   );

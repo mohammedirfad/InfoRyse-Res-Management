@@ -105,18 +105,19 @@ export async function GET(req: Request) {
       }),
     ]);
 
+    const requestedAt =
+      session.billRequestedAt?.toISOString() ?? request?.createdAt.toISOString() ?? null;
+    const canShareBill = Boolean(requestedAt) || bill?.paymentStatus === "PAID";
+
     return Response.json(
       {
         tableId: table.id,
         tableLabel: table.label,
         tableSessionId: session.id,
-        requestedAt:
-          session.billRequestedAt?.toISOString() ??
-          request?.createdAt.toISOString() ??
-          null,
-        billToken: bill?.shareToken ?? null,
-        billNumber: bill?.billNumber ?? null,
-        paymentStatus: bill?.paymentStatus ?? null,
+        requestedAt,
+        billToken: canShareBill ? bill?.shareToken ?? null : null,
+        billNumber: canShareBill ? bill?.billNumber ?? null : null,
+        paymentStatus: canShareBill ? bill?.paymentStatus ?? null : null,
       },
       { headers: { "Cache-Control": "private, no-store" } },
     );

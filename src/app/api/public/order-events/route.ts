@@ -42,7 +42,7 @@ export async function GET(req: Request) {
           order.tableSessionId ? db.bill.findFirst({
             where: { restaurantId: table.restaurantId, tableId: table.id, tableSessionId: order.tableSessionId, shareToken: { not: null } },
             orderBy: { createdAt: "desc" },
-            select: { shareToken: true },
+            select: { shareToken: true, paymentStatus: true },
           }) : Promise.resolve(null),
           order.tableSessionId ? db.orderItem.findFirst({
             where: {
@@ -52,17 +52,17 @@ export async function GET(req: Request) {
             select: { id: true },
           }) : Promise.resolve(null),
           order.tableSessionId ? db.tableSession.findFirst({
-            where: { id: order.tableSessionId, tableId: table.id, restaurantId: table.restaurantId, status: "OPEN" },
-            select: { id: true },
+            where: { id: order.tableSessionId, tableId: table.id, restaurantId: table.restaurantId },
+            select: { id: true, status: true, billRequestedAt: true },
           }) : Promise.resolve(null),
         ]);
         snapshot = {
           orderNumber: order.orderNumber,
           status: order.status,
           tableSessionId: order.tableSessionId,
-          billShareToken: bill?.shareToken ?? null,
+          billShareToken: openSession?.billRequestedAt || bill?.paymentStatus === "PAID" ? bill?.shareToken ?? null : null,
           hasBillableItems: Boolean(billableItem),
-          tableSessionOpen: Boolean(openSession),
+          tableSessionOpen: openSession?.status === "OPEN",
         };
       }
       if (orderNumber && table && !snapshot) return Response.json({ error: "Order not found at this table" }, { status: 404 });

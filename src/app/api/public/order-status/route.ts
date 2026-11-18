@@ -21,7 +21,7 @@ export async function GET(req: Request) {
         restaurant: { slug, isActive: true },
         table: { qrToken, deletedAt: null },
       },
-      select: { status: true, createdAt: true, restaurantId: true, tableId: true, tableSessionId: true, tableSession: { select: { status: true } } },
+      select: { status: true, createdAt: true, restaurantId: true, tableId: true, tableSessionId: true, tableSession: { select: { status: true, billRequestedAt: true } } },
     });
     if (!order) return Response.json({ error: "Order not found" }, { status: 404 });
 
@@ -34,7 +34,7 @@ export async function GET(req: Request) {
           shareToken: { not: null },
         },
         orderBy: { createdAt: "desc" },
-        select: { shareToken: true },
+        select: { shareToken: true, paymentStatus: true },
       }),
       db.orderItem.findFirst({
         where: {
@@ -50,7 +50,7 @@ export async function GET(req: Request) {
       updatedAt: order.createdAt,
       tableSessionId: order.tableSessionId,
       tableSessionOpen: order.tableSession?.status === "OPEN",
-      billShareToken: bill?.shareToken ?? null,
+      billShareToken: order.tableSession?.billRequestedAt || bill?.paymentStatus === "PAID" ? bill?.shareToken ?? null : null,
       hasBillableItems: Boolean(billableItem),
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
