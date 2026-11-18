@@ -39,6 +39,24 @@ const safe = (value: unknown) => String(value ?? "")
   .trim();
 const money = (cents: number) => `INR ${(cents / 100).toFixed(2)}`;
 
+function drawQr(doc: PDFKit.PDFDocument, value: string, x: number, y: number, size: number) {
+  const { modules } = QRCode.create(value, { errorCorrectionLevel: "M" });
+  const quietZone = 4;
+  const cell = size / (modules.size + quietZone * 2);
+  doc.save();
+  doc.rect(x, y, size, size).fillColor("#ffffff").fill();
+  doc.fillColor("#000000");
+  for (let row = 0; row < modules.size; row++) {
+    for (let column = 0; column < modules.size; column++) {
+      if (modules.data[row * modules.size + column]) {
+        doc.rect(x + (column + quietZone) * cell, y + (row + quietZone) * cell, cell + 0.15, cell + 0.15);
+      }
+    }
+  }
+  doc.fill();
+  doc.restore();
+}
+
 export async function createBillPdf(bill: PdfBill, billUrl?: string) {
   const doc = new PDFDocument({
     size: "A4",
@@ -167,10 +185,9 @@ export async function createBillPdf(bill: PdfBill, billUrl?: string) {
   setCursor(grandY + 25);
 
   if (billUrl) {
-    const qr = await QRCode.toBuffer(billUrl, { type: "png", width: 180, margin: 1, errorCorrectionLevel: "M" });
     if (doc.y + 145 > pageBottom()) doc.addPage();
     const qrY = doc.y + 10;
-    doc.image(Buffer.from(qr), (595 - 100) / 2, qrY, { width: 100, height: 100 });
+    drawQr(doc, billUrl, (595 - 100) / 2, qrY, 100);
     setCursor(qrY + 104);
     doc.font("Helvetica").fontSize(9).fillColor("#64748b")
       .text("Scan to open your digital bill", left, doc.y, { width: right - left, align: "center" });
@@ -180,10 +197,9 @@ export async function createBillPdf(bill: PdfBill, billUrl?: string) {
   if (bill.restaurant.upiPaymentId && bill.paymentStatus !== "PAID") {
     const upiUri = `upi://pay?pa=${encodeURIComponent(bill.restaurant.upiPaymentId)}&pn=${encodeURIComponent(bill.restaurant.name.slice(0, 40))}&am=${(bill.totalCents / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Bill ${bill.billNumber}`)}`;
     try {
-      const qr = await QRCode.toBuffer(upiUri, { type: "png", width: 180, margin: 1, errorCorrectionLevel: "M" });
       if (doc.y + 130 > pageBottom()) doc.addPage();
       const qrY = doc.y + 6;
-      doc.image(Buffer.from(qr), (595 - 92) / 2, qrY, { width: 92, height: 92 });
+      drawQr(doc, upiUri, (595 - 92) / 2, qrY, 92);
       setCursor(qrY + 96);
       doc.font("Helvetica-Bold").fontSize(9).fillColor("#132a1e")
         .text("Scan to pay this bill by UPI", left, doc.y, { width: right - left, align: "center" });
