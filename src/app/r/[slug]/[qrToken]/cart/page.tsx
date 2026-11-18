@@ -143,9 +143,22 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
           }
           if (data.bill?.shareToken) {
             const savedBill = { token: data.bill.shareToken, sessionId: data.bill.tableSessionId || data.session.id };
-            rememberBillLink(params.qrToken, savedBill);
-            setLastDigitalBill(savedBill);
-            setBillRequestState("ready");
+            const canShowBill = Boolean(data.session.billRequestedAt) || data.bill.paymentStatus === "PAID";
+            if (canShowBill) {
+              rememberBillLink(params.qrToken, savedBill);
+              setLastDigitalBill(savedBill);
+              setBillRequestState("ready");
+            } else {
+              forgetBillLink(params.qrToken);
+              setLastDigitalBill(null);
+              setBillRequestState("idle");
+            }
+          } else if (!data.session.billRequestedAt) {
+            const savedBill = recallBillLink(params.qrToken);
+            if (savedBill?.sessionId === data.session.id) {
+              forgetBillLink(params.qrToken);
+              setLastDigitalBill(null);
+            }
           }
         }
 
@@ -205,7 +218,9 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
         const event = JSON.parse(rawEvent.data);
         const shareToken = event?.data?.shareToken;
         const sessionId = event?.data?.tableSessionId ?? event?.data?.sessionId;
-        if (event?.type === "bill_updated" && shareToken && sessionId) {
+        const billWasRequested = billRequestState === "sending" || billRequestState === "waiting" || billRequestState === "ready" || Boolean(sessionData?.session?.billRequestedAt);
+        const billIsAlreadyPaid = event?.data?.paymentStatus === "PAID";
+        if (event?.type === "bill_updated" && shareToken && sessionId && (billWasRequested || billIsAlreadyPaid)) {
           const billLink = { token: shareToken as string, sessionId: sessionId as string };
           rememberBillLink(params.qrToken, billLink);
           saveGuestTableSession(params.qrToken, sessionId as string);
@@ -241,7 +256,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       if (fallbackTimer) clearInterval(fallbackTimer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [tab, params.slug, params.qrToken, refreshTableOrders]);
+  }, [tab, params.slug, params.qrToken, refreshTableOrders, billRequestState, sessionData?.session?.billRequestedAt]);
 
   const subtotal   = totalCents;
   const grandTotal = subtotal;
@@ -290,7 +305,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       const snapshot = await fetchBillSnapshot(params.slug, params.qrToken);
       if (!snapshot || stopped) return;
       if (snapshot.tableSessionId) saveGuestTableSession(params.qrToken, snapshot.tableSessionId);
-      if (snapshot.billToken && snapshot.tableSessionId) {
+      if (snapshot.billToken && snapshot.tableSessionId && (snapshot.requestedAt || snapshot.paymentStatus === "PAID")) {
         const link = { token: snapshot.billToken, sessionId: snapshot.tableSessionId };
         rememberBillLink(params.qrToken, link);
         setLastDigitalBill(link);
@@ -310,7 +325,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       const snapshot = await fetchBillSnapshot(params.slug, params.qrToken);
       if (!snapshot || stopped) return;
       if (snapshot.tableSessionId) saveGuestTableSession(params.qrToken, snapshot.tableSessionId);
-      if (snapshot.billToken && snapshot.tableSessionId) {
+      if (snapshot.billToken && snapshot.tableSessionId && (snapshot.requestedAt || snapshot.paymentStatus === "PAID")) {
         const link = { token: snapshot.billToken, sessionId: snapshot.tableSessionId };
         rememberBillLink(params.qrToken, link);
         setLastDigitalBill(link);

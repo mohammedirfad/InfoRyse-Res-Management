@@ -44,7 +44,11 @@ export default function BillPrintButton({ pdfUrl, bill, fileName }: { pdfUrl: st
       });
       const contentType = response.headers.get("content-type") || "";
       if (!response.ok || !contentType.toLowerCase().includes("application/pdf")) {
-        setError("PDF download is temporarily unavailable. Use Print / Save as PDF below.");
+        const stage = response.headers.get("x-bill-pdf-stage");
+        const reference = response.headers.get("x-bill-pdf-error-id");
+        setError(stage
+          ? `PDF failed during ${stage}${reference ? ` (${reference})` : ""}. Use Print / Save as PDF below.`
+          : "PDF download is temporarily unavailable. Use Print / Save as PDF below.");
         return;
       }
 

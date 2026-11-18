@@ -880,7 +880,7 @@ export default function BillPage() {
                       </p>
                           {session?.billRequestedAt && (
                             <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-300 px-3 py-1 text-xs font-black text-amber-950">
-                              <Receipt className="h-3.5 w-3.5" /> Guest requested the bill
+                              <Receipt className="h-3.5 w-3.5" /> {digitalBillUrl ? "Bill generated · awaiting payment" : "Guest requested the bill"}
                             </span>
                           )}
                     </div>

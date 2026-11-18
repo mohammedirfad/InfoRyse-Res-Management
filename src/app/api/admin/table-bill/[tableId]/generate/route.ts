@@ -203,11 +203,6 @@ export async function POST(
           });
         }
 
-        await tx.tableSession.updateMany({
-          where: { id: session.id, restaurantId },
-          data: { billRequestedAt: null },
-        });
-
         // Close the guest's pending bill request in the admin inbox.
         const resolved = await tx.serviceRequest.findMany({
           where: {

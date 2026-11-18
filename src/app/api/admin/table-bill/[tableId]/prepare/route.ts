@@ -101,7 +101,6 @@ export async function POST(req: Request, { params }: { params: { tableId: string
           ...billData,
         } });
       }
-      await tx.tableSession.update({ where: { id: session.id }, data: { billRequestedAt: null } });
       const resolved = await tx.serviceRequest.updateMany({
         where: { restaurantId, tableSessionId: session.id, requests: { has: "pay_bill" }, status: { in: ["PENDING", "IN_PROGRESS"] } },
         data: { status: "COMPLETED" },

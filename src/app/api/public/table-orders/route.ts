@@ -216,7 +216,9 @@ export async function GET(req: Request) {
           packingCents,
           totalCents,
         },
-        bill: activeBill,
+        // Keep an unpaid draft private until the guest asks for the bill.
+        // Settled bills remain available, including when staff settled first.
+        bill: activeBill && (session.billRequestedAt || activeBill.paymentStatus === "PAID") ? activeBill : null,
       }),
       {
         headers: {
