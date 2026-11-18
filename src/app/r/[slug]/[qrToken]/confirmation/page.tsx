@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { UtensilsCrossed, RefreshCw, X, AlertTriangle, ReceiptText, Download, Gamepad2 } from "lucide-react";
+import { UtensilsCrossed, RefreshCw, X, AlertTriangle, ReceiptText, Gamepad2 } from "lucide-react";
 import { getStoredOrders, saveStoredOrders } from "@/components/CartContext";
 import { requestTableBill } from "@/lib/guestBill";
 
@@ -461,9 +461,6 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
               <Link href={`/bill/${encodeURIComponent(billShareToken)}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#132A1E] px-3 py-2 text-sm font-semibold text-white">
                 <ReceiptText className="h-4 w-4" /> View / Download bill
               </Link>
-              <a href={`/bill/${encodeURIComponent(billShareToken)}/pdf`} download className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#132A1E]/20 px-3 py-2 text-sm font-semibold text-[#132A1E]">
-                <Download className="h-4 w-4" /> Download PDF
-              </a>
             </div>
           ) : hasBillableItems && tableSessionOpen && status !== "CANCELLED" ? (
             <button type="button" onClick={requestBill} disabled={!tableSessionId || billRequestState === "sending" || billRequestState === "sent" || status === "CANCELLED"}

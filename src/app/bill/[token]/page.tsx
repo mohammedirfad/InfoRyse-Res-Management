@@ -10,7 +10,7 @@ const money = (value: number) => `₹${(value / 100).toLocaleString("en-IN", { m
 export default async function DigitalBillPage({ params }: { params: { token: string } }) {
   const bill = await db.bill.findUnique({
     where: { shareToken: params.token },
-    include: { restaurant: { select: { name: true, contactPhone: true, logoUrl: true } } },
+    include: { restaurant: { select: { name: true, contactPhone: true, location: true, logoUrl: true, upiPaymentId: true } } },
   });
   if (!bill) notFound();
 
@@ -19,6 +19,34 @@ export default async function DigitalBillPage({ params }: { params: { token: str
   const taxLines = Array.isArray(bill.taxBreakdown)
     ? bill.taxBreakdown as { name: string; percent: number; amountCents: number }[]
     : [{ name: bill.taxName, percent: bill.taxPercent, amountCents: bill.taxCents }];
+  const pdfBill = {
+    billNumber: bill.billNumber,
+    tableLabel: bill.tableLabel,
+    customerName: bill.customerName,
+    customerPhone: bill.customerPhone,
+    subtotalCents: bill.subtotalCents,
+    discountCents: bill.discountCents,
+    discountPercent: bill.discountPercent,
+    discountName: bill.discountName,
+    taxCents: bill.taxCents,
+    taxPercent: bill.taxPercent,
+    taxName: bill.taxName,
+    taxBreakdown: bill.taxBreakdown,
+    packingCents: bill.packingCents,
+    totalCents: bill.totalCents,
+    paymentMethod: bill.paymentMethod,
+    paymentStatus: bill.paymentStatus,
+    createdAt: bill.createdAt.toISOString(),
+    paidAt: bill.paidAt?.toISOString() ?? null,
+    itemsJson: bill.itemsJson,
+    shareToken: bill.shareToken,
+    restaurant: {
+      name: bill.restaurant.name,
+      contactPhone: bill.restaurant.contactPhone,
+      location: bill.restaurant.location,
+      upiPaymentId: bill.restaurant.upiPaymentId,
+    },
+  };
 
   return (
     <main className="min-h-screen bg-stone-100 px-3 py-6 sm:px-6">
@@ -60,7 +88,7 @@ export default async function DigitalBillPage({ params }: { params: { token: str
 
           <p className="text-center text-[11px] text-stone-400">Thank you for dining with us.</p>
         </section>
-        <footer className="border-t border-stone-100 bg-stone-50 p-4 text-center print:hidden"><BillPrintButton pdfUrl={`/bill/${encodeURIComponent(params.token)}/pdf`} fileName={`bill-${bill.billNumber}.pdf`} /></footer>
+        <footer className="border-t border-stone-100 bg-stone-50 p-4 text-center print:hidden"><BillPrintButton pdfUrl={`/bill/${encodeURIComponent(params.token)}/pdf`} bill={pdfBill} fileName={`bill-${bill.billNumber}.pdf`} /></footer>
       </article>
     </main>
   );

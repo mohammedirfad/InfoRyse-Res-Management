@@ -3,7 +3,31 @@
 import { useState } from "react";
 import { Printer, Download } from "lucide-react";
 
-export default function BillPrintButton({ pdfUrl, fileName }: { pdfUrl: string; fileName: string }) {
+type BillPdfPayload = {
+  billNumber: number;
+  tableLabel: string;
+  customerName: string | null;
+  customerPhone: string | null;
+  subtotalCents: number;
+  discountCents: number;
+  discountPercent: number;
+  discountName: string | null;
+  taxCents: number;
+  taxPercent: number;
+  taxName: string;
+  taxBreakdown: unknown;
+  packingCents: number;
+  totalCents: number;
+  paymentMethod: string;
+  paymentStatus: string;
+  createdAt: string;
+  paidAt: string | null;
+  itemsJson: string;
+  shareToken: string | null;
+  restaurant: { name: string; contactPhone: string | null; location: string | null; upiPaymentId: string | null };
+};
+
+export default function BillPrintButton({ pdfUrl, bill, fileName }: { pdfUrl: string; bill: BillPdfPayload; fileName: string }) {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
 
@@ -12,7 +36,12 @@ export default function BillPrintButton({ pdfUrl, fileName }: { pdfUrl: string; 
     setDownloading(true);
     setError("");
     try {
-      const response = await fetch(pdfUrl, { cache: "no-store" });
+      const response = await fetch(pdfUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bill),
+        cache: "no-store",
+      });
       const contentType = response.headers.get("content-type") || "";
       if (!response.ok || !contentType.toLowerCase().includes("application/pdf")) {
         setError("PDF download is temporarily unavailable. Use Print / Save as PDF below.");
