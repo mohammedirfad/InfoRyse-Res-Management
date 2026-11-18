@@ -1,16 +1,10 @@
 import { db } from "@/lib/db";
 import { requireSuperAdmin, tenantErrorResponse } from "@/lib/tenant";
+import { unstable_cache } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
-let dashboardCache: { expiresAt: number; payload: unknown } | null = null;
-
-export async function GET() {
-  try {
-    await requireSuperAdmin();
-    if (dashboardCache && dashboardCache.expiresAt > Date.now()) {
-      return Response.json(dashboardCache.payload, { headers: { "Cache-Control": "private, max-age=15, stale-while-revalidate=30" } });
-    }
+const getDashboardPayload = unstable_cache(async () => {
     const since = new Date();
     since.setUTCDate(since.getUTCDate() - 29);
     since.setUTCHours(0, 0, 0, 0);
@@ -47,13 +41,18 @@ export async function GET() {
       return { day, orders: orderMap.get(day) ?? 0, paidCents: revenueMap.get(day) ?? 0 };
     });
 
-    const payload = {
+    return {
       stats: { restaurants, activeRestaurants, pausedRestaurants: restaurants - activeRestaurants, users, activeTables, orders, paidRevenueCents: bills._sum.totalCents ?? 0 },
       daily,
       topRestaurants,
       generatedAt: new Date().toISOString(),
     };
-    dashboardCache = { expiresAt: Date.now() + 30_000, payload };
+  }, ["super-dashboard-metrics-v2"], { revalidate: 30, tags: ["super-dashboard"] });
+
+export async function GET() {
+  try {
+    await requireSuperAdmin();
+    const payload = await getDashboardPayload();
     return Response.json(payload, { headers: { "Cache-Control": "private, max-age=15, stale-while-revalidate=30" } });
   } catch (error) {
     return tenantErrorResponse(error);

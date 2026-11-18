@@ -4,6 +4,7 @@ import { requireFastRestaurantUser, requireRestaurantUser, tenantErrorResponse }
 import { invalidatePublicMenu } from "@/lib/publicMenuCache";
 import { clearSession } from "@/lib/auth";
 import { invalidateRestaurantActiveCache } from "@/lib/tenant";
+import { revalidateTag } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,7 @@ export async function PATCH(req: Request) {
       data:  body,
     });
     invalidatePublicMenu(restaurantId);
+    revalidateTag("admin-panel-context");
     return Response.json({ restaurant: updated });
   } catch (err) {
     return tenantErrorResponse(err);
@@ -70,6 +72,7 @@ export async function DELETE(req: Request) {
     await db.restaurant.update({ where: { id: restaurantId }, data: { isActive: false, openNow: false } });
     invalidatePublicMenu(restaurantId);
     invalidateRestaurantActiveCache(restaurantId);
+    revalidateTag("admin-panel-context");
     clearSession();
     return Response.json({ ok: true });
   } catch (error) {

@@ -1,11 +1,12 @@
 import { isAdminRedisRealtimeConfigured, publishAdminRestaurantEvent } from "@/lib/adminRedisRealtime";
+import { isSupabaseProjectConfigConsistent } from "@/lib/supabaseProjectConfig";
 import WebSocket from "ws";
 
 const SUPABASE_URL = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 function realtimeBaseUrl() {
-  if (!/^https:\/\//i.test(SUPABASE_URL) || !SUPABASE_KEY) return null;
+  if (!/^https:\/\//i.test(SUPABASE_URL) || !SUPABASE_KEY || !isSupabaseProjectConfigConsistent()) return null;
   const url = new URL(SUPABASE_URL);
   url.protocol = "wss:";
   url.pathname = "/realtime/v1/websocket";
@@ -21,7 +22,7 @@ export async function broadcastOrderEvent(payload: {
   data?: any;
 }) {
   const base = SUPABASE_URL;
-  const hasSupabaseRealtime = /^https:\/\//i.test(base) && Boolean(SUPABASE_KEY);
+  const hasSupabaseRealtime = /^https:\/\//i.test(base) && Boolean(SUPABASE_KEY) && isSupabaseProjectConfigConsistent();
   const useRedisForAdmin = isAdminRedisRealtimeConfigured();
   if (payload.type === "order_created" || payload.type === "service_request_created") {
     console.info("[realtime:broadcast] transport selection", {

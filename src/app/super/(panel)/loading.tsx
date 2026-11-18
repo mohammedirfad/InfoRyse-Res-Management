@@ -1,11 +1,15 @@
-export default function SuperPanelLoading() {
+export default function SuperAdminPanelLoading() {
   return (
-    <div role="status" aria-label="Loading super admin section" className="space-y-5 p-5 sm:p-7">
-      <div className="h-9 w-56 animate-pulse rounded-xl bg-slate-200" />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }, (_, index) => <div key={index} className="h-24 animate-pulse rounded-2xl border border-slate-100 bg-white" />)}
+    <div role="status" aria-live="polite" className="min-h-[calc(100dvh-3.5rem)] bg-slate-50 p-4 sm:p-6">
+      <span className="sr-only">Loading platform page</span>
+      <div className="mb-5 h-8 w-64 animate-pulse rounded-lg bg-slate-200" />
+      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {[0, 1, 2].map((item) => <div key={item} className="h-24 animate-pulse rounded-2xl bg-white shadow-sm" />)}
       </div>
-      <div className="h-72 animate-pulse rounded-2xl border border-slate-100 bg-white" />
+      <div className="space-y-3 rounded-2xl bg-white p-4 shadow-sm">
+        {[0, 1, 2, 3, 4].map((item) => <div key={item} className="h-12 animate-pulse rounded-lg bg-slate-100" />)}
+      </div>
+      <p className="mt-4 text-center text-sm text-slate-500">Loading platform workspace…</p>
     </div>
   );
 }

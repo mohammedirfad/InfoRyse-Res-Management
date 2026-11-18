@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { getAdminPanelUser } from "@/lib/adminPanelUser";
 import AdminSidebar from "@/components/AdminSidebar";
 import AdminOrderNotifications from "@/components/AdminOrderNotifications";
 import { AdminPanelContextProvider } from "@/components/AdminPanelContext";
@@ -14,15 +14,7 @@ export default async function AdminPanelLayout({ children }: { children: React.R
     redirect("/admin/login");
   }
 
-  // Read the admin and tenant in one indexed query on every panel navigation.
-  const user = await db.user.findUnique({
-    where: { id: session.userId },
-    select: {
-      email: true,
-      mustChangePassword: true,
-      restaurant: { select: { id: true, name: true, openNow: true, slug: true, isActive: true } },
-    },
-  });
+  const user = await getAdminPanelUser(session.userId);
   const restaurant = user?.restaurant;
 
   if (!restaurant || restaurant.id !== session.restaurantId) {

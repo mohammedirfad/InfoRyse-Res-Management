@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus, Search, Filter, X, ExternalLink, ShieldAlert,
   Mail, Phone, MapPin, Building, Copy, Check, Send, Edit3,
@@ -23,6 +23,12 @@ type Restaurant = {
   _count?: { orders: number; tables: number };
   users?: { id: string; email: string; name: string | null; phone: string | null }[];
 };
+type RestaurantStats = { total: number; active: number; suspended: number };
+type RestaurantPageData = {
+  restaurants: Restaurant[];
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+  stats: RestaurantStats;
+};
 
 type CreatedCredentials = {
   restaurant: Restaurant;
@@ -34,10 +40,14 @@ type CreatedCredentials = {
 };
 
 export default function RestaurantsPage() {
-  const [restaurants, setRestaurants] = useState<Restaurant[]>(() => readSuperPageCache<Restaurant[]>("restaurants") ?? []);
-  const [loading, setLoading] = useState(() => !readSuperPageCache<Restaurant[]>("restaurants"));
+  const [restaurants, setRestaurants] = useState<Restaurant[]>(() => readSuperPageCache<RestaurantPageData>("restaurants:1:all:")?.restaurants ?? []);
+  const [loading, setLoading] = useState(() => !readSuperPageCache<RestaurantPageData>("restaurants:1:all:"));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState(() => readSuperPageCache<RestaurantPageData>("restaurants:1:all:")?.pagination ?? { page: 1, limit: 25, total: 0, totalPages: 1 });
+  const [stats, setStats] = useState<RestaurantStats>(() => readSuperPageCache<RestaurantPageData>("restaurants:1:all:")?.stats ?? { total: 0, active: 0, suspended: 0 });
+  const activeRequest = useRef<AbortController | null>(null);
 
   // Add Restaurant Form
   const [showForm, setShowForm] = useState(false);
@@ -82,22 +92,41 @@ export default function RestaurantsPage() {
   });
   const [savingEdit, setSavingEdit] = useState(false);
 
-  async function load() {
-    if (restaurants.length === 0) setLoading(true);
-    try {
-      const res = await fetch("/api/super/restaurants");
-      const data = await res.json();
-      const list = data.restaurants ?? [];
-      writeSuperPageCache("restaurants", list);
-      setRestaurants(list);
-    } finally {
+  const load = useCallback(async () => {
+    const params = new URLSearchParams({ page: String(page), limit: "25", status: statusFilter, search: search.trim() });
+    const cacheKey = `restaurants:${page}:${statusFilter}:${search.trim()}`;
+    const cached = readSuperPageCache<RestaurantPageData>(cacheKey);
+    if (cached) {
+      setRestaurants(cached.restaurants ?? []);
+      setPagination(cached.pagination ?? { page, limit: 25, total: 0, totalPages: 1 });
+      setStats(cached.stats ?? { total: 0, active: 0, suspended: 0 });
       setLoading(false);
+    } else {
+      setLoading(true);
     }
-  }
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    try {
+      const res = await fetch(`/api/super/restaurants?${params}`, { cache: "no-store", signal: controller.signal });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not load restaurants.");
+      writeSuperPageCache(cacheKey, data);
+      if (controller.signal.aborted) return;
+      setRestaurants(data.restaurants ?? []);
+      setPagination(data.pagination ?? { page, limit: 25, total: 0, totalPages: 1 });
+      setStats(data.stats ?? { total: 0, active: 0, suspended: 0 });
+    } catch (error) {
+      if (!controller.signal.aborted) console.error("Restaurant list load failed", error);
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  }, [page, search, statusFilter]);
 
   useEffect(() => {
-    load();
-  }, []);
+    const timer = window.setTimeout(() => void load(), search.trim() ? 250 : 0);
+    return () => { window.clearTimeout(timer); activeRequest.current?.abort(); };
+  }, [load, search]);
 
   function copyToClipboard(text: string, field: string) {
     navigator.clipboard.writeText(text);
@@ -152,6 +181,8 @@ export default function RestaurantsPage() {
 
       setCreatedInfo(data);
       setShowForm(false);
+      setStats((current) => ({ total: current.total + 1, active: current.active + 1, suspended: current.suspended }));
+      setPage(1);
       setFormData({
         name: "",
         ownerName: "",
@@ -160,7 +191,7 @@ export default function RestaurantsPage() {
         location: "",
         plan: "Pro",
       });
-      load();
+      if (page === 1) void load();
     } catch {
       setFormError("An unexpected network error occurred.");
     } finally {
@@ -178,8 +209,16 @@ export default function RestaurantsPage() {
       const data = await response.json();
       if (!response.ok || typeof data.restaurant?.isActive !== "boolean") throw new Error(data.error || "Could not update restaurant access.");
       const updated = { ...r, isActive: data.restaurant.isActive };
-      setRestaurants((current) => current.map((item) => item.id === r.id ? { ...item, isActive: updated.isActive } : item));
+      setRestaurants((current) => current.flatMap((item) => {
+        if (item.id !== r.id) return [item];
+        if ((statusFilter === "active" && !updated.isActive) || (statusFilter === "inactive" && updated.isActive)) return [];
+        return [{ ...item, isActive: updated.isActive }];
+      }));
       setSelected((current) => current?.id === r.id ? { ...current, isActive: updated.isActive } : current);
+      setStats((current) => {
+        const delta = updated.isActive ? 1 : -1;
+        return { ...current, active: current.active + delta, suspended: current.suspended - delta };
+      });
       const message = updated.isActive
         ? `${r.name} is active again. Its admin users can sign in.`
         : `${r.name} is blocked. Its admin users cannot sign in and active sessions are denied access.`;
@@ -283,29 +322,7 @@ export default function RestaurantsPage() {
     }
   }
 
-  const filtered = restaurants.filter((r) => {
-    const query = search.toLowerCase();
-    const matchSearch =
-      !search ||
-      r.name.toLowerCase().includes(query) ||
-      r.slug.toLowerCase().includes(query) ||
-      (r.ownerName && r.ownerName.toLowerCase().includes(query)) ||
-      (r.contactEmail && r.contactEmail.toLowerCase().includes(query)) ||
-      (r.location && r.location.toLowerCase().includes(query));
-
-    const matchStatus =
-      statusFilter === "all" ||
-      (statusFilter === "active" && r.isActive) ||
-      (statusFilter === "inactive" && !r.isActive);
-
-    return matchSearch && matchStatus;
-  });
-
-  const stats = {
-    total: restaurants.length,
-    active: restaurants.filter((r) => r.isActive).length,
-    suspended: restaurants.filter((r) => !r.isActive).length,
-  };
+  const filtered = restaurants;
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -360,15 +377,15 @@ export default function RestaurantsPage() {
                 className="input pl-10 bg-slate-50 border-slate-200"
                 placeholder="Search by restaurant name, owner, email, location..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               />
             </div>
             <select
               className="input w-40 bg-slate-50 border-slate-200 font-medium"
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             >
-              <option value="all">All Status ({restaurants.length})</option>
+              <option value="all">All Status ({stats.total})</option>
               <option value="active">Active Only ({stats.active})</option>
               <option value="inactive">Suspended ({stats.suspended})</option>
             </select>
@@ -415,7 +432,7 @@ export default function RestaurantsPage() {
                       className="cursor-pointer hover:bg-slate-50/80 transition-colors"
                       onClick={() => setSelected(r)}
                     >
-                      <td className="font-mono text-xs text-slate-400">{i + 1}</td>
+                      <td className="font-mono text-xs text-slate-400">{(page - 1) * pagination.limit + i + 1}</td>
                       <td>
                         <div className="flex items-center gap-3">
                           <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-slate-800 to-blue-950 flex items-center justify-center text-white font-bold text-sm shadow-sm flex-shrink-0">
@@ -519,6 +536,13 @@ export default function RestaurantsPage() {
               </tbody>
             </table>
           )}
+        </div>
+        <div className="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+          <span>{pagination.total.toLocaleString("en-IN")} restaurants · Page {page} of {pagination.totalPages}</span>
+          <div className="flex gap-2">
+            <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)} className="rounded-lg border px-3 py-1.5 disabled:opacity-40">Previous</button>
+            <button type="button" disabled={page >= pagination.totalPages || loading} onClick={() => setPage((value) => value + 1)} className="rounded-lg border px-3 py-1.5 disabled:opacity-40">Next</button>
+          </div>
         </div>
       </div>
 

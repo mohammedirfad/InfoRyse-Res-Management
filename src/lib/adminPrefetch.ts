@@ -26,7 +26,7 @@ export type AdminRouteData = {
 
 export const ADMIN_ROUTE_ENDPOINTS: Record<string, string[]> = {
   "/admin/dashboard": ["/api/admin/orders?view=dashboard", "/api/admin/me"],
-  "/admin/orders": ["/api/admin/orders"],
+  "/admin/orders": ["/api/admin/orders?page=1&limit=25&status=all&search="],
   "/admin/bill": ["/api/admin/tables", "/api/admin/me"],
   "/admin/payments": [
     "/api/admin/bills?page=1&limit=10&search=&paymentMethod=all",

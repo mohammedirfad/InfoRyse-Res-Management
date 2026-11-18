@@ -1,179 +1,138 @@
 import { db } from "@/lib/db";
 import { requireFastRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
+import { Prisma } from "@prisma/client";
+import { unstable_cache } from "next/cache";
 
 export const dynamic = "force-dynamic";
+
+const getCustomerRows = unstable_cache(
+  async (restaurantId: string, search: string, page: number, limit: number, exportAll: boolean) => db.$queryRaw<any[]>`
+      WITH base AS (
+        SELECT
+          o."id",
+          o."orderNumber",
+          o."customerName",
+          o."customerPhone",
+          o."customerEmail",
+          o."totalCents",
+          o."status",
+          o."createdAt",
+          t."label" AS table_label,
+          CASE
+            WHEN NULLIF(BTRIM(o."customerPhone"), '') IS NOT NULL THEN 'phone:' || BTRIM(o."customerPhone")
+            WHEN NULLIF(BTRIM(o."customerEmail"), '') IS NOT NULL THEN 'email:' || LOWER(BTRIM(o."customerEmail"))
+            WHEN NULLIF(BTRIM(o."customerName"), '') IS NOT NULL THEN 'name:' || LOWER(BTRIM(o."customerName"))
+            ELSE 'table:' || COALESCE(t."label", 'unknown')
+          END AS customer_key,
+          COALESCE(
+            (SELECT jsonb_agg(jsonb_build_object('name', i."nameSnapshot", 'quantity', i."quantity", 'price', i."priceCentsSnapshot") ORDER BY i."id")
+             FROM "OrderItem" i WHERE i."orderId" = o."id"),
+            '[]'::jsonb
+          ) AS order_items
+        FROM "Order" o
+        LEFT JOIN "Table" t ON t."id" = o."tableId"
+        WHERE o."restaurantId" = ${restaurantId}
+          AND o."status" <> 'CANCELLED'
+      ), ranked AS (
+        SELECT base.*, ROW_NUMBER() OVER (PARTITION BY customer_key ORDER BY "createdAt" DESC, id DESC) AS customer_order_rank
+        FROM base
+      ), grouped AS (
+        SELECT
+          customer_key AS id,
+          COALESCE(
+            (ARRAY_AGG(NULLIF(BTRIM("customerName"), '') ORDER BY "createdAt" DESC) FILTER (WHERE NULLIF(BTRIM("customerName"), '') IS NOT NULL))[1],
+            CASE WHEN (ARRAY_AGG(NULLIF(BTRIM("customerPhone"), '') ORDER BY "createdAt" DESC) FILTER (WHERE NULLIF(BTRIM("customerPhone"), '') IS NOT NULL))[1] IS NOT NULL
+              THEN 'Guest (' || RIGHT((ARRAY_AGG(NULLIF(BTRIM("customerPhone"), '') ORDER BY "createdAt" DESC) FILTER (WHERE NULLIF(BTRIM("customerPhone"), '') IS NOT NULL))[1], 4) || ')'
+              ELSE 'Table Guest' END
+          ) AS name,
+          COALESCE((ARRAY_AGG(NULLIF(BTRIM("customerPhone"), '') ORDER BY "createdAt" DESC) FILTER (WHERE NULLIF(BTRIM("customerPhone"), '') IS NOT NULL))[1], '') AS phone,
+          COALESCE((ARRAY_AGG(NULLIF(BTRIM("customerEmail"), '') ORDER BY "createdAt" DESC) FILTER (WHERE NULLIF(BTRIM("customerEmail"), '') IS NOT NULL))[1], '') AS email,
+          COUNT(*)::bigint AS order_count,
+          COALESCE(SUM("totalCents"), 0)::bigint AS total_spent,
+          MAX("createdAt") AS last_visit,
+          MIN("createdAt") AS first_visit,
+          ARRAY_REMOVE(ARRAY_AGG(DISTINCT table_label), NULL) AS tables,
+          JSONB_AGG(JSONB_BUILD_OBJECT(
+            'id', id,
+            'orderNumber', "orderNumber",
+            'totalCents', "totalCents",
+            'status', "status",
+            'createdAt', "createdAt",
+            'tableLabel', COALESCE(table_label, ''),
+            'items', order_items
+          ) ORDER BY "createdAt" DESC) FILTER (WHERE customer_order_rank <= 5) AS recent_orders
+        FROM ranked
+        GROUP BY customer_key
+      ), filtered AS (
+        SELECT * FROM grouped
+        WHERE ${search} = ''
+          OR name ILIKE ('%' || ${search} || '%')
+          OR phone ILIKE ('%' || ${search} || '%')
+          OR email ILIKE ('%' || ${search} || '%')
+      )
+      SELECT
+        filtered.*,
+        COUNT(*) OVER()::bigint AS total_customers,
+        COALESCE(SUM(total_spent) OVER(), 0)::bigint AS total_spent_all,
+        COUNT(*) FILTER (WHERE order_count < 2 AND total_spent < 200000) OVER()::bigint AS new_count,
+        COUNT(*) FILTER (WHERE order_count >= 2 AND order_count < 5 AND total_spent < 200000) OVER()::bigint AS repeat_count,
+        COUNT(*) FILTER (WHERE order_count >= 5 OR total_spent >= 200000) OVER()::bigint AS vip_count
+      FROM filtered
+      ORDER BY last_visit DESC, id
+      ${exportAll ? Prisma.empty : Prisma.sql`OFFSET ${(page - 1) * limit} LIMIT ${limit}`}
+    `,
+  ["admin-customer-list-v1"],
+  { revalidate: 10 },
+);
 
 export async function GET(req: Request) {
   try {
     const { restaurantId } = await requireFastRestaurantUser();
     const url = new URL(req.url);
-    const search = (url.searchParams.get("search") ?? "").trim().toLowerCase();
-    const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10));
-    const limit = Math.max(1, parseInt(url.searchParams.get("limit") ?? "10", 10));
+    const search = (url.searchParams.get("search") ?? "").trim().slice(0, 100);
+    const page = Math.max(1, Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+    const requestedLimit = Number.parseInt(url.searchParams.get("limit") ?? "10", 10) || 10;
+    const limit = Math.min(50, Math.max(1, requestedLimit));
     const exportAll = url.searchParams.get("export") === "true";
 
-    // Fetch all non-cancelled orders for this restaurant
-    const orders = await db.order.findMany({
-      where: {
-        restaurantId,
-        status: { not: "CANCELLED" },
-      },
-      include: {
-        table: { select: { label: true } },
-        items: {
-          select: {
-            nameSnapshot: true,
-            priceCentsSnapshot: true,
-            quantity: true,
-          },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    // Aggregate customer totals, table history and the five latest orders in
+    // PostgreSQL. The previous implementation loaded every order and item into
+    // the Node process before returning just one page to the browser.
+    const rows = await getCustomerRows(restaurantId, search, page, limit, exportAll);
 
-    // Group orders by customer (phone preferred, then clean name)
-    const customerMap = new Map<string, {
-      id: string;
-      name: string;
-      phone: string;
-      email: string;
-      orderCount: number;
-      totalSpent: number;
-      lastVisit: string;
-      firstVisit: string;
-      tables: Set<string>;
-      status: "NEW" | "REPEAT" | "VIP";
-      recentOrders: Array<{
-        id: string;
-        orderNumber: number;
-        totalCents: number;
-        status: string;
-        createdAt: string;
-        tableLabel: string;
-        items: Array<{ name: string; quantity: number; price: number }>;
-      }>;
-    }>();
+    const totals = rows[0] ?? {};
+    const customers = rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      phone: row.phone,
+      email: row.email,
+      orderCount: Number(row.order_count),
+      totalSpent: Number(row.total_spent),
+      lastVisit: new Date(row.last_visit).toISOString(),
+      firstVisit: new Date(row.first_visit).toISOString(),
+      tables: row.tables ?? [],
+      status: Number(row.order_count) >= 5 || Number(row.total_spent) >= 200000
+        ? "VIP"
+        : Number(row.order_count) >= 2 ? "REPEAT" : "NEW",
+      recentOrders: row.recent_orders ?? [],
+    }));
+    const totalCustomers = Number(totals.total_customers ?? 0);
+    const totalSpent = Number(totals.total_spent_all ?? 0);
 
-    for (const order of orders) {
-      const rawName = (order.customerName ?? "").trim();
-      const rawPhone = (order.customerPhone ?? "").trim();
-      const rawEmail = (order.customerEmail ?? "").trim();
+    if (exportAll) return Response.json({ customers, total: totalCustomers, totalSpent });
 
-      // If neither name nor phone exists, group as "Table Guest"
-      const key = rawPhone
-        ? `phone:${rawPhone}`
-        : rawEmail
-        ? `email:${rawEmail}`
-        : rawName
-        ? `name:${rawName.toLowerCase()}`
-        : `table:${order.table?.label ?? "unknown"}`;
-
-      const displayName = rawName || (rawPhone ? `Guest (${rawPhone.slice(-4)})` : "Table Guest");
-
-      let existing = customerMap.get(key);
-      if (!existing) {
-        existing = {
-          id: key,
-          name: displayName,
-          phone: rawPhone,
-          email: rawEmail,
-          orderCount: 0,
-          totalSpent: 0,
-          lastVisit: order.createdAt.toISOString(),
-          firstVisit: order.createdAt.toISOString(),
-          tables: new Set<string>(),
-          status: "NEW",
-          recentOrders: [],
-        };
-        customerMap.set(key, existing);
-      }
-
-      existing.orderCount += 1;
-      existing.totalSpent += order.totalCents;
-      if (order.table?.label) existing.tables.add(order.table.label);
-
-      // Keep up to 5 recent orders per customer
-      if (existing.recentOrders.length < 5) {
-        existing.recentOrders.push({
-          id: order.id,
-          orderNumber: order.orderNumber,
-          totalCents: order.totalCents,
-          status: order.status,
-          createdAt: order.createdAt.toISOString(),
-          tableLabel: order.table?.label ?? "",
-          items: order.items.map((i) => ({
-            name: i.nameSnapshot,
-            quantity: i.quantity,
-            price: i.priceCentsSnapshot,
-          })),
-        });
-      }
-    }
-
-    // Convert map to array and compute VIP/REPEAT status
-    let customers = Array.from(customerMap.values()).map((c) => {
-      let status: "NEW" | "REPEAT" | "VIP" = "NEW";
-      if (c.orderCount >= 5 || c.totalSpent >= 200000) {
-        status = "VIP";
-      } else if (c.orderCount >= 2) {
-        status = "REPEAT";
-      }
-
-      return {
-        ...c,
-        status,
-        tables: Array.from(c.tables),
-      };
-    });
-
-    // Sort by last visit descending
-    customers.sort((a, b) => new Date(b.lastVisit).getTime() - new Date(a.lastVisit).getTime());
-
-    // Apply search filter if provided
-    if (search) {
-      customers = customers.filter(
-        (c) =>
-          c.name.toLowerCase().includes(search) ||
-          c.phone.toLowerCase().includes(search) ||
-          c.email.toLowerCase().includes(search)
-      );
-    }
-
-    const totalCustomers = customers.length;
-    const totalSpentAll = customers.reduce((s, c) => s + c.totalSpent, 0);
-
-    // If exporting, return all data without pagination
-    if (exportAll) {
-      return Response.json({
-        customers,
-        total: totalCustomers,
-        totalSpent: totalSpentAll,
-      });
-    }
-
-    // Server-side pagination (10 per page default)
-    const startIndex = (page - 1) * limit;
-    const paginatedCustomers = customers.slice(startIndex, startIndex + limit);
     const totalPages = Math.ceil(totalCustomers / limit) || 1;
-
     return Response.json({
-      customers: paginatedCustomers,
-      pagination: {
-        page,
-        limit,
-        total: totalCustomers,
-        totalPages,
-        hasNext: page < totalPages,
-        hasPrev: page > 1,
-      },
+      customers,
+      pagination: { page, limit, total: totalCustomers, totalPages, hasNext: page < totalPages, hasPrev: page > 1 },
       stats: {
         totalCustomers,
-        totalSpent: totalSpentAll,
-        newCount: customers.filter((c) => c.status === "NEW").length,
-        repeatCount: customers.filter((c) => c.status === "REPEAT").length,
-        vipCount: customers.filter((c) => c.status === "VIP").length,
+        totalSpent,
+        newCount: Number(totals.new_count ?? 0),
+        repeatCount: Number(totals.repeat_count ?? 0),
+        vipCount: Number(totals.vip_count ?? 0),
       },
-    });
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (err) {
     return tenantErrorResponse(err);
   }

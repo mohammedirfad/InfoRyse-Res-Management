@@ -1,9 +1,23 @@
 import { db } from "@/lib/db";
 import { requireSuperAdmin, tenantErrorResponse } from "@/lib/tenant";
+import { unstable_cache } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
-let cachedStats: { expiresAt: number; value: { total: number; completed: number; cancelled: number; orderValueCents: number } } | null = null;
+const getPlatformOrderStats = unstable_cache(async () => {
+  const where = { NOT: { idempotencyKey: { startsWith: "assist_" } } };
+  const [total, byStatus, amount] = await Promise.all([
+    db.order.count({ where }),
+    db.order.groupBy({ by: ["status"], where, _count: { _all: true } }),
+    db.order.aggregate({ where, _sum: { totalCents: true } }),
+  ]);
+  return {
+    total,
+    completed: byStatus.find((entry) => entry.status === "COMPLETED")?._count._all ?? 0,
+    cancelled: byStatus.find((entry) => entry.status === "CANCELLED")?._count._all ?? 0,
+    orderValueCents: amount._sum.totalCents ?? 0,
+  };
+}, ["super-orders-global-stats-v1"], { revalidate: 30, tags: ["super-orders-stats"] });
 
 export async function GET(req: Request) {
   try {
@@ -34,23 +48,11 @@ export async function GET(req: Request) {
       }),
       db.order.count({ where }),
     ]);
-    if (!cachedStats || cachedStats.expiresAt <= Date.now()) {
-      const [allOrders, byStatus, amount] = await Promise.all([
-        db.order.count({ where: { NOT: { idempotencyKey: { startsWith: "assist_" } } } }),
-        db.order.groupBy({ by: ["status"], where: { NOT: { idempotencyKey: { startsWith: "assist_" } } }, _count: { _all: true } }),
-        db.order.aggregate({ where: { NOT: { idempotencyKey: { startsWith: "assist_" } } }, _sum: { totalCents: true } }),
-      ]);
-      cachedStats = { expiresAt: Date.now() + 30_000, value: {
-        total: allOrders,
-        completed: byStatus.find((entry) => entry.status === "COMPLETED")?._count._all ?? 0,
-        cancelled: byStatus.find((entry) => entry.status === "CANCELLED")?._count._all ?? 0,
-        orderValueCents: amount._sum.totalCents ?? 0,
-      } };
-    }
+    const stats = await getPlatformOrderStats();
     return Response.json({
       orders,
       pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
-      stats: cachedStats.value,
+      stats,
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return tenantErrorResponse(error);

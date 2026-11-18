@@ -7,22 +7,55 @@ import { slugify } from "@/lib/slug";
 import { sendEmail, buildOnboardingEmailHtml } from "@/lib/email";
 import { generateQrToken } from "@/lib/qr";
 import { getPublicAppUrl } from "@/lib/appUrl";
+import { unstable_cache, revalidateTag } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+const getRestaurantStats = unstable_cache(async () => {
+  const [total, active] = await Promise.all([
+    db.restaurant.count(),
+    db.restaurant.count({ where: { isActive: true } }),
+  ]);
+  return { total, active, suspended: total - active };
+}, ["super-restaurant-registry-stats-v1"], { revalidate: 30, tags: ["super-restaurants-stats"] });
+
+export async function GET(request: Request) {
   try {
     await requireSuperAdmin();
-    const restaurants = await db.restaurant.findMany({
-      orderBy: { createdAt: "desc" },
+    const url = new URL(request.url);
+    const page = Math.max(1, Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+    const limit = Math.min(50, Math.max(10, Number.parseInt(url.searchParams.get("limit") ?? "25", 10) || 25));
+    const search = (url.searchParams.get("search") ?? "").trim().slice(0, 100);
+    const status = url.searchParams.get("status") ?? "all";
+    const where: any = {};
+    if (status === "active") where.isActive = true;
+    else if (status === "inactive") where.isActive = false;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { slug: { contains: search, mode: "insensitive" } },
+        { ownerName: { contains: search, mode: "insensitive" } },
+        { contactEmail: { contains: search, mode: "insensitive" } },
+        { location: { contains: search, mode: "insensitive" } },
+      ];
+    }
+    const [restaurants, filteredTotal, stats] = await Promise.all([db.restaurant.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (page - 1) * limit,
+      take: limit,
       select: {
         id: true, name: true, slug: true, ownerName: true, contactEmail: true, contactPhone: true,
         location: true, plan: true, isActive: true, createdAt: true,
         _count: { select: { orders: { where: { NOT: { idempotencyKey: { startsWith: "assist_" } } } }, tables: { where: { deletedAt: null } } } },
         users: { where: { role: "OWNER" }, select: { id: true, email: true, name: true, phone: true } },
       },
-    });
-    return Response.json({ restaurants });
+    }), db.restaurant.count({ where }), getRestaurantStats()]);
+    return Response.json({
+      restaurants,
+      pagination: { page, limit, total: filteredTotal, totalPages: Math.max(1, Math.ceil(filteredTotal / limit)) },
+      stats,
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (err) {
     return tenantErrorResponse(err);
   }
@@ -114,6 +147,7 @@ export async function POST(req: Request) {
 
       return r;
     });
+    revalidateTag("super-restaurants-stats");
 
     const loginUrl = `${getPublicAppUrl(req.url)}/admin/login`;
 

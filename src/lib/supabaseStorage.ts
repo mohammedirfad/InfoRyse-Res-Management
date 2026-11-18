@@ -1,5 +1,7 @@
 import "server-only";
 
+import { isSupabaseProjectConfigConsistent } from "@/lib/supabaseProjectConfig";
+
 const SUPABASE_URL = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 export const IMAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET ?? "restaurant-images";
@@ -17,6 +19,7 @@ function assertStorageConfiguration() {
 
   if (
     !/^https:\/\//i.test(SUPABASE_URL) ||
+    !isSupabaseProjectConfigConsistent() ||
     isExample(SUPABASE_URL) ||
     isExample(SERVICE_KEY) ||
     isExample(IMAGE_BUCKET)

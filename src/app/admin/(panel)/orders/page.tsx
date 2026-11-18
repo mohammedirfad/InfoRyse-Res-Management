@@ -5,7 +5,7 @@ import {
   Search, RefreshCw, X, CheckCircle2, XCircle, ChefHat,
   ShoppingBag, Printer, Volume2, VolumeX, Bell, Plus,
   Clock, ArrowRight, UtensilsCrossed, LayoutList, LayoutGrid,
-  Check, AlertCircle, ChevronDown, Sparkles
+  Check, AlertCircle, Sparkles
 } from "lucide-react";
 import { formatRupees, formatTime } from "@/lib/utils";
 import { fetchJsonCached, invalidateCache, peekCache } from "@/lib/cachedFetch";
@@ -33,8 +33,7 @@ type Order = {
 };
 
 const TABS = ["All", "New", "Preparing", "Ready", "Completed", "Cancelled"] as const;
-const INITIAL_VISIBLE_COUNT = 15;
-const SCROLL_BATCH_SIZE = 15;
+const ORDERS_PAGE_SIZE = 25;
 
 const STATUS_META: Record<string, { label: string; bg: string; text: string; border: string; glow: string; dot: string }> = {
   NEW: {
@@ -104,8 +103,14 @@ function formatElapsed(createdAt: string): string {
 }
 
 export default function OrdersPage() {
-  const [orders, setOrders] = useState<Order[]>(() => peekCache<{ orders?: Order[] }>("admin:/api/admin/orders")?.orders ?? []);
+  // Keep the first server render and browser hydration identical. Browser cache
+  // is restored in an effect below, after React has hydrated the page.
+  const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [tab, setTab] = useState<string>("All");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Order | null>(null);
@@ -113,8 +118,6 @@ export default function OrdersPage() {
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  // Progressive scroll pagination limit
-  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Luxury dynamic toast state
@@ -148,6 +151,13 @@ export default function OrdersPage() {
   const prevNewCount = useRef(-1);
   const audioCtx = useRef<AudioContext | null>(null);
   const isFetching = useRef(false);
+  const isLoadingMore = useRef(false);
+  const currentPage = useRef(1);
+  const currentQueryKey = useRef("all|");
+  const tabRef = useRef(tab);
+  const searchRef = useRef(search);
+  tabRef.current = tab;
+  searchRef.current = search;
 
   // Dual-tone executive chime for incoming orders
   function playExecutiveChime() {
@@ -189,14 +199,62 @@ export default function OrdersPage() {
 
   // Serverless instances do not share memory. The shared Realtime stream
   // signals changes; fetch the order snapshot only at entry or after a signal.
-  const load = useCallback(async () => {
-    if (isFetching.current) return;
-    isFetching.current = true;
+  const load = useCallback(async (page = 1, append = false, preserveLoadedPages = true) => {
+    if (isFetching.current || isLoadingMore.current) return;
+    if (append) {
+      isLoadingMore.current = true;
+      setLoadingMore(true);
+    } else {
+      isFetching.current = true;
+    }
+    const status = tabRef.current === "All" ? "all" : tabRef.current.toLowerCase();
+    const query = searchRef.current.trim();
+    const queryKey = `${status}|${query}`;
+    const params = new URLSearchParams({ page: String(page), limit: String(ORDERS_PAGE_SIZE), status, search: query });
+    const url = `/api/admin/orders?${params.toString()}`;
     try {
-      const data = await fetchJsonCached<{ orders?: Order[] }>("admin:/api/admin/orders", "/api/admin/orders");
-      saveAdminRouteData("/api/admin/orders", data);
+      const data = await fetchJsonCached<{
+        orders?: Order[];
+        pagination?: { page: number; total: number; hasMore: boolean };
+        statusCounts?: Record<string, number>;
+      }>(`admin:${url}`, url);
+      const latestStatus = tabRef.current === "All" ? "all" : tabRef.current.toLowerCase();
+      if (queryKey !== `${latestStatus}|${searchRef.current.trim()}`) return;
+      saveAdminRouteData(url, data);
       const list: Order[] = data.orders ?? [];
-      setOrders(list);
+      const sameQuery = currentQueryKey.current === queryKey;
+      if (append && sameQuery) {
+        setOrders((current) => {
+          const ids = new Set(current.map((order) => order.id));
+          return [...current, ...list.filter((order) => !ids.has(order.id))];
+        });
+      } else if (!append && page === 1 && preserveLoadedPages && sameQuery) {
+        const activeTab = tabRef.current;
+        const normalizedSearch = searchRef.current.trim().toLowerCase().replace(/^#/, "");
+        setOrders((current) => {
+          const freshIds = new Set(list.map((order) => order.id));
+          const stillMatches = (order: Order) => {
+            const matchesStatus = activeTab === "All"
+              || (activeTab === "New" && (order.status === "NEW" || order.status === "ACCEPTED"))
+              || order.status === activeTab.toUpperCase();
+            if (!matchesStatus) return false;
+            if (!normalizedSearch) return true;
+            return order.orderNumber.toString().includes(normalizedSearch)
+              || Boolean(order.customerName?.toLowerCase().includes(normalizedSearch))
+              || Boolean(order.customerPhone?.toLowerCase().includes(normalizedSearch))
+              || Boolean(order.table?.label.toLowerCase().includes(normalizedSearch))
+              || order.items.some((item) => item.nameSnapshot.toLowerCase().includes(normalizedSearch));
+          };
+          return [...list, ...current.filter((order) => !freshIds.has(order.id) && stillMatches(order))];
+        });
+      } else {
+        setOrders(list);
+      }
+      currentQueryKey.current = queryKey;
+      if (!(page === 1 && preserveLoadedPages && sameQuery)) currentPage.current = page;
+      setHasMore(data.pagination?.hasMore ?? false);
+      setTotalOrders(data.pagination?.total ?? list.length);
+      setStatusCounts(data.statusCounts ?? {});
       setLoading(false);
 
       setSelected((prev) => {
@@ -216,22 +274,75 @@ export default function OrdersPage() {
     } catch {
       // silent
     } finally {
-      isFetching.current = false;
+      if (append) {
+        isLoadingMore.current = false;
+        setLoadingMore(false);
+      } else {
+        isFetching.current = false;
+      }
     }
   }, [soundOn]);
 
+  const loadMore = useCallback(() => {
+    if (!hasMore || isLoadingMore.current) return;
+    void load(currentPage.current + 1, true);
+  }, [hasMore, load]);
+
   useEffect(() => {
-    // Load once, then refresh only when the realtime stream reports a change.
-    void load();
+    const cached = peekCache<{
+      orders?: Order[];
+      pagination?: { page: number; total: number; hasMore: boolean };
+      statusCounts?: Record<string, number>;
+    }>("admin:/api/admin/orders?page=1&limit=25&status=all&search=");
+    if (!cached) return;
+    setOrders(cached.orders ?? []);
+    setHasMore(cached.pagination?.hasMore ?? false);
+    setTotalOrders(cached.pagination?.total ?? cached.orders?.length ?? 0);
+    setStatusCounts(cached.statusCounts ?? {});
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    // Refresh the current query once; subsequent updates are push-driven.
+    const delay = search.trim() ? 300 : 0;
+    let timer = 0;
+    let cancelled = false;
+    const refresh = () => {
+      if (cancelled) return;
+      if (isFetching.current || isLoadingMore.current) {
+        timer = window.setTimeout(refresh, 100);
+        return;
+      }
+      const requestedStatus = tabRef.current === "All" ? "all" : tabRef.current.toLowerCase();
+      const requestedQueryKey = `${requestedStatus}|${searchRef.current.trim()}`;
+      const queryChanged = currentQueryKey.current !== requestedQueryKey;
+      if (queryChanged) setOrders([]);
+      currentQueryKey.current = "";
+      currentPage.current = 1;
+      setOrders([]);
+      setHasMore(true);
+      setTotalOrders(0);
+      setLoading(true);
+      invalidateCache("admin:/api/admin/orders");
+      void load(1, false, false);
+    };
+    timer = window.setTimeout(refresh, delay);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [tab, search, load]);
+
+  useEffect(() => {
     const onRestaurantEvent = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (detail?.type === "resync" || detail?.type === "order_created" || detail?.type === "order_updated" || detail?.type === "bill_updated") {
         invalidateCache("admin:/api/admin/orders");
-        void load();
+        void load(1, false, true);
       }
     };
     const onVisible = () => {
-      if (document.visibilityState === "visible") void load();
+      if (document.visibilityState === "visible") void load(1, false, true);
     };
     window.addEventListener("inforyse:restaurant-event", onRestaurantEvent);
     document.addEventListener("visibilitychange", onVisible);
@@ -273,45 +384,22 @@ export default function OrdersPage() {
   // Handle scroll pagination
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-    if (scrollHeight - scrollTop - clientHeight < 120) {
-      setVisibleCount((prev) => prev + SCROLL_BATCH_SIZE);
-    }
+    if (scrollHeight - scrollTop - clientHeight < 180) loadMore();
   }
 
-  // Filtered orders
-  const filtered = useMemo(() => {
-    return orders.filter((o) => {
-      const matchTab =
-        tab === "All" ||
-        o.status === tab.toUpperCase() ||
-        (tab === "New" && (o.status === "NEW" || o.status === "ACCEPTED"));
-
-      const query = search.toLowerCase();
-      const matchSearch =
-        !search ||
-        o.orderNumber.toString().includes(query) ||
-        (o.customerName && o.customerName.toLowerCase().includes(query)) ||
-        (o.table?.label && o.table.label.toLowerCase().includes(query)) ||
-        o.items.some((i) => i.nameSnapshot.toLowerCase().includes(query));
-
-      return matchTab && matchSearch;
-    });
-  }, [orders, tab, search]);
-
-  const visibleOrders = useMemo(() => {
-    return filtered.slice(0, visibleCount);
-  }, [filtered, visibleCount]);
+  const filtered = orders;
+  const visibleOrders = orders;
 
   const tabCounts = useMemo(() => {
     return {
-      All: orders.length,
-      New: orders.filter((o) => o.status === "NEW" || o.status === "ACCEPTED").length,
-      Preparing: orders.filter((o) => o.status === "PREPARING").length,
-      Ready: orders.filter((o) => o.status === "READY").length,
-      Completed: orders.filter((o) => o.status === "COMPLETED").length,
-      Cancelled: orders.filter((o) => o.status === "CANCELLED").length,
+      All: Object.values(statusCounts).reduce((sum, count) => sum + count, 0),
+      New: (statusCounts.NEW ?? 0) + (statusCounts.ACCEPTED ?? 0),
+      Preparing: statusCounts.PREPARING ?? 0,
+      Ready: statusCounts.READY ?? 0,
+      Completed: statusCounts.COMPLETED ?? 0,
+      Cancelled: statusCounts.CANCELLED ?? 0,
     };
-  }, [orders]);
+  }, [statusCounts]);
 
   async function updateStatus(order: Order, nextStatus: string) {
     const key = order.id + nextStatus;
@@ -589,7 +677,7 @@ export default function OrdersPage() {
 
               {/* Refresh */}
               <button
-                onClick={load}
+                onClick={() => { void load(1, false, true); }}
                 className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50"
               >
                 <RefreshCw className="h-4 w-4" />
@@ -618,7 +706,6 @@ export default function OrdersPage() {
                     key={t}
                     onClick={() => {
                       setTab(t);
-                      setVisibleCount(INITIAL_VISIBLE_COUNT);
                     }}
                     className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-semibold transition-all ${
                       isActive
@@ -650,10 +737,7 @@ export default function OrdersPage() {
                 className="input pl-9 py-1.5 text-xs bg-slate-50 border-slate-200"
                 placeholder="Search order #, table, dish, customer..."
                 value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setVisibleCount(INITIAL_VISIBLE_COUNT);
-                }}
+                  onChange={(e) => setSearch(e.target.value)}
               />
             </div>
           </div>
@@ -901,18 +985,12 @@ export default function OrdersPage() {
           {/* ── Scroll Pagination Feedback Indicator ────────────────────────── */}
           {filtered.length > 0 && (
             <div className="py-4 text-center">
-              {visibleCount < filtered.length ? (
-                <button
-                  onClick={() => setVisibleCount((prev) => prev + SCROLL_BATCH_SIZE)}
-                  className="text-xs font-semibold text-slate-500 hover:text-slate-900 bg-white border border-slate-200 rounded-full px-4 py-1.5 shadow-sm inline-flex items-center gap-1.5"
-                >
-                  <span>Showing {visibleOrders.length} of {filtered.length} orders · Load more</span>
-                  <ChevronDown className="h-3.5 w-3.5" />
-                </button>
+              {loadingMore ? (
+                <span className="text-xs font-semibold text-slate-500 inline-flex items-center gap-2"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Loading more orders…</span>
+              ) : hasMore ? (
+                <span className="text-xs text-slate-400">Showing {visibleOrders.length} of {totalOrders} orders · Scroll for more</span>
               ) : (
-                <span className="text-xs text-slate-400 font-medium">
-                  ✓ All {filtered.length} orders loaded
-                </span>
+                <span className="text-xs text-slate-400 font-medium">Showing all {visibleOrders.length} matching orders</span>
               )}
             </div>
           )}

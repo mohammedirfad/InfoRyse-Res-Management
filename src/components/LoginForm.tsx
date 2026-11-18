@@ -59,7 +59,10 @@ export function LoginForm({
         return;
       }
       // Instant direct login without OTP friction
-      router.push(redirectTo);
+      // Use a full document navigation after the login response has set the
+      // HTTP-only session cookie. This avoids a stale App Router transition
+      // leaving the login screen visible even though authentication succeeded.
+      window.location.replace(redirectTo);
     } catch {
       setError("Unable to connect to login server. Please try again.");
       setLoading(false);
