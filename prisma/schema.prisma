@@ -249,7 +249,9 @@ model Order {
   statusHistory  OrderStatusHistory[]
 
   @@index([restaurantId, status, createdAt])
+  @@index([restaurantId, createdAt])
   @@index([tableSessionId])
+  @@index([tableSessionId, createdAt])
   @@unique([restaurantId, orderNumber])
 }
 

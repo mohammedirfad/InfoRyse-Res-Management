@@ -85,6 +85,8 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
     let stopped = false;
     let source: EventSource | null = null;
     let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectAttempt = 0;
     let streamConnected = false;
     const applyStatus = (nextStatus: string | null) => {
       if (!nextStatus || stopped) return;
@@ -102,16 +104,22 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       }
     };
     const openStream = () => {
+      if (stopped) return;
       source?.close();
       streamConnected = false;
       source = new EventSource(`/api/public/order-events?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}&orderNumber=${encodeURIComponent(orderNumber)}`);
       source.addEventListener("connected", () => {
         streamConnected = true;
+        reconnectAttempt = 0;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = null;
         if (fallbackTimer) clearInterval(fallbackTimer);
         fallbackTimer = null;
       });
       source.onerror = () => {
         streamConnected = false;
+        source?.close();
+        source = null;
         const pollStatus = () => {
           if (stopped || streamConnected || document.visibilityState === "hidden" || statusRef.current === "CANCELLED") return;
           void fetch(`/api/public/order-status?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}&orderNumber=${encodeURIComponent(orderNumber)}`, { cache: "no-store" })
@@ -127,9 +135,14 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
         };
         if (!fallbackTimer) {
           pollStatus();
-          // Keep the fallback useful when realtime is down without polling
-          // every few seconds from every guest device.
-          fallbackTimer = setInterval(pollStatus, 15000);
+          fallbackTimer = setInterval(pollStatus, 20000);
+        }
+        if (reconnectTimer === null) {
+          const delay = Math.min(30_000, 2_000 * 2 ** reconnectAttempt++);
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            openStream();
+          }, delay);
         }
       };
       source.addEventListener("realtime_unavailable", () => source?.onerror?.(new Event("error")));
@@ -160,7 +173,11 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
     };
     openStream();
     const onVisible = () => {
-      if (document.visibilityState === "visible" && statusRef.current !== "CANCELLED") openStream();
+      if (document.visibilityState === "visible" && statusRef.current !== "CANCELLED") {
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+        openStream();
+      }
     };
     document.addEventListener("visibilitychange", onVisible);
 
@@ -171,6 +188,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       stopped = true;
       source?.close();
       if (fallbackTimer) clearInterval(fallbackTimer);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       document.removeEventListener("visibilitychange", onVisible);
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
     };

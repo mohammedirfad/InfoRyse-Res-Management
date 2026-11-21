@@ -151,6 +151,7 @@ export default function OrdersPage() {
   const prevNewCount = useRef(-1);
   const audioCtx = useRef<AudioContext | null>(null);
   const isFetching = useRef(false);
+  const refreshQueued = useRef(false);
   const isLoadingMore = useRef(false);
   const currentPage = useRef(1);
   const currentQueryKey = useRef("all|");
@@ -279,6 +280,11 @@ export default function OrdersPage() {
         setLoadingMore(false);
       } else {
         isFetching.current = false;
+        if (refreshQueued.current) {
+          refreshQueued.current = false;
+          invalidateCache("admin:/api/admin/orders");
+          void load(1, false, true);
+        }
       }
     }
   }, [soundOn]);
@@ -338,7 +344,8 @@ export default function OrdersPage() {
       const detail = (event as CustomEvent).detail;
       if (detail?.type === "resync" || detail?.type === "order_created" || detail?.type === "order_updated" || detail?.type === "bill_updated") {
         invalidateCache("admin:/api/admin/orders");
-        void load(1, false, true);
+        if (isFetching.current) refreshQueued.current = true;
+        else void load(1, false, true);
       }
     };
     const onVisible = () => {

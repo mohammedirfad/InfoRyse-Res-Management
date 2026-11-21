@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, RefreshCw, Sparkles, CheckCircle2, Clock, ChefHat, PartyPopper, Download, Receipt } from "lucide-react";
@@ -115,6 +115,8 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
   const [billRequestState, setBillRequestState] = useState<BillStage>("idle");
   const [billRequestMessage, setBillRequestMessage] = useState("");
   const [note, setNote]                   = useState("");
+  const refreshInFlight = useRef(false);
+  const refreshQueued = useRef(false);
 
   const base = `/r/${params.slug}/${params.qrToken}`;
 
@@ -125,6 +127,11 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
 
   // Poll server for active TableSession (all orders placed by anyone at this table)
   const refreshTableOrders = useCallback(async () => {
+    if (refreshInFlight.current) {
+      refreshQueued.current = true;
+      return;
+    }
+    refreshInFlight.current = true;
     setIsFetchingSession(true);
     try {
       const data = await refreshTableTab(params.slug, params.qrToken);
@@ -193,7 +200,12 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       // Never substitute a possibly stale previous session for the live bill.
       setPastOrders([]);
     } finally {
+      refreshInFlight.current = false;
       setIsFetchingSession(false);
+      if (refreshQueued.current) {
+        refreshQueued.current = false;
+        window.setTimeout(() => { void refreshTableOrders(); }, 0);
+      }
     }
   }, [params.slug, params.qrToken, syncSession]);
 
@@ -212,7 +224,9 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
   useEffect(() => {
     if (tab !== "confirmed") return;
     const url = `/api/public/order-events?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}`;
-    const source = new EventSource(url);
+    let source: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectAttempt = 0;
     const onTableChange = (rawEvent: MessageEvent) => {
       try {
         const event = JSON.parse(rawEvent.data);
@@ -233,27 +247,61 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
     };
     let connectedBefore = false;
     let fallbackTimer: ReturnType<typeof setInterval> | null = null;
-    source.addEventListener("connected", () => {
+    let stopped = false;
+    const stopFallback = () => {
       if (fallbackTimer) clearInterval(fallbackTimer);
       fallbackTimer = null;
-      if (connectedBefore) void refreshTableOrders();
-      connectedBefore = true;
-    });
-    source.onerror = () => {
+    };
+    const scheduleReconnect = () => {
+      if (stopped || reconnectTimer) return;
+      const delay = Math.min(30_000, 2_000 * 2 ** reconnectAttempt++);
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, delay);
+    };
+    const onStreamError = () => {
+      source?.close();
+      source = null;
       if (!fallbackTimer) {
         void refreshTableOrders();
         fallbackTimer = setInterval(() => {
           if (document.visibilityState === "visible") void refreshTableOrders();
-      }, 10000);
+        }, 15000);
+      }
+      scheduleReconnect();
+    };
+    const connect = () => {
+      if (stopped || source) return;
+      source = new EventSource(url);
+      source.addEventListener("connected", () => {
+        reconnectAttempt = 0;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+        stopFallback();
+        if (connectedBefore) void refreshTableOrders();
+        connectedBefore = true;
+      });
+      source.addEventListener("realtime_unavailable", onStreamError);
+      source.addEventListener("restaurant_event", onTableChange);
+      source.onerror = onStreamError;
+    };
+    connect();
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshTableOrders();
+      if (!source) {
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+        connect();
       }
     };
-    source.addEventListener("realtime_unavailable", () => source.onerror?.(new Event("error")));
-    source.addEventListener("restaurant_event", onTableChange);
-    const onVisible = () => { if (document.visibilityState === "visible") void refreshTableOrders(); };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      source.close();
-      if (fallbackTimer) clearInterval(fallbackTimer);
+      stopped = true;
+      source?.close();
+      stopFallback();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [tab, params.slug, params.qrToken, refreshTableOrders, billRequestState, sessionData?.session?.billRequestedAt]);
