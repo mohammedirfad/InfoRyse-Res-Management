@@ -35,6 +35,53 @@ export async function POST(
     const result = await db.$transaction(
       async (tx) => {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${params.tableId}))::text AS "locked"`;
+
+        // A client can retry after the first request committed but its response
+        // was lost. Resolve that retry to the same unpaid bill, provided the
+        // submitted session belongs to this restaurant and table.
+        if (body.tableSessionId) {
+          const submittedSession = await tx.tableSession.findFirst({
+            where: {
+              id: body.tableSessionId,
+              tableId: params.tableId,
+              restaurantId,
+            },
+            select: { id: true, billRequestedAt: true },
+          });
+          if (!submittedSession)
+            return { error: "This table session could not be found. Refresh the table and try again." } as const;
+
+          const submittedBill = await tx.bill.findFirst({
+            where: {
+              restaurantId,
+              tableId: params.tableId,
+              tableSessionId: submittedSession.id,
+            },
+            orderBy: { createdAt: "desc" },
+          });
+          if (submittedBill?.paymentStatus === "PAID")
+            return { error: "This table tab is already settled." } as const;
+
+          const activeSession = await getCurrentTableSession(
+            tx,
+            params.tableId,
+            restaurantId,
+          );
+          if (activeSession?.id !== submittedSession.id) {
+            if (submittedBill) {
+              return {
+                bill: submittedBill,
+                tableId: params.tableId,
+                guestRequested: Boolean(submittedSession.billRequestedAt),
+                resolved: [],
+              } as const;
+            }
+            return {
+              error: "This table tab has changed. Refresh the table before generating a bill.",
+            } as const;
+          }
+        }
+
         const current = await getCurrentTableSession(
           tx,
           params.tableId,
@@ -269,7 +316,7 @@ export async function POST(
       });
     }
 
-    return Response.json({ bill: result.bill, billUrl }, { status: 201 });
+    return Response.json({ bill: result.bill, billUrl }, { status: 200 });
   } catch (error) {
     if (error instanceof z.ZodError)
       return Response.json({ error: "Invalid bill request" }, { status: 400 });

@@ -121,6 +121,7 @@ export default function BillPage() {
   const [tables, setTables]                 = useState<Table[]>([]);
   const [selectedTable, setSelectedTable]   = useState<Table | null>(null);
   const [session, setSession]               = useState<Session | null>(null);
+  const [sessionTableId, setSessionTableId] = useState<string | null>(null);
   const [packingSaving, setPackingSaving] = useState(false);
   const [packingError, setPackingError] = useState("");
   const [restaurantName, setRestaurantName] = useState("");
@@ -156,6 +157,7 @@ export default function BillPage() {
 
   const selectedTableRef = useRef<Table | null>(null);
   selectedTableRef.current = selectedTable;
+  const billLoadSequenceRef = useRef(0);
   const tablesRef = useRef<Table[]>([]);
   tablesRef.current = tables;
   const requestedTableIdRef = useRef<string | null>(null);
@@ -208,7 +210,15 @@ export default function BillPage() {
 
   // Fetch specific table bill
   const loadBill = useCallback(async (table: Table, silent = false) => {
+    const requestSequence = ++billLoadSequenceRef.current;
+    const isSwitchingTables = selectedTableRef.current?.id !== table.id;
     setSelectedTable(table);
+    if (isSwitchingTables) {
+      setSession(null);
+      setSessionTableId(null);
+      setDigitalBillUrl("");
+      setBillSubmitError("");
+    }
     if (!silent) setLoading(true);
     try {
       const { data } = await cachedJson<{ session?: Session | null; restaurant?: { taxName?: string; taxPercent?: number } }>(
@@ -216,15 +226,18 @@ export default function BillPage() {
         `/api/admin/table-bill/${table.id}`,
         { ttlMs: 5_000 },
       );
+      if (requestSequence !== billLoadSequenceRef.current) return;
       setSession(data.session ?? null);
+      setSessionTableId(table.id);
       if (data.restaurant) {
         setTaxName(data.restaurant.taxName ?? "GST");
         setTaxPercent(data.restaurant.taxPercent ?? 5);
       }
     } catch (err) {
+      if (requestSequence !== billLoadSequenceRef.current) return;
       console.error("Failed to load table bill:", err);
     } finally {
-      if (!silent) setLoading(false);
+      if (requestSequence === billLoadSequenceRef.current && !silent) setLoading(false);
     }
   }, []);
 
@@ -315,7 +328,7 @@ export default function BillPage() {
 
   // Generate the final bill and push it to the guest instantly (one tap).
   async function generateAndShareBill() {
-    if (!session || !selectedTable) return;
+    if (!session || !selectedTable || sessionTableId !== selectedTable.id) return;
     if (digitalBillUrl) {
       window.open(digitalBillUrl, "_blank", "noopener");
       return;
@@ -467,6 +480,7 @@ export default function BillPage() {
       setSettlingPayment(false);
       // Immediately reset local table tab to clean available state
       setSession(null);
+      setSessionTableId(null);
       setSelectedTable((prev) =>
         prev
           ? {
@@ -907,7 +921,7 @@ export default function BillPage() {
                         <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
                       </button>
 
-                      {session && session.orderCount > 0 && (
+                      {session && sessionTableId === selectedTable.id && session.orderCount > 0 && (
                         <>
                           <button
                             onClick={generateAndShareBill}
