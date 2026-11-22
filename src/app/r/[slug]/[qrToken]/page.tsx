@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Search, X, ShoppingCart, Wifi, ChevronUp, ArrowLeft, ReceiptText } from "lucide-react";
 import { LandingPage } from "./landing";
@@ -9,6 +10,7 @@ import { useCart, formatRupees, type MenuItem } from "@/components/CartContext";
 import { getDishImageUrl } from "@/lib/dishImages";
 import { clearGuestTableSession, guestSessionQuery, saveGuestTableSession } from "@/lib/guestTableSession";
 import { requestTableBill } from "@/lib/guestBill";
+import GuestFeaturedCarousel from "@/components/GuestFeaturedCarousel";
 
 /* ── types ──────────────────────────────────────────────────────────────────── */
 type Category  = { id: string; name: string; menuItems: MenuItem[] };
@@ -266,12 +268,12 @@ function ItemCard({
       {/* Food Image with Floating Quantity Controller on Image */}
       <div className="relative w-full h-36 rounded-2xl overflow-hidden bg-gray-100 mb-2.5 flex-shrink-0">
         {!imgErr ? (
-          <img
+          <Image
             src={imageUrl}
             alt={item.name}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            fill
+            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+            className="object-cover group-hover:scale-105 transition-transform duration-500"
             onError={() => setImgErr(true)}
           />
         ) : (
@@ -382,8 +384,6 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
   const [billRequestState, setBillRequestState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [billRequestMessage, setBillRequestMessage] = useState("");
   const [vegFilter, setVegFilter]   = useState<"all"|"veg"|"nonveg">("all");
-  const [heroIdx, setHeroIdx]   = useState(0);
-  const [heroFrozen, setHeroFrozen] = useState(false); // stop auto-advance on interaction
   const [phase, setPhase]       = useState<"landing"|"menu">("landing"); // landing splash first
   const [visibleLimit, setVisibleLimit] = useState(16);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -501,7 +501,6 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
     return () => { cancelled = true; };
   }, [params.slug, params.qrToken, syncSession]);
 
-  /* hero auto-advance — stable, won't re-trigger on every render */
   const allItems = useMemo(() => data?.categories.flatMap(c=>c.menuItems).filter(i=>i.isAvailable) ?? [], [data]);
   const featuredItems = useMemo(() => {
     const withCategories = (data?.categories ?? []).flatMap((category) =>
@@ -516,14 +515,6 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
       Number(Boolean(item.isTodaySpecial));
     return withCategories.sort((a, b) => badgeScore(b) - badgeScore(a)).slice(0, 8);
   }, [data]);
-  const heroTotal = Math.min(allItems.length, 8);
-
-  useEffect(() => {
-    if (heroFrozen || heroTotal === 0) return;
-    const t = setInterval(() => setHeroIdx(i => (i+1) % heroTotal), 3500);
-    return () => clearInterval(t);
-  }, [heroFrozen, heroTotal]);
-
   /* search focus */
   useEffect(() => { if (showSearch) searchRef.current?.focus(); }, [showSearch]);
 
@@ -645,9 +636,12 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
               </button>
               <div className="flex min-w-0 flex-1 items-center justify-center gap-2 px-1">
                 {d.restaurant.logoUrl && (
-                  <img
+                  <Image
                     src={d.restaurant.logoUrl}
                     alt=""
+                    width={36}
+                    height={36}
+                    sizes="36px"
                     className="h-9 w-9 shrink-0 rounded-xl border border-gray-100 bg-white object-contain p-0.5"
                   />
                 )}
@@ -685,89 +679,9 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
       )}
 
       {/* ── HERO CAROUSEL ─────────────────────────────────────────────────────── */}
-      {!showSearch && featuredItems.length > 0 && (
-        <div className="pt-4 pb-2">
-          <div className="text-center mb-3 px-4">
-            <p className="text-xs text-gray-400 uppercase tracking-widest">{d.restaurant.name}</p>
-            <p className="text-sm text-gray-500">{d.categories.find(c=>c.id===activeCat)?.name ?? "Our Menu"}</p>
-          </div>
+      {!showSearch && featuredItems.length > 0 && <GuestFeaturedCarousel items={featuredItems} restaurantName={d.restaurant.name} categoryName={d.categories.find(c => c.id === activeCat)?.name ?? "Our Menu"} justAdded={justAdded} onSelect={setSelectedItem} onAdd={addToCart} />}
 
-          {/* Stable carousel — CSS transitions only, no layout shifts */}
-          <div className="relative flex items-center justify-center overflow-hidden" style={{ height: 260 }}>
-            {featuredItems.map((item, idx) => {
-              const offset = idx - heroIdx;
-              const absOff = Math.abs(offset);
-              const isCenter = offset === 0;
-              const hidden = absOff > 2;
-              return (
-                <div key={item.id}
-                  onClick={() => {
-                    if (!isCenter) { setHeroIdx(idx); setHeroFrozen(true); setTimeout(()=>setHeroFrozen(false),5000); }
-                    else setSelectedItem(item);
-                  }}
-                  style={{
-                    position:"absolute",
-                    width: isCenter ? 200 : 130,
-                    height: isCenter ? 200 : 130,
-                    left: "50%",
-                    transform: `translateX(calc(-50% + ${offset * 155}px)) scale(${isCenter?1:0.85})`,
-                    opacity: hidden ? 0 : isCenter ? 1 : 0.6,
-                    zIndex: isCenter ? 10 : 10-absOff,
-                    transition: "all 0.45s cubic-bezier(0.25,0.46,0.45,0.94)",
-                    pointerEvents: hidden ? "none" : "auto",
-                  }}
-                  className="cursor-pointer">
-                  <div className={`w-full h-full rounded-2xl overflow-hidden shadow-xl bg-gradient-to-br ${grad(idx)} relative flex items-center justify-center`}>
-                    <div className="absolute inset-0 flex items-center justify-center text-5xl">🍽️</div>
-                    {item.imageUrl && (
-                      <img
-                        src={item.imageUrl}
-                        alt={item.name}
-                        loading="lazy"
-                        decoding="async"
-                        className="relative z-10 w-full h-full object-cover"
-                        onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
-                      />
-                    )}
-                    {menuBadge(item) && <span className={`absolute left-2 top-2 z-20 rounded-full px-2.5 py-1 text-[9px] font-black shadow ${menuBadge(item)!.style}`}>{menuBadge(item)!.label}</span>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Active item info — below carousel, no layout shift */}
-          {featuredItems[heroIdx] && (
-            <div className="text-center px-8 mt-2 min-h-[72px]">
-              {menuBadge(featuredItems[heroIdx]) && <span className={`mb-1 inline-flex rounded-full px-2.5 py-1 text-[9px] font-black ${menuBadge(featuredItems[heroIdx])!.style}`}>{menuBadge(featuredItems[heroIdx])!.label}</span>}
-              <p className="font-bold text-gray-900 text-base leading-snug">{featuredItems[heroIdx].name}</p>
-              {featuredItems[heroIdx].description && (
-                <p className="text-xs text-gray-400 mt-0.5 line-clamp-2 leading-relaxed">{featuredItems[heroIdx].description}</p>
-              )}
-              <div className="flex items-center justify-center gap-3 mt-2">
-                <span className="font-bold text-gray-900">{formatRupees(featuredItems[heroIdx].priceCents)}</span>
-                <button onClick={e=>addToCart(featuredItems[heroIdx],e)}
-                  className={`text-xs font-bold px-4 py-1.5 rounded-full border-2 transition-all active:scale-90
-                    ${justAdded===featuredItems[heroIdx].id
-                      ?"bg-green-500 text-white border-green-500"
-                      :"bg-white text-gray-900 border-gray-900 hover:bg-gray-900 hover:text-white"}`}>
-                  {justAdded===featuredItems[heroIdx].id ? "Added ✓" : "Add to cart"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Dots */}
-          <div className="flex justify-center gap-1.5 mt-3">
-            {featuredItems.map((_,i)=>(
-              <button key={i} onClick={()=>{ setHeroIdx(i); setHeroFrozen(true); setTimeout(()=>setHeroFrozen(false),5000); }}
-                className={`rounded-full transition-all ${i===heroIdx?"w-5 h-1.5 bg-gray-900":"w-1.5 h-1.5 bg-gray-200"}`}/>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── MENU SECTION ──────────────────────────────────────────────────────── */}
+      {/* MENU SECTION */}
       <div className="mt-6 px-4">
         <div className="text-center mb-4">
           <p className="text-xs text-gray-400 uppercase tracking-widest">What's on</p>
@@ -896,10 +810,12 @@ export default function MenuPage({ params }:{ params:{ slug:string; qrToken:stri
             onClick={(e) => e.stopPropagation()}
           >
             <div className="relative h-60 flex-shrink-0 bg-gray-100 flex items-center justify-center overflow-hidden">
-              <img
+              <Image
                 src={getDishImageUrl(selectedItem.name, undefined, selectedItem.imageUrl)}
                 alt={selectedItem.name}
-                className="w-full h-full object-cover"
+                fill
+                sizes="(max-width: 640px) 100vw, 512px"
+                className="object-cover"
                 onError={(e) => {
                   (e.currentTarget as HTMLElement).style.display = "none";
                 }}

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { verifyPassword, createSession } from "@/lib/auth";
-import { checkRateLimit } from "@/lib/rateLimit";
+import { checkSharedRateLimit } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     const email = rawEmail.toLowerCase();
 
     // Rate-limit login attempts per email, independent of every other account.
-    const limit = checkRateLimit(`login:${email}`, 10, 15 * 60 * 1000);
+    const limit = await checkSharedRateLimit(`login:${email}`, 10, 15 * 60 * 1000);
     if (!limit.allowed) {
       return Response.json({ error: "Too many login attempts. Please wait a few minutes or reset your password." }, { status: 429 });
     }

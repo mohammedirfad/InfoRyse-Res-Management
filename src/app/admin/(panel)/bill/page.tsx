@@ -168,8 +168,18 @@ export default function BillPage() {
     try {
       setIsRefreshing(true);
       const [tablesData, meData] = await Promise.all([
-        cachedJson<{ tables?: Table[] }>("admin:/api/admin/tables", "/api/admin/tables"),
-        cachedJson<{ restaurant?: { name?: string; taxName?: string; taxPercent?: number } }>("admin:/api/admin/me", "/api/admin/me"),
+        cachedJson<{ tables?: Table[] }>("admin:/api/admin/tables", "/api/admin/tables", {
+          onUpdate: (updated) => setTables((updated as { tables?: Table[] }).tables ?? []),
+        }),
+        cachedJson<{ restaurant?: { name?: string; taxName?: string; taxPercent?: number } }>("admin:/api/admin/me", "/api/admin/me", {
+          onUpdate: (updated) => {
+            const restaurant = (updated as { restaurant?: { name?: string; taxName?: string; taxPercent?: number } }).restaurant;
+            if (!restaurant) return;
+            setRestaurantName(restaurant.name ?? "");
+            setTaxName(restaurant.taxName ?? "GST");
+            setTaxPercent(restaurant.taxPercent ?? 5);
+          },
+        }),
       ]);
 
       const loadedTables: Table[] = tablesData.data.tables ?? [];

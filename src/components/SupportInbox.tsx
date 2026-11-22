@@ -77,7 +77,7 @@ export default function SupportInbox({ scope }: { scope: Scope }) {
     void loadTickets();
     const timer = window.setInterval(() => {
       if (!document.hidden) void loadTickets(true);
-    }, 5000);
+    }, 20_000);
     return () => window.clearInterval(timer);
   }, [loadTickets]);
 
@@ -103,7 +103,7 @@ export default function SupportInbox({ scope }: { scope: Scope }) {
     void loadDetail(selectedId);
     const timer = window.setInterval(() => {
       if (!document.hidden) void loadDetail(selectedId);
-    }, 5000);
+    }, 20_000);
     return () => window.clearInterval(timer);
   }, [loadDetail, selectedId]);
 

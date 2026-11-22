@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import LogoutButton from "./LogoutButton";
 import { invalidateCache } from "@/lib/cachedFetch";
+import { prefetchAdminRoute } from "@/lib/adminPrefetch";
 
 const NAV = [
   { href: "/admin/dashboard",  label: "Dashboard",          icon: LayoutDashboard },
@@ -46,6 +47,17 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
     return () => window.clearTimeout(timeout);
   }, [pendingHref]);
 
+  useEffect(() => {
+    const alternate = pathname === "/admin/orders" ? "/admin/dashboard" : "/admin/orders";
+    const idleWindow = window as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+    if (idleWindow.requestIdleCallback) {
+      const id = idleWindow.requestIdleCallback(() => prefetchAdminRoute(alternate), { timeout: 1500 });
+      return () => idleWindow.cancelIdleCallback?.(id);
+    }
+    const id = window.setTimeout(() => prefetchAdminRoute(alternate), 800);
+    return () => window.clearTimeout(id);
+  }, [pathname]);
+
   // Close on Escape key
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
@@ -72,6 +84,7 @@ export default function AdminSidebar({ restaurant, userRole = "OWNER" }: Props) 
 
   function warmRoute(href: string) {
     router.prefetch(href);
+    prefetchAdminRoute(href);
   }
 
   const sidebarContent = (

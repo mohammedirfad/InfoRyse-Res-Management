@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
-import { checkRateLimit } from "@/lib/rateLimit";
+import { checkSharedRateLimit } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const actor = await requireRestaurantUser();
-    const limit = checkRateLimit(`support-ticket-create:${actor.userId}`, 5, 60 * 60 * 1000);
+    const limit = await checkSharedRateLimit(`support-ticket-create:${actor.userId}`, 5, 60 * 60 * 1000);
     if (!limit.allowed) return Response.json({ error: "Please wait before opening another support ticket." }, { status: 429 });
     const parsed = CreateTicketSchema.safeParse(await request.json());
     if (!parsed.success) return Response.json({ error: parsed.error.issues[0]?.message || "Please check the ticket details." }, { status: 400 });

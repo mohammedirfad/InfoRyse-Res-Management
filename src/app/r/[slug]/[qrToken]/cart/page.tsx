@@ -28,6 +28,7 @@ import {
   type BillStage,
 } from "@/lib/guestBill";
 import { capitalizeInitials } from "@/lib/nameFormat";
+import { subscribeBrowserRealtime } from "@/lib/browserRealtime";
 
 interface TableSessionData {
   table: { id: string; label: string; status: string };
@@ -117,6 +118,10 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
   const [note, setNote]                   = useState("");
   const refreshInFlight = useRef(false);
   const refreshQueued = useRef(false);
+  const billRequestStateRef = useRef(billRequestState);
+  const billRequestedAtRef = useRef<string | null | undefined>(sessionData?.session?.billRequestedAt);
+  billRequestStateRef.current = billRequestState;
+  billRequestedAtRef.current = sessionData?.session?.billRequestedAt;
 
   const base = `/r/${params.slug}/${params.qrToken}`;
 
@@ -227,12 +232,11 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
     let source: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectAttempt = 0;
-    const onTableChange = (rawEvent: MessageEvent) => {
+    const onTableEvent = (event: any) => {
       try {
-        const event = JSON.parse(rawEvent.data);
         const shareToken = event?.data?.shareToken;
         const sessionId = event?.data?.tableSessionId ?? event?.data?.sessionId;
-        const billWasRequested = billRequestState === "sending" || billRequestState === "waiting" || billRequestState === "ready" || Boolean(sessionData?.session?.billRequestedAt);
+        const billWasRequested = billRequestStateRef.current === "sending" || billRequestStateRef.current === "waiting" || billRequestStateRef.current === "ready" || Boolean(billRequestedAtRef.current);
         const billIsAlreadyPaid = event?.data?.paymentStatus === "PAID";
         if (event?.type === "bill_updated" && shareToken && sessionId && (billWasRequested || billIsAlreadyPaid)) {
           const billLink = { token: shareToken as string, sessionId: sessionId as string };
@@ -245,12 +249,26 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       } catch { /* The session snapshot will still refresh when possible. */ }
       void refreshTableOrders();
     };
+    const onTableChange = (rawEvent: MessageEvent) => {
+      try { onTableEvent(JSON.parse(rawEvent.data)); } catch { /* Ignore malformed event frames. */ }
+    };
     let connectedBefore = false;
     let fallbackTimer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
+    let directStop: (() => void) | null = null;
+    let directStarting = false;
+    let directRejected = false;
+    let hiddenAt: number | null = null;
     const stopFallback = () => {
       if (fallbackTimer) clearInterval(fallbackTimer);
       fallbackTimer = null;
+    };
+    const startFallbackPolling = () => {
+      if (fallbackTimer) return;
+      void refreshTableOrders();
+      fallbackTimer = setInterval(() => {
+        if (document.visibilityState === "visible") void refreshTableOrders();
+      }, 20000);
     };
     const scheduleReconnect = () => {
       if (stopped || reconnectTimer) return;
@@ -271,7 +289,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       }
       scheduleReconnect();
     };
-    const connect = () => {
+    const connectLegacy = () => {
       if (stopped || source) return;
       source = new EventSource(url);
       source.addEventListener("connected", () => {
@@ -286,25 +304,63 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       source.addEventListener("restaurant_event", onTableChange);
       source.onerror = onStreamError;
     };
+    const connect = () => {
+      if (stopped || directStop || directStarting) return;
+      if (directRejected) { connectLegacy(); return; }
+      directStarting = true;
+      void subscribeBrowserRealtime({ scope: "table", slug: params.slug, qrToken: params.qrToken }, onTableEvent, (connected) => {
+        if (connected) {
+          reconnectAttempt = 0;
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+          stopFallback();
+          if (connectedBefore) void refreshTableOrders();
+          connectedBefore = true;
+        } else if (!stopped && !fallbackTimer) {
+          void refreshTableOrders();
+          fallbackTimer = setInterval(() => {
+            if (document.visibilityState === "visible") void refreshTableOrders();
+          }, 20_000);
+        }
+      }, () => {
+        directRejected = true;
+        connectLegacy();
+      }).then((stopBrowser) => {
+        directStarting = false;
+        if (stopped) { stopBrowser?.(); return; }
+        if (stopBrowser) directStop = stopBrowser;
+        else if (process.env.NODE_ENV === "production") startFallbackPolling();
+        else connectLegacy();
+      }).catch(() => {
+        directStarting = false;
+        if (process.env.NODE_ENV === "production") startFallbackPolling();
+        else connectLegacy();
+      });
+    };
     connect();
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
-      void refreshTableOrders();
-      if (!source) {
+      if (hiddenAt !== null && Date.now() - hiddenAt > 30_000) void refreshTableOrders();
+      hiddenAt = null;
+      if (!source && !directStop) {
         if (reconnectTimer) clearTimeout(reconnectTimer);
         reconnectTimer = null;
         connect();
       }
     };
+    const onHidden = () => { if (document.visibilityState === "hidden") hiddenAt = Date.now(); };
     document.addEventListener("visibilitychange", onVisible);
+    document.addEventListener("visibilitychange", onHidden);
     return () => {
       stopped = true;
+      directStop?.();
       source?.close();
       stopFallback();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("visibilitychange", onHidden);
     };
-  }, [tab, params.slug, params.qrToken, refreshTableOrders, billRequestState, sessionData?.session?.billRequestedAt]);
+  }, [tab, params.slug, params.qrToken, refreshTableOrders]);
 
   const subtotal   = totalCents;
   const grandTotal = subtotal;

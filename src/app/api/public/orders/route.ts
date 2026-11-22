@@ -46,7 +46,7 @@ export async function POST(req: Request) {
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
             ?? req.headers.get("x-real-ip")
             ?? "unknown";
-    const ipLimit = checkOrderRateLimit("ip:" + ip, "global");
+    const ipLimit = await checkOrderRateLimit("ip:" + ip, "global");
     if (!ipLimit.allowed) {
       return Response.json(
         { error: "Too many requests. Please wait a moment and try again." },
@@ -96,7 +96,7 @@ export async function POST(req: Request) {
     }
 
     // 4) Rate limit per table, independent of every other table/restaurant.
-    const limit = checkOrderRateLimit(restaurant.id, table.id);
+    const limit = await checkOrderRateLimit(restaurant.id, table.id);
     if (!limit.allowed) {
       return Response.json({ error: "Please wait a moment before ordering again" }, { status: 429 });
     }
@@ -106,7 +106,7 @@ export async function POST(req: Request) {
     //    and network retries).
     const validationStartedAt = performance.now();
     const [existing, dbItems] = await Promise.all([
-      db.order.findFirst({ where: { idempotencyKey: body.idempotencyKey, restaurantId: restaurant.id, tableId: table.id } }),
+      db.order.findFirst({ where: { idempotencyKey: body.idempotencyKey, restaurantId: restaurant.id, tableId: table.id }, include: { items: true } }),
       db.menuItem.findMany({
         where: { id: { in: body.items.map((item) => item.menuItemId) }, restaurantId: restaurant.id, deletedAt: null },
       }),
@@ -119,13 +119,7 @@ export async function POST(req: Request) {
         restaurantId: restaurant.id,
         type: "order_created",
         data: {
-          orderId: existing.id,
-          orderNumber: existing.orderNumber,
-          customerName: existing.customerName,
-          createdAt: existing.createdAt,
-          tableLabel: table.label,
-          tableId: table.id,
-          totalCents: existing.totalCents,
+          order: { ...existing, table: { label: table.label } },
         },
       });
       return Response.json({ order: existing, tableSessionId: existing.tableSessionId, duplicate: true }, { status: 200 });
@@ -213,19 +207,13 @@ export async function POST(req: Request) {
       // Concurrent retries with the same idempotency key can race past the
       // initial lookup. Return the already-created order instead of a 500.
       if (err?.code === "P2002") {
-        const duplicate = await db.order.findFirst({ where: { idempotencyKey: body.idempotencyKey, restaurantId: restaurant.id, tableId: table.id } });
+        const duplicate = await db.order.findFirst({ where: { idempotencyKey: body.idempotencyKey, restaurantId: restaurant.id, tableId: table.id }, include: { items: true } });
         if (duplicate) {
           await emitOrderEvent({
             restaurantId: restaurant.id,
             type: "order_created",
             data: {
-              orderId: duplicate.id,
-              orderNumber: duplicate.orderNumber,
-              customerName: duplicate.customerName,
-              createdAt: duplicate.createdAt,
-              tableLabel: table.label,
-              tableId: table.id,
-              totalCents: duplicate.totalCents,
+              order: { ...duplicate, table: { label: table.label } },
             },
           });
           return Response.json({ order: duplicate, tableSessionId: duplicate.tableSessionId, duplicate: true }, { status: 200 });
@@ -241,13 +229,7 @@ export async function POST(req: Request) {
       restaurantId: restaurant.id,
       type: "order_created",
       data: {
-        orderId: session.order.id,
-        orderNumber: session.order.orderNumber,
-        customerName: session.order.customerName,
-        createdAt: session.order.createdAt,
-        tableLabel: table.label,
-        tableId: table.id,
-        totalCents: session.order.totalCents,
+        order: { ...session.order, table: { label: table.label } },
       },
     });
     realtimeDispatchMs = performance.now() - realtimeStartedAt;

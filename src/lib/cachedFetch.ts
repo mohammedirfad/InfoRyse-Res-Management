@@ -1,4 +1,6 @@
 "use client";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { getQueryClient } from "@/lib/queryClient";
 
 /**
  * Tiny client-side cache used by every admin screen (and the guest pages that
@@ -20,8 +22,7 @@
 
 type Entry = { data: unknown; savedAt: number };
 
-const memory = new Map<string, Entry>();
-const inflight = new Map<string, Promise<unknown>>();
+const queryClient = getQueryClient();
 
 /** Prefix for every key we store so the namespace can be cleared in one go. */
 const STORAGE_PREFIX = "inforyse:cache:";
@@ -33,10 +34,16 @@ export type CachedFetchOptions = {
   maxStaleMs?: number;
   /** Start the request in the background without awaiting it. */
   prefetch?: boolean;
+  /** Apply a background refresh to the mounted page that requested it. */
+  onUpdate?: (data: unknown) => void;
 };
 
 const DEFAULT_TTL = 60_000;
-const DEFAULT_MAX_STALE = 30 * 60_000;
+const DEFAULT_MAX_STALE = 24 * 60 * 60_000;
+
+function refreshInBackground<T>(key: string, url: string, onUpdate?: (data: T) => void) {
+  void fetchJsonCached<T>(key, url).then((data) => onUpdate?.(data)).catch(() => {});
+}
 
 function readStorage(key: string): Entry | null {
   if (typeof window === "undefined") return null;
@@ -60,23 +67,24 @@ function writeStorage(key: string, entry: Entry) {
 
 /** Last snapshot we have for a key, or null. Synchronous: safe in useState(). */
 export function peekCache<T>(key: string, maxStaleMs = DEFAULT_MAX_STALE): T | null {
-  const entry = memory.get(key) ?? readStorage(key);
+  const entry = queryClient.getQueryData<Entry>([key]) ?? readStorage(key);
   if (!entry) return null;
   if (Date.now() - entry.savedAt > maxStaleMs) return null;
+  queryClient.setQueryData([key], entry);
   return entry.data as T;
 }
 
 /** Write a value that came back from the server (or from an optimistic update). */
 export function writeCache<T>(key: string, data: T) {
   const entry: Entry = { data, savedAt: Date.now() };
-  memory.set(key, entry);
+  queryClient.setQueryData([key], entry);
   writeStorage(key, entry);
 }
 
 /** Drop every cached response (used by keys that start with the prefix). */
 export function invalidateCache(prefix?: string) {
   if (!prefix) {
-    memory.clear();
+    queryClient.clear();
     if (typeof window !== "undefined") {
       try {
         for (const key of Object.keys(window.sessionStorage)) {
@@ -86,7 +94,7 @@ export function invalidateCache(prefix?: string) {
     }
     return;
   }
-  for (const key of [...memory.keys()]) if (key.startsWith(prefix)) memory.delete(key);
+  queryClient.removeQueries({ predicate: (query) => typeof query.queryKey[0] === "string" && query.queryKey[0].startsWith(prefix) });
   if (typeof window !== "undefined") {
     try {
       for (const key of Object.keys(window.sessionStorage)) {
@@ -97,7 +105,7 @@ export function invalidateCache(prefix?: string) {
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, { ...init, cache: "no-store" });
+  const response = await fetchWithRetry(url, { ...init, cache: "no-store" });
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     const message = (payload as { error?: string } | null)?.error ?? `Request failed (${response.status})`;
@@ -115,13 +123,15 @@ export async function cachedJson<T>(
   url: string,
   options: CachedFetchOptions = {},
 ): Promise<{ data: T; fromCache: boolean }> {
-  const { ttlMs = DEFAULT_TTL, maxStaleMs = DEFAULT_MAX_STALE, prefetch = false } = options;
-  const entry = memory.get(key) ?? readStorage(key);
+  const { ttlMs = DEFAULT_TTL, maxStaleMs = DEFAULT_MAX_STALE, prefetch = false, onUpdate } = options;
+  const entry = queryClient.getQueryData<Entry>([key]) ?? readStorage(key);
   const fresh = entry && Date.now() - entry.savedAt < ttlMs;
 
   if (fresh) {
-    if (entry) memory.set(key, entry);
-    if (prefetch) void fetchJsonCached<T>(key, url, { maxStaleMs });
+    if (entry) queryClient.setQueryData([key], entry);
+    // Refresh on route entry even when the persisted value is still within its
+    // paint TTL; observers receive the newer value without waiting for expiry.
+    refreshInBackground<T>(key, url, onUpdate);
     return { data: entry!.data as T, fromCache: true };
   }
 
@@ -130,8 +140,8 @@ export async function cachedJson<T>(
   // background so the next visit starts with newer data. Mutations invalidate
   // these keys and therefore still require a fresh server response.
   if (entry && Date.now() - entry.savedAt <= maxStaleMs) {
-    memory.set(key, entry);
-    void fetchJsonCached<T>(key, url, { maxStaleMs }).catch(() => {});
+    queryClient.setQueryData([key], entry);
+    refreshInBackground<T>(key, url, onUpdate);
     return { data: entry.data as T, fromCache: true };
   }
 
@@ -145,23 +155,21 @@ export function fetchJsonCached<T>(
   url: string,
   options: { maxStaleMs?: number } = {},
 ): Promise<T> {
-  const existing = inflight.get(key);
-  if (existing) return existing as Promise<T>;
-  const promise = requestJson<T>(url)
-    .then((data) => {
-      writeCache(key, data);
-      return data;
-    })
-    .finally(() => {
-      inflight.delete(key);
-    });
-  inflight.set(key, promise);
-  return promise;
+  return queryClient.fetchQuery({
+    queryKey: [key],
+    staleTime: 0,
+    queryFn: async () => {
+      const data = await requestJson<T>(url);
+      const entry: Entry = { data, savedAt: Date.now() };
+      writeStorage(key, entry);
+      return entry;
+    },
+  }).then((entry) => entry.data as T);
 }
 
 /** Fire-and-forget warm-up. Failures are silent: the page will fetch on demand. */
 export function prefetchJson(key: string, url: string) {
-  const entry = memory.get(key);
+  const entry = queryClient.getQueryData<Entry>([key]) ?? readStorage(key);
   if (entry && Date.now() - entry.savedAt < 15_000) return;
   void fetchJsonCached(key, url).catch(() => {});
 }

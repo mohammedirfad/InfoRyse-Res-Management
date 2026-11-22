@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   Search, RefreshCw, X, CheckCircle2, XCircle, ChefHat,
-  ShoppingBag, Printer, Volume2, VolumeX, Bell, Plus,
+  ShoppingBag, Printer, Plus,
   Clock, ArrowRight, UtensilsCrossed, LayoutList, LayoutGrid,
   Check, AlertCircle, Sparkles
 } from "lucide-react";
@@ -11,6 +11,8 @@ import { formatRupees, formatTime } from "@/lib/utils";
 import { fetchJsonCached, invalidateCache, peekCache } from "@/lib/cachedFetch";
 import { saveAdminRouteData } from "@/lib/adminPrefetch";
 import OrderMenuPicker from "@/components/OrderMenuPicker";
+import { AdminOrderCard, AdminOrderTableRow, type OrderRowData } from "@/components/AdminOrderRow";
+import OrderArrivalToast from "@/components/OrderArrivalToast";
 
 type OrderItem = { id: string; menuItemId: string | null; nameSnapshot: string; priceCentsSnapshot: number; quantity: number; servedQuantity: number; cancelledQuantity: number };
 type MenuCategory = { id: string; name: string };
@@ -29,7 +31,6 @@ type Order = {
   orderType: string | null;
   paymentMethod: string | null;
   createdAt: string;
-  statusHistory: { status: string; createdAt: string }[];
 };
 
 const TABS = ["All", "New", "Preparing", "Ready", "Completed", "Cancelled"] as const;
@@ -114,7 +115,6 @@ export default function OrdersPage() {
   const [tab, setTab] = useState<string>("All");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Order | null>(null);
-  const [soundOn, setSoundOn] = useState(true);
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
@@ -122,7 +122,6 @@ export default function OrdersPage() {
 
   // Luxury dynamic toast state
   const [arrivalToastOrder, setArrivalToastOrder] = useState<Order | null>(null);
-  const [toastTimerProgress, setToastTimerProgress] = useState(100);
 
   // Manual order modal state
   const [showCreate, setShowCreate] = useState(false);
@@ -149,7 +148,7 @@ export default function OrdersPage() {
   const [createError, setCreateError] = useState<string | null>(null);
 
   const prevNewCount = useRef(-1);
-  const audioCtx = useRef<AudioContext | null>(null);
+  const orderStatusById = useRef(new Map<string, string>());
   const isFetching = useRef(false);
   const refreshQueued = useRef(false);
   const isLoadingMore = useRef(false);
@@ -159,44 +158,7 @@ export default function OrdersPage() {
   const searchRef = useRef(search);
   tabRef.current = tab;
   searchRef.current = search;
-
-  // Dual-tone executive chime for incoming orders
-  function playExecutiveChime() {
-    if (!soundOn) return;
-    try {
-      if (!audioCtx.current) {
-        audioCtx.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-      const ctx = audioCtx.current;
-      if (ctx.state === "suspended") ctx.resume();
-
-      // Note 1: 880 Hz
-      const osc1 = ctx.createOscillator();
-      const gain1 = ctx.createGain();
-      osc1.type = "sine";
-      osc1.frequency.setValueAtTime(880, ctx.currentTime);
-      gain1.gain.setValueAtTime(0.25, ctx.currentTime);
-      gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-      osc1.connect(gain1);
-      gain1.connect(ctx.destination);
-      osc1.start(ctx.currentTime);
-      osc1.stop(ctx.currentTime + 0.35);
-
-      // Note 2: 1320 Hz
-      const osc2 = ctx.createOscillator();
-      const gain2 = ctx.createGain();
-      osc2.type = "sine";
-      osc2.frequency.setValueAtTime(1320, ctx.currentTime + 0.15);
-      gain2.gain.setValueAtTime(0.3, ctx.currentTime + 0.15);
-      gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-      osc2.start(ctx.currentTime + 0.15);
-      osc2.stop(ctx.currentTime + 0.6);
-    } catch {
-      // Audio context restricted by browser policy
-    }
-  }
+  const handleSelectOrder = useCallback((order: OrderRowData) => setSelected(order as Order), []);
 
   // Serverless instances do not share memory. The shared Realtime stream
   // signals changes; fetch the order snapshot only at entry or after a signal.
@@ -223,6 +185,7 @@ export default function OrdersPage() {
       if (queryKey !== `${latestStatus}|${searchRef.current.trim()}`) return;
       saveAdminRouteData(url, data);
       const list: Order[] = data.orders ?? [];
+      for (const order of list) orderStatusById.current.set(order.id, order.status);
       const sameQuery = currentQueryKey.current === queryKey;
       if (append && sameQuery) {
         setOrders((current) => {
@@ -265,29 +228,28 @@ export default function OrdersPage() {
 
       const newOrders = list.filter((o) => o.status === "NEW");
       if (prevNewCount.current !== -1 && newOrders.length > prevNewCount.current) {
-        // Trigger high-end notification banner & audio
-        playExecutiveChime();
+        // AdminOrderNotifications owns the shared sound; this page owns its toast.
         const latestNewOrder = newOrders[0];
         setArrivalToastOrder(latestNewOrder);
-        setToastTimerProgress(100);
       }
       prevNewCount.current = newOrders.length;
     } catch {
-      // silent
+      // Keep the page usable with its last snapshot if the refresh fails.
+      if (!append) setLoading(false);
     } finally {
       if (append) {
         isLoadingMore.current = false;
         setLoadingMore(false);
       } else {
         isFetching.current = false;
-        if (refreshQueued.current) {
-          refreshQueued.current = false;
-          invalidateCache("admin:/api/admin/orders");
-          void load(1, false, true);
-        }
+      }
+      if (refreshQueued.current) {
+        refreshQueued.current = false;
+        invalidateCache("admin:/api/admin/orders");
+        void load(1, false, true);
       }
     }
-  }, [soundOn]);
+  }, []);
 
   const loadMore = useCallback(() => {
     if (!hasMore || isLoadingMore.current) return;
@@ -305,6 +267,7 @@ export default function OrdersPage() {
     setHasMore(cached.pagination?.hasMore ?? false);
     setTotalOrders(cached.pagination?.total ?? cached.orders?.length ?? 0);
     setStatusCounts(cached.statusCounts ?? {});
+    for (const order of cached.orders ?? []) orderStatusById.current.set(order.id, order.status);
     setLoading(false);
   }, []);
 
@@ -316,7 +279,7 @@ export default function OrdersPage() {
     const refresh = () => {
       if (cancelled) return;
       if (isFetching.current || isLoadingMore.current) {
-        timer = window.setTimeout(refresh, 100);
+        refreshQueued.current = true;
         return;
       }
       const requestedStatus = tabRef.current === "All" ? "all" : tabRef.current.toLowerCase();
@@ -342,14 +305,95 @@ export default function OrdersPage() {
   useEffect(() => {
     const onRestaurantEvent = (event: Event) => {
       const detail = (event as CustomEvent).detail;
-      if (detail?.type === "resync" || detail?.type === "order_created" || detail?.type === "order_updated" || detail?.type === "bill_updated") {
+      if (detail?.type === "resync") {
         invalidateCache("admin:/api/admin/orders");
-        if (isFetching.current) refreshQueued.current = true;
+        if (isFetching.current || isLoadingMore.current) refreshQueued.current = true;
         else void load(1, false, true);
+      } else if (detail?.type === "order_created") {
+        invalidateCache("admin:/api/admin/orders");
+        const data = detail.data?.order ?? detail.data ?? {};
+        // The public event includes the full order so live updates do not need
+        // to issue three list queries for every incoming ticket.
+        if (!data.id || !Array.isArray(data.items)) {
+          if (isFetching.current || isLoadingMore.current) refreshQueued.current = true;
+          else void load(1, false, true);
+          return;
+        }
+        const freshOrder = data as Order;
+        const activeTab = tabRef.current;
+        const normalizedSearch = searchRef.current.trim().toLowerCase().replace(/^#/, "");
+        const matchesTab = activeTab === "All" || (activeTab === "New" && ["NEW", "ACCEPTED"].includes(freshOrder.status)) || freshOrder.status === activeTab.toUpperCase();
+        const matchesSearch = !normalizedSearch || freshOrder.orderNumber.toString().includes(normalizedSearch)
+          || Boolean(freshOrder.customerName?.toLowerCase().includes(normalizedSearch))
+          || Boolean(freshOrder.customerPhone?.toLowerCase().includes(normalizedSearch))
+          || Boolean(freshOrder.table?.label.toLowerCase().includes(normalizedSearch))
+          || freshOrder.items.some((item) => item.nameSnapshot.toLowerCase().includes(normalizedSearch));
+        if (matchesTab && matchesSearch) {
+          const previousStatus = orderStatusById.current.get(freshOrder.id);
+          orderStatusById.current.set(freshOrder.id, freshOrder.status);
+          setOrders((current) => [freshOrder, ...current.filter((order) => order.id !== freshOrder.id)]);
+          if (!previousStatus) {
+            setTotalOrders((count) => count + 1);
+            setStatusCounts((counts) => ({ ...counts, [freshOrder.status]: (counts[freshOrder.status] ?? 0) + 1 }));
+          }
+          if (freshOrder.status === "NEW") setArrivalToastOrder(freshOrder);
+        }
+      } else if (detail?.type === "order_updated") {
+        invalidateCache("admin:/api/admin/orders");
+        const update = detail.data ?? {};
+        const previousStatus = orderStatusById.current.get(update.orderId);
+        const found = Boolean(previousStatus);
+        if (found && update.status && update.status !== previousStatus) {
+          orderStatusById.current.set(update.orderId, update.status);
+          setStatusCounts((counts) => ({
+            ...counts,
+            [previousStatus!]: Math.max(0, (counts[previousStatus!] ?? 0) - 1),
+            [update.status]: (counts[update.status] ?? 0) + 1,
+          }));
+        }
+        if (found) {
+          const nextStatus = update.status ?? previousStatus;
+          const activeTab = tabRef.current;
+          const matchesTab = activeTab === "All" || (activeTab === "New" && ["NEW", "ACCEPTED"].includes(nextStatus)) || nextStatus === activeTab.toUpperCase();
+          if (!matchesTab) {
+            setOrders((current) => current.filter((order) => order.id !== update.orderId));
+            setTotalOrders((count) => Math.max(0, count - 1));
+          } else {
+            setOrders((current) => current.map((order) => order.id !== update.orderId
+              ? order
+            : {
+                ...order,
+                ...(update.status ? { status: update.status } : {}),
+                ...(update.totalCents !== undefined ? { totalCents: update.totalCents } : {}),
+                ...(update.items ? { items: update.items } : {}),
+                ...(update.item ? { items: order.items.map((item) => item.id === update.item.id ? { ...item, ...update.item } : item) } : {}),
+              }));
+          setSelected((current) => {
+            if (!current || current.id !== update.orderId) return current;
+            const items = update.items
+              ? update.items as OrderItem[]
+              : update.item
+                ? current.items.map((item) => item.id === update.item.id ? { ...item, ...update.item } : item)
+                : current.items;
+            return {
+              ...current,
+              ...(update.status ? { status: update.status } : {}),
+              ...(update.totalCents !== undefined ? { totalCents: update.totalCents } : {}),
+              items,
+            };
+          });
+          }
+        }
+        if (!found && (isFetching.current || isLoadingMore.current)) refreshQueued.current = true;
+        else if (!found) void load(1, false, true);
       }
     };
     const onVisible = () => {
-      if (document.visibilityState === "visible") void load(1, false, true);
+      if (document.visibilityState === "visible") {
+        const hiddenAt = Number(sessionStorage.getItem("inforyse:orders-hidden-at") ?? 0);
+        sessionStorage.removeItem("inforyse:orders-hidden-at");
+        if (hiddenAt && Date.now() - hiddenAt > 30_000) void load(1, false, true);
+      } else sessionStorage.setItem("inforyse:orders-hidden-at", String(Date.now()));
     };
     window.addEventListener("inforyse:restaurant-event", onRestaurantEvent);
     document.addEventListener("visibilitychange", onVisible);
@@ -359,19 +403,11 @@ export default function OrdersPage() {
     };
   }, [load]);
 
-  // Toast auto-dismiss progress bar timer
+  // CSS animates the progress bar without re-rendering every order row.
   useEffect(() => {
     if (!arrivalToastOrder) return;
-    const interval = setInterval(() => {
-      setToastTimerProgress((prev) => {
-        if (prev <= 0) {
-          setArrivalToastOrder(null);
-          return 100;
-        }
-        return prev - 2;
-      });
-    }, 140);
-    return () => clearInterval(interval);
+    const timer = window.setTimeout(() => setArrivalToastOrder(null), 6000);
+    return () => window.clearTimeout(timer);
   }, [arrivalToastOrder]);
 
   // Load tables + menu items when manual create modal opens
@@ -408,7 +444,7 @@ export default function OrdersPage() {
     };
   }, [statusCounts]);
 
-  async function updateStatus(order: Order, nextStatus: string) {
+  const updateStatus = useCallback(async (order: Order, nextStatus: string) => {
     const key = order.id + nextStatus;
     setUpdatingId(key);
     try {
@@ -434,7 +470,7 @@ export default function OrdersPage() {
     } finally {
       setUpdatingId(null);
     }
-  }
+  }, [arrivalToastOrder, load]);
 
   async function updateItemFulfillment(order: Order, item: OrderItem, kind: "served" | "cancelled", delta: number) {
     const servedQuantity = item.servedQuantity + (kind === "served" ? delta : 0);
@@ -452,7 +488,8 @@ export default function OrdersPage() {
     } finally { setUpdatingId(null); }
   }
 
-  function printBill(order: Order) {
+  const printBill = useCallback((order: Order) => {
+    const escapeHtml = (value: string) => value.replace(/[&<>\"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[char]!);
     const sub = order.items.reduce((s, i) => s + i.priceCentsSnapshot * i.quantity, 0);
     const win = window.open("", "_blank", "width=380,height=600");
     if (!win) return;
@@ -485,7 +522,10 @@ export default function OrdersPage() {
       win.print();
       win.close();
     }, 350);
-  }
+  }, []);
+
+  const handlePrintOrder = useCallback((order: OrderRowData) => printBill(order as Order), [printBill]);
+  const handleUpdateOrderStatus = useCallback((order: OrderRowData, nextStatus: string) => updateStatus(order as Order, nextStatus), [updateStatus]);
 
   // Manual order helpers
   function removeManualLine(itemId: string) {
@@ -554,81 +594,10 @@ export default function OrdersPage() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
-      {/* ── Luxury Order Arrival Toast (Floating Dynamic Island) ─────────────── */}
-      {arrivalToastOrder && (
-        <div className="fixed inset-x-0 top-4 z-[100] mx-auto w-[calc(100vw-1rem)] max-w-lg px-2 animate-toast-enter sm:top-5 sm:px-4">
-          <div className="bg-slate-950/95 backdrop-blur-xl text-white rounded-3xl p-4 shadow-2xl border border-white/20 relative overflow-hidden flex flex-col gap-3">
-            {/* Progress bar */}
-            <div
-              className="absolute top-0 left-0 h-1 bg-gradient-to-r from-rose-500 via-amber-500 to-emerald-500 transition-all duration-150 ease-linear"
-              style={{ width: `${toastTimerProgress}%` }}
-            />
+      {arrivalToastOrder && <OrderArrivalToast order={arrivalToastOrder} onDismiss={() => setArrivalToastOrder(null)} onInspect={(order) => { setSelected(order as Order); setArrivalToastOrder(null); }} onAccept={(order) => { void updateStatus(order as Order, "ACCEPTED"); setArrivalToastOrder(null); }} />}
 
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="h-11 w-11 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center flex-shrink-0 relative">
-                  <Bell className="h-5 w-5 animate-bounce" />
-                  <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-rose-500 animate-ping" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">
-                      New Order Incoming
-                    </span>
-                    <span className="font-bold text-white text-sm">
-                      #{arrivalToastOrder.orderNumber}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-300 font-medium mt-0.5">
-                    {arrivalToastOrder.table ? (
-                      <span className="text-amber-300 font-bold">Table {arrivalToastOrder.table.label}</span>
-                    ) : (
-                      "Takeaway"
-                    )}
-                    {arrivalToastOrder.customerName ? ` · ${arrivalToastOrder.customerName}` : ""}
-                    {" · "}
-                    <span className="text-white font-bold">{formatRupees(arrivalToastOrder.totalCents)}</span>
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setArrivalToastOrder(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Dish quick snippet */}
-            <div className="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-slate-300 truncate">
-              {arrivalToastOrder.items.map((i) => `${i.quantity}x ${i.nameSnapshot}`).join(", ")}
-            </div>
-
-            {/* Quick Actions directly on Toast */}
-            <div className="flex items-center gap-2 pt-0.5">
-              <button
-                onClick={() => {
-                  setSelected(arrivalToastOrder);
-                  setArrivalToastOrder(null);
-                }}
-                className="btn-primary flex-1 bg-white/10 hover:bg-white/20 text-white text-xs py-2 rounded-xl font-semibold border border-white/10"
-              >
-                Inspect Order
-              </button>
-              <button
-                onClick={() => updateStatus(arrivalToastOrder, "ACCEPTED")}
-                className="btn-primary flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs py-2 rounded-xl font-bold shadow-lg shadow-emerald-950/40"
-              >
-                <Check className="h-3.5 w-3.5" /> Accept & Send to KDS
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Main Order Management Surface ───────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header bar */}
+      {/* Header bar */}
         <div className="p-5 pb-3 bg-white border-b border-slate-200 flex-shrink-0">
           <div className="flex items-center justify-between mb-3.5 flex-wrap gap-3">
             <div>
@@ -647,19 +616,6 @@ export default function OrdersPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Sound alert toggle */}
-              <button
-                onClick={() => setSoundOn((s) => !s)}
-                title={soundOn ? "Mute audio chimes" : "Enable order chimes"}
-                className={`p-2 rounded-xl border transition-all ${
-                  soundOn
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-                    : "bg-slate-100 text-slate-400 border-slate-200"
-                }`}
-              >
-                {soundOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-              </button>
-
               {/* View Switcher */}
               <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 border border-slate-200">
                 <button
@@ -780,212 +736,14 @@ export default function OrdersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleOrders.map((o) => {
-                    const meta = STATUS_META[o.status] ?? STATUS_META.NEW;
-                    const nextAction = NEXT_STATUS[o.status];
-                    const isNew = o.status === "NEW";
-                    const isSelected = selected?.id === o.id;
-
-                    return (
-                      <tr
-                        key={o.id}
-                        onClick={() => setSelected(o)}
-                        className={`cursor-pointer transition-colors ${
-                          isSelected
-                            ? "bg-emerald-50/70"
-                            : isNew
-                            ? "bg-rose-50/40 hover:bg-rose-50/70"
-                            : "hover:bg-slate-50"
-                        }`}
-                      >
-                        <td>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-900 text-sm font-mono">
-                              #{o.orderNumber}
-                            </span>
-                            {isNew && (
-                              <span className="h-2 w-2 rounded-full bg-rose-500 animate-ping" />
-                            )}
-                          </div>
-                        </td>
-
-                        <td>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-800 text-xs bg-slate-100 border border-slate-200/80 px-2.5 py-1 rounded-lg">
-                              {o.table ? `Table ${o.table.label}` : "Takeaway"}
-                            </span>
-                            {o.customerName && (
-                              <span className="text-xs text-slate-500 font-medium truncate max-w-[120px]">
-                                {o.customerName}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-
-                        <td>
-                          <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                            <Clock className="h-3 w-3 text-slate-400" />
-                            {formatElapsed(o.createdAt)}
-                          </span>
-                        </td>
-
-                        <td>
-                          <div className="flex flex-wrap gap-1 max-w-sm">
-                            {o.items.slice(0, 3).map((item) => (
-                              <span
-                                key={item.id}
-                                className="bg-slate-100 text-slate-700 text-[11px] font-medium px-2 py-0.5 rounded-md border border-slate-200/60"
-                              >
-                                {item.quantity}x {item.nameSnapshot}
-                              </span>
-                            ))}
-                            {o.items.length > 3 && (
-                              <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md">
-                                +{o.items.length - 3} more
-                              </span>
-                            )}
-                          </div>
-                        </td>
-
-                        <td>
-                          <span className="font-bold text-slate-900 text-sm">
-                            {formatRupees(o.totalCents)}
-                          </span>
-                        </td>
-
-                        <td>
-                          <span
-                            className={`badge text-xs font-semibold border ${meta.bg} ${meta.text} ${meta.border}`}
-                          >
-                            <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-                            {meta.label}
-                          </span>
-                        </td>
-
-                        <td className="text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              onClick={() => printBill(o)}
-                              title="Print KOT Ticket"
-                              className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-                            >
-                              <Printer className="h-4 w-4" />
-                            </button>
-
-                            {nextAction && (
-                              <button
-                                onClick={() => updateStatus(o, nextAction.next)}
-                                disabled={updatingId !== null}
-                                className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 shadow-sm ${
-                                  isNew
-                                    ? "bg-rose-600 hover:bg-rose-500 text-white"
-                                    : "bg-slate-900 hover:bg-slate-800 text-white"
-                                }`}
-                              >
-                                <nextAction.icon className="h-3.5 w-3.5" />
-                                {nextAction.label}
-                              </button>
-                            )}
-
-                            {isNew && (
-                              <button
-                                onClick={() => updateStatus(o, "CANCELLED")}
-                                title="Reject Order"
-                                className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors"
-                              >
-                                <XCircle className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {visibleOrders.map((order) => <AdminOrderTableRow key={order.id} order={order} meta={STATUS_META[order.status] ?? STATUS_META.NEW} nextAction={NEXT_STATUS[order.status]} selected={selected?.id === order.id} updating={updatingId !== null} onSelect={handleSelectOrder} onPrint={handlePrintOrder} onStatus={handleUpdateOrderStatus} />)}
                 </tbody>
               </table>
             </div>
           ) : (
             /* ── Modern KDS Cards View ────────────────────────────────────────── */
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
-              {visibleOrders.map((o) => {
-                const meta = STATUS_META[o.status] ?? STATUS_META.NEW;
-                const nextAction = NEXT_STATUS[o.status];
-                const isNew = o.status === "NEW";
-                const isSelected = selected?.id === o.id;
-
-                return (
-                  <div
-                    key={o.id}
-                    onClick={() => setSelected(o)}
-                    className={`bg-white rounded-2xl border p-4 cursor-pointer transition-all hover:shadow-md ${
-                      isSelected
-                        ? "border-emerald-600 ring-2 ring-emerald-600/20"
-                        : isNew
-                        ? "border-rose-300 ring-1 ring-rose-200/50 shadow-sm"
-                        : "border-slate-200/80"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-slate-900 text-base">
-                          #{o.orderNumber}
-                        </span>
-                        <span className="font-bold text-xs bg-slate-100 text-slate-800 px-2 py-0.5 rounded-md border border-slate-200/80">
-                          {o.table ? `Table ${o.table.label}` : "Takeaway"}
-                        </span>
-                      </div>
-                      <span className={`badge text-xs font-semibold ${meta.bg} ${meta.text} border ${meta.border}`}>
-                        {meta.label}
-                      </span>
-                    </div>
-
-                    <div className="py-3 space-y-1.5 min-h-[90px]">
-                      {o.items.map((i) => (
-                        <div key={i.id} className="flex justify-between items-center text-xs">
-                          <span className="font-medium text-slate-800 truncate pr-2">
-                            <span className="font-bold text-slate-900 mr-1.5">{i.quantity}x</span>
-                            {i.nameSnapshot}
-                          </span>
-                          <span className="text-slate-500 font-mono flex-shrink-0">
-                            {formatRupees(i.priceCentsSnapshot * i.quantity)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-
-                    {o.notes && (
-                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-[11px] text-amber-800 mb-3">
-                        <strong>Note:</strong> {o.notes}
-                      </div>
-                    )}
-
-                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                      <div>
-                        <span className="text-xs text-slate-400 block">{formatElapsed(o.createdAt)}</span>
-                        <span className="font-bold text-slate-900 text-sm">{formatRupees(o.totalCents)}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => printBill(o)}
-                          className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50"
-                        >
-                          <Printer className="h-4 w-4" />
-                        </button>
-                        {nextAction && (
-                          <button
-                            onClick={() => updateStatus(o, nextAction.next)}
-                            className={`btn-primary text-xs py-2 px-3 rounded-xl font-bold ${
-                              isNew ? "bg-rose-600 text-white" : "bg-slate-900 text-white"
-                            }`}
-                          >
-                            {nextAction.label}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {visibleOrders.map((order) => <AdminOrderCard key={order.id} order={order} meta={STATUS_META[order.status] ?? STATUS_META.NEW} nextAction={NEXT_STATUS[order.status]} selected={selected?.id === order.id} updating={updatingId !== null} onSelect={handleSelectOrder} onPrint={handlePrintOrder} onStatus={handleUpdateOrderStatus} />)}
             </div>
           )}
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ShoppingCart,
@@ -191,10 +192,12 @@ export function LandingPage({
           >
             {restaurantLogo ? (
               <div className="relative w-20 h-20 rounded-2xl p-1 bg-gradient-to-tr from-amber-400 via-amber-200 to-emerald-400 shadow-2xl">
-                <img
+                <Image
                   src={restaurantLogo}
                   alt={restaurantName}
-                  className="w-full h-full object-cover rounded-xl bg-black"
+                  fill
+                  sizes="80px"
+                  className="rounded-xl bg-black object-cover"
                 />
               </div>
             ) : (
@@ -466,12 +469,12 @@ export function LandingPage({
               >
                 {/* Image Container with Zoom effect */}
                 <div className="relative aspect-square w-full rounded-2xl overflow-hidden bg-black/60 mb-2.5">
-                  <img
+                  <Image
                     src={getDishImageUrl(item.name, item.categoryName, item.imageUrl)}
                     alt={item.name}
-                    loading="lazy"
-                    decoding="async"
-                    className="w-full h-full object-cover group-hover:scale-115 transition-transform duration-700 ease-out"
+                    fill
+                    sizes="(max-width: 640px) 50vw, 33vw"
+                    className="object-cover group-hover:scale-115 transition-transform duration-700 ease-out"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
 

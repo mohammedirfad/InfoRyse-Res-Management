@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Check, ReceiptText, Volume2, VolumeX, X } from "lucide-react";
 import { formatDate, formatRupees, formatTime } from "@/lib/utils";
+import { subscribeBrowserRealtime } from "@/lib/browserRealtime";
 
 type IncomingOrder = {
   id: string;
@@ -117,6 +118,8 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
     cursor.current = new Date(Date.now() - 60000).toISOString();
     let disposed = false;
     let needsResync = false;
+    let offlineSince: number | null = null;
+    let hiddenSince: number | null = document.visibilityState === "hidden" ? Date.now() : null;
     let snapshotBusy = false;
     let authorized = true;
     let reconnectAttempt = 0;
@@ -124,10 +127,16 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
     let redisRetryAttempt = 0;
     let redisRetryTimer: number | null = null;
     let snapshotFallbackTimer: number | null = null;
+    let changeCheckTimer: number | null = null;
+    let changeCheckBusy = false;
+    let lastOrderVersion: string | null | undefined;
     let snapshotInitialized = false;
     let wasVisible = document.visibilityState === "visible";
     let source: EventSource | null = null;
     let socket: WebSocket | null = null;
+    let browserStop: (() => void) | null = null;
+    let browserStartPending = false;
+    let browserRealtimeRejected = false;
     let redisFallback = false;
     const knownServiceRequestIds = new Set<string>();
     const useRedisWebSocket = realtimeTransport === "redis-ws";
@@ -200,7 +209,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       // Push is the normal path. If the Realtime connection is unavailable,
       // reconcile occasionally so notifications still recover without making
       // every open admin device query the database every few seconds.
-      snapshotFallbackTimer = window.setInterval(() => void loadSnapshot(), 60000);
+      snapshotFallbackTimer = window.setInterval(() => void loadSnapshot(), 30000);
     };
     const stopSnapshotFallback = () => {
       if (snapshotFallbackTimer === null) return;
@@ -208,7 +217,8 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       snapshotFallbackTimer = null;
     };
     const onConnected = () => {
-      const reconnected = needsResync;
+      const reconnected = needsResync && offlineSince !== null && Date.now() - offlineSince > 30_000;
+      offlineSince = null;
       needsResync = false;
       reconnectAttempt = 0;
       stopSnapshotFallback();
@@ -249,6 +259,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
     };
     const scheduleReconnect = () => {
       needsResync = true;
+      offlineSince ??= Date.now();
       if (disposed || !authorized || reconnectTimer !== null) return;
       const delay = Math.min(30000, 1000 * 2 ** reconnectAttempt++);
       reconnectTimer = window.setTimeout(() => {
@@ -292,8 +303,12 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
         scheduleReconnect();
       };
     };
-    const connectStream = () => {
+    const connectLegacyStream = () => {
       if (disposed || !authorized) return;
+      if (process.env.NODE_ENV === "production") {
+        startSnapshotFallback();
+        return;
+      }
       if (useRedisWebSocket && !redisFallback) {
         stopSnapshotFallback();
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -317,6 +332,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
           // authenticated SSE channel, which is also published server-side.
           redisFallback = true;
           needsResync = true;
+          offlineSince ??= Date.now();
           startSnapshotFallback();
           connectSse();
           scheduleRedisRetry();
@@ -326,21 +342,83 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       }
       connectSse();
     };
+    const connectStream = () => {
+      if (disposed || !authorized || browserStop || browserStartPending) return;
+      if (browserRealtimeRejected) { connectLegacyStream(); return; }
+      browserStartPending = true;
+      void subscribeBrowserRealtime(
+        { scope: "restaurant" },
+        onRestaurantEvent,
+        (connected) => {
+          if (connected) onConnected();
+          else if (!disposed) {
+            needsResync = true;
+            offlineSince ??= Date.now();
+            startSnapshotFallback();
+          }
+        },
+        () => {
+        browserRealtimeRejected = true;
+        connectLegacyStream();
+      }).then((stopBrowser) => {
+        browserStartPending = false;
+        if (disposed) { stopBrowser?.(); return; }
+        if (stopBrowser) {
+          browserStop = stopBrowser;
+          return;
+        }
+        // Local development can use the authenticated SSE route. Production
+        // falls back to bounded snapshots so no serverless function is held open.
+        connectLegacyStream();
+      }).catch(() => {
+        browserStartPending = false;
+        connectLegacyStream();
+      });
+    };
     connectStream();
     void loadSnapshot();
+    const checkForMissedOrderChanges = async () => {
+      if (disposed || changeCheckBusy || document.visibilityState === "hidden") return;
+      changeCheckBusy = true;
+      try {
+        const response = await fetch("/api/admin/order-version", { cache: "no-store", signal: AbortSignal.timeout(5000) });
+        if (response.status === 401) {
+          authorized = false;
+          router.replace("/admin/login");
+          return;
+        }
+        if (!response.ok) return;
+        const data = await response.json();
+        if (lastOrderVersion !== undefined && data.version !== lastOrderVersion) {
+          window.dispatchEvent(new CustomEvent("inforyse:restaurant-event", { detail: { type: "resync" } }));
+        }
+        lastOrderVersion = data.version ?? null;
+      } catch { /* Realtime and the notification snapshot remain available. */ }
+      finally { changeCheckBusy = false; }
+    };
+    void checkForMissedOrderChanges();
+    changeCheckTimer = window.setInterval(() => void checkForMissedOrderChanges(), 30_000);
     const onVisible = () => {
       const visible = document.visibilityState === "visible";
-      if (visible && !wasVisible) void loadSnapshot(true);
+      if (visible && !wasVisible) {
+        if (hiddenSince !== null && Date.now() - hiddenSince > 30_000) void loadSnapshot(true);
+        hiddenSince = null;
+        void checkForMissedOrderChanges();
+      } else if (!visible && wasVisible) {
+        hiddenSince = Date.now();
+      }
       wasVisible = visible;
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       disposed = true;
+      browserStop?.();
       source?.close();
       socket?.close(1000, "admin panel closed");
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       if (redisRetryTimer !== null) window.clearTimeout(redisRetryTimer);
       if (snapshotFallbackTimer !== null) window.clearInterval(snapshotFallbackTimer);
+      if (changeCheckTimer !== null) window.clearInterval(changeCheckTimer);
       document.removeEventListener("visibilitychange", onVisible);
       if (audio.current) void audio.current.close();
     };

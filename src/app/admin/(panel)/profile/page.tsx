@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { Save, MapPin, Phone, Mail, Globe, Eye, Building2, User, CheckCircle2 } from "lucide-react";
 import ImageUpload from "@/components/ImageUpload";
 import Link from "next/link";
@@ -353,9 +354,9 @@ export default function RestaurantProfilePage() {
               </span>
 
               <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/15 text-center">
-                <div className="h-16 w-16 mx-auto rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-900 font-extrabold text-2xl shadow-lg mb-3">
+                <div className="relative h-16 w-16 mx-auto rounded-2xl overflow-hidden bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-900 font-extrabold text-2xl shadow-lg mb-3">
                   {logoUrl ? (
-                    <img src={logoUrl} alt="Logo" className="h-full w-full object-cover rounded-2xl" />
+                    <Image src={logoUrl} alt="Logo" fill sizes="64px" className="rounded-2xl object-cover" />
                   ) : (
                     name[0]?.toUpperCase() || "R"
                   )}

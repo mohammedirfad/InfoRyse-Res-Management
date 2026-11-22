@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRestaurantUser, tenantErrorResponse } from "@/lib/tenant";
-import { checkRateLimit } from "@/lib/rateLimit";
+import { checkSharedRateLimit } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +26,7 @@ export async function GET(_request: Request, { params }: { params: { id: string 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   try {
     const actor = await requireRestaurantUser();
-    const limit = checkRateLimit(`support-ticket-message:${actor.userId}`, 30, 10 * 60 * 1000);
+    const limit = await checkSharedRateLimit(`support-ticket-message:${actor.userId}`, 30, 10 * 60 * 1000);
     if (!limit.allowed) return Response.json({ error: "You have sent several messages. Please try again shortly." }, { status: 429 });
     const parsed = MessageSchema.safeParse(await request.json());
     if (!parsed.success) return Response.json({ error: "Message must contain 1–5000 characters." }, { status: 400 });

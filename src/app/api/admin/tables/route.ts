@@ -7,29 +7,42 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const { restaurantId } = await requireFastRestaurantUser();
-    const restaurant = await db.restaurant.findUniqueOrThrow({ where: { id: restaurantId }, select: { slug: true } });
     const tables = await db.table.findMany({
       where: { restaurantId, deletedAt: null },
       orderBy: { label: "asc" },
-      include: {
+      select: {
+        id: true,
+        label: true,
+        section: true,
+        capacity: true,
+        status: true,
+        qrToken: true,
+        restaurant: { select: { slug: true } },
         sessions: {
           where: { status: "OPEN" },
+          orderBy: { createdAt: "desc" },
           take: 1,
-          include: {
-            orders: {
-              where: { status: { notIn: ["CANCELLED", "COMPLETED"] } },
-              select: { id: true, subtotalCents: true },
-            },
-          },
+          select: { id: true },
         },
       },
     });
 
+    const sessionIds = tables.flatMap((table) => table.sessions.map((session) => session.id));
+    const sessionTotals = sessionIds.length
+      ? await db.order.groupBy({
+          by: ["tableSessionId"],
+          where: { tableSessionId: { in: sessionIds }, status: { notIn: ["CANCELLED", "COMPLETED"] } },
+          _count: { _all: true },
+          _sum: { subtotalCents: true },
+        })
+      : [];
+    const totalsBySession = new Map(sessionTotals.map((entry) => [entry.tableSessionId, entry]));
+
     const mapped = tables.map((t) => {
       const activeSession = t.sessions?.[0] || null;
-      const activeOrders = activeSession?.orders || [];
-      const hasActiveOrders = activeOrders.length > 0;
-      const activeSubtotal = activeOrders.reduce((s, o) => s + o.subtotalCents, 0);
+      const totals = activeSession ? totalsBySession.get(activeSession.id) : null;
+      const activeOrderCount = totals?._count._all ?? 0;
+      const hasActiveOrders = activeOrderCount > 0;
 
       return {
         id: t.id,
@@ -38,10 +51,10 @@ export async function GET() {
         capacity: t.capacity,
         status: hasActiveOrders ? "OCCUPIED" : t.status,
         qrToken: t.qrToken,
-        menuUrl: buildCustomerMenuUrl(restaurant.slug, t.qrToken),
+        menuUrl: buildCustomerMenuUrl(t.restaurant.slug, t.qrToken),
         hasActiveSession: Boolean(activeSession),
-        activeOrderCount: activeOrders.length,
-        activeSubtotalCents: activeSubtotal,
+        activeOrderCount,
+        activeSubtotalCents: totals?._sum.subtotalCents ?? 0,
       };
     });
 

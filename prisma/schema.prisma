@@ -244,12 +244,14 @@ model Order {
   customerEmail  String?
   createdByStaff String?
   createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @default(now()) @updatedAt
 
   items          OrderItem[]
   statusHistory  OrderStatusHistory[]
 
   @@index([restaurantId, status, createdAt])
   @@index([restaurantId, createdAt])
+  @@index([restaurantId, updatedAt(sort: Desc)])
   @@index([tableSessionId])
   @@index([tableSessionId, createdAt])
   @@unique([restaurantId, orderNumber])
@@ -311,6 +313,7 @@ model Bill {
   createdAt       DateTime    @default(now())
 
   @@index([restaurantId, createdAt])
+  @@index([restaurantId, paymentStatus, paidAt])
   @@index([restaurantId, tableSessionId])
   @@unique([restaurantId, billNumber])
 }

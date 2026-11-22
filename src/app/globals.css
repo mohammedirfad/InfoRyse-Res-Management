@@ -169,6 +169,10 @@ body {
   70% { transform: translate(-50%, 4px) scale(1.02); opacity: 1; }
   100% { transform: translate(-50%, 0) scale(1); opacity: 1; }
 }
+@keyframes order-toast-progress {
+  from { transform: scaleX(1); transform-origin: left; }
+  to { transform: scaleX(0); transform-origin: left; }
+}
 
 .animate-slide-up       { animation: slide-up       0.25s ease-out; }
 .animate-slide-in-right { animation: slide-in-right 0.3s  ease-out; }
@@ -176,6 +180,7 @@ body {
 .animate-fade-in        { animation: fade-in        0.3s  ease-out; }
 .animate-pulse-ring     { animation: pulse-ring     2s    ease-in-out infinite; }
 .animate-toast-enter    { animation: toast-enter    0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.order-toast-progress { animation: order-toast-progress 6s linear forwards; }
 
 /* ─── Scrollbar ─────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar        { width: 4px; height: 4px; }

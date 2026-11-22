@@ -1,26 +1,23 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
-} from "recharts";
+import dynamic from "next/dynamic";
 import { formatRupees } from "@/lib/utils";
 import { BarChart3 } from "lucide-react";
-import { cachedJson, peekCache } from "@/lib/cachedFetch";
+import { cachedJson } from "@/lib/cachedFetch";
 
-type Order = {
-  id: string;
-  status: string;
-  totalCents: number;
-  orderType: string | null;
-  customerPhone?: string | null;
-  createdAt: string;
-  items: { nameSnapshot: string; quantity: number; priceCentsSnapshot: number }[];
-  table?: { label: string } | null;
+const AnalyticsTrendChart = dynamic(() => import("@/components/AdminAnalyticsCharts").then((module) => module.AdminAnalyticsTrendChart), { ssr: false, loading: () => <div className="h-64 rounded-xl bg-slate-100 animate-pulse" /> });
+const AnalyticsPeakChart = dynamic(() => import("@/components/AdminAnalyticsCharts").then((module) => module.AdminAnalyticsPeakChart), { ssr: false, loading: () => <div className="h-56 rounded-xl bg-slate-100 animate-pulse" /> });
+
+type AnalyticsData = {
+  orderCount: number;
+  revenueCents: number;
+  knownCustomers: number;
+  daily: { day: string; orders: number; revenueCents: number }[];
+  hourly: { hour: number; orders: number }[];
+  orderTypes: { orderType: string; orders: number }[];
+  topItems: { name: string; quantity: number; revenueCents: number }[];
 };
-
-const COLORS = ["#132A1E", "#D4A94C", "#0284C7", "#9333EA", "#E11D48"];
 
 function dateInputValue(date: Date) {
   const year = date.getFullYear();
@@ -30,101 +27,62 @@ function dateInputValue(date: Date) {
 }
 
 export default function AnalyticsPage() {
-  const [orders, setOrders] = useState<Order[]>(() => peekCache<{ orders?: Order[] }>("admin:/api/admin/orders")?.orders ?? []);
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
-  const [bills, setBills] = useState<{ totalCents: number; taxCents: number; paymentStatus: string; paymentMethod: string; createdAt: string; paidAt: string | null; customerPhone: string | null; customerEmail: string | null }[]>([]);
+  const [billMetrics, setBillMetrics] = useState({ paidTaxCents: 0, paidOnlineCents: 0 });
   const [from, setFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 29); return dateInputValue(d); });
   const [to, setTo] = useState(() => dateInputValue(new Date()));
 
   useEffect(() => {
     Promise.all([
       cachedJson<{ role?: string }>("admin:/api/admin/me", "/api/admin/me"),
-      cachedJson<{ orders?: Order[] }>(`admin:analytics-orders:${from}:${to}`, `/api/admin/orders?view=analytics&from=${from}&to=${to}`),
-      cachedJson<{ bills?: typeof bills }>(`admin:analytics-bills:${from}:${to}`, `/api/admin/bills?export=true&from=${from}&to=${to}`),
+      cachedJson<{ analytics?: AnalyticsData }>(`admin:analytics-summary-v2:${from}:${to}`, `/api/admin/orders?view=analytics&from=${from}&to=${to}`),
+      cachedJson<{ analytics?: typeof billMetrics }>(`admin:analytics-bill-summary-v2:${from}:${to}`, `/api/admin/bills?analytics=true&from=${from}&to=${to}`),
     ])
       .then(([me, orderData, billData]) => {
         if (me.data.role === "STAFF") {
           setAccessDenied(true);
           return;
         }
-        setOrders(orderData.data.orders ?? []);
-        setBills(billData.data.bills ?? []);
+        setAnalytics(orderData.data.analytics ?? null);
+        setBillMetrics(billData.data.analytics ?? { paidTaxCents: 0, paidOnlineCents: 0 });
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [from, to]);
 
-  const startDate = new Date(`${from}T00:00:00`);
-  const endDate = new Date(`${to}T23:59:59.999`);
-  const inRange = (value: string) => { const d = new Date(value); return d >= startDate && d <= endDate; };
-  const rangeOrders = useMemo(() => orders.filter((o) => inRange(o.createdAt)), [orders, from, to]);
-  const rangeBills = useMemo(() => bills.filter((b) => inRange(b.paidAt ?? b.createdAt) && b.paymentStatus === "PAID"), [bills, from, to]);
-
-  // Real Dynamic Top Items
-  const topItems = useMemo(() => {
-    const itemMap: Record<string, { count: number; revenue: number }> = {};
-    rangeOrders.forEach((o) => {
-      if (o.status !== "CANCELLED") {
-        o.items.forEach((i) => {
-          if (!itemMap[i.nameSnapshot]) itemMap[i.nameSnapshot] = { count: 0, revenue: 0 };
-          itemMap[i.nameSnapshot].count += i.quantity;
-          itemMap[i.nameSnapshot].revenue += i.priceCentsSnapshot * i.quantity;
-        });
-      }
-    });
-    return Object.entries(itemMap)
-      .sort((a, b) => b[1].count - a[1].count)
-      .slice(0, 5);
-  }, [rangeOrders]);
+  const topItems = analytics?.topItems ?? [];
 
   // Real Dynamic Order Types
-  const orderTypeData = useMemo(() => {
-    const counts: Record<string, number> = { "Dine In": 0, "Takeaway": 0 };
-    rangeOrders.forEach((o) => {
-      if (o.status !== "CANCELLED") {
-        if (o.orderType === "TAKEAWAY") counts["Takeaway"]++;
-        else counts["Dine In"]++;
-      }
-    });
-    const total = Object.values(counts).reduce((a, b) => a + b, 0);
-    if (total === 0) return [];
-    return [
-      { name: "Dine In", value: counts["Dine In"], color: "#132A1E" },
-      { name: "Takeaway", value: counts["Takeaway"], color: "#D4A94C" },
-    ].filter((x) => x.value > 0);
-  }, [rangeOrders]);
+  const orderTypeData = (analytics?.orderTypes ?? []).map((item) => ({
+    name: item.orderType === "TAKEAWAY" ? "Takeaway" : "Dine In",
+    value: item.orders,
+    color: item.orderType === "TAKEAWAY" ? "#D4A94C" : "#132A1E",
+  }));
 
   // Real Dynamic Peak Hours
   const peakHoursData = useMemo(() => {
-    const hourMap: Record<number, number> = {};
-    for (let h = 8; h <= 23; h++) hourMap[h] = 0;
-    rangeOrders.forEach((o) => {
-      if (o.status !== "CANCELLED") {
-        const h = new Date(o.createdAt).getHours();
-        if (hourMap[h] !== undefined) hourMap[h]++;
-      }
-    });
-    return Object.entries(hourMap).map(([h, count]) => {
-      const hr = Number(h);
+    const counts = new Map((analytics?.hourly ?? []).map((item) => [item.hour, item.orders]));
+    return Array.from({ length: 16 }, (_, index) => index + 8).map((hr) => {
       const label = hr === 12 ? "12PM" : hr > 12 ? `${hr - 12}PM` : `${hr}AM`;
-      return { time: label, orders: count };
+      return { time: label, orders: counts.get(hr) ?? 0 };
     });
-  }, [rangeOrders]);
+  }, [analytics]);
 
-  const completedOrders = rangeOrders.filter((o) => o.status !== "CANCELLED");
-  const totalRevenue = completedOrders.reduce((s, o) => s + o.totalCents, 0);
-  const paidTax = bills.filter((b) => inRange(b.paidAt ?? b.createdAt) && b.paymentStatus === "PAID").reduce((sum, b) => sum + b.taxCents, 0);
-  const customers = new Set(rangeOrders.map((o) => o.customerPhone).filter(Boolean));
-  const rangeTrendData = useMemo(() => {
-    const days = Math.max(1, Math.ceil((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86400000) + 1);
-    return Array.from({ length: Math.min(days, 366) }, (_, i) => {
-      const d = new Date(`${from}T00:00:00`); d.setDate(d.getDate() + i);
-      const day = rangeOrders.filter((o) => new Date(o.createdAt).toDateString() === d.toDateString() && o.status !== "CANCELLED");
-      return { date: `${d.getDate()}/${d.getMonth() + 1}`, sales: Math.round(day.reduce((s, o) => s + o.totalCents, 0) / 100), orders: day.length };
-    });
-  }, [rangeOrders, from, to]);
-  const avgOrderValue = completedOrders.length > 0 ? Math.round(totalRevenue / completedOrders.length) : 0;
+  const completedOrders = analytics?.orderCount ?? 0;
+  const totalRevenue = analytics?.revenueCents ?? 0;
+  const paidTax = billMetrics.paidTaxCents;
+  const knownCustomers = analytics?.knownCustomers ?? 0;
+  const dailyByDate = new Map((analytics?.daily ?? []).map((row) => [row.day.slice(0, 10), row]));
+  const dayCount = Math.min(366, Math.max(1, Math.ceil((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86400000) + 1));
+  const rangeTrendData = Array.from({ length: dayCount }, (_, index) => {
+    const day = new Date(`${from}T00:00:00`);
+    day.setDate(day.getDate() + index);
+    const row = dailyByDate.get(dateInputValue(day));
+    return { date: `${day.getDate()}/${day.getMonth() + 1}`, sales: Math.round((row?.revenueCents ?? 0) / 100), orders: row?.orders ?? 0 };
+  });
+  const avgOrderValue = completedOrders > 0 ? Math.round(totalRevenue / completedOrders) : 0;
 
   if (accessDenied) {
     return (
@@ -162,7 +120,7 @@ export default function AnalyticsPage() {
 
       {loading ? (
         <div className="p-16 text-center text-slate-400">Loading metrics...</div>
-      ) : orders.length === 0 ? (
+      ) : completedOrders === 0 ? (
         /* Clean empty state for new restaurants */
         <div className="card p-16 text-center text-slate-400 space-y-3 border border-slate-200">
           <BarChart3 className="h-12 w-12 mx-auto text-slate-300" />
@@ -186,7 +144,7 @@ export default function AnalyticsPage() {
             </div>
             <div className="card p-4 border border-slate-200/80">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Total Orders</span>
-              <p className="text-2xl font-bold text-slate-900 mt-1">{completedOrders.length}</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{completedOrders}</p>
               <p className="text-[11px] text-slate-400 mt-1">Non-cancelled orders</p>
             </div>
             <div className="card p-4 border border-slate-200/80">
@@ -197,20 +155,20 @@ export default function AnalyticsPage() {
             <div className="card p-4 border border-slate-200/80">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Top Dish Sold</span>
               <p className="text-lg font-bold text-slate-900 truncate mt-1">
-                {topItems[0] ? topItems[0][0] : "—"}
+                {topItems[0] ? topItems[0].name : "—"}
               </p>
               <p className="text-[11px] text-slate-400 mt-1">
-                {topItems[0] ? `${topItems[0][1].count} portions ordered` : "Awaiting orders"}
+                {topItems[0] ? `${topItems[0].quantity} portions ordered` : "Awaiting orders"}
               </p>
             </div>
             <div className="card p-4 border border-slate-200/80">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Paid Online</span>
-              <p className="text-2xl font-bold text-slate-900 mt-1">{formatRupees(rangeBills.filter((b) => !["CASH", "PAY_AT_RESTAURANT"].includes(b.paymentMethod)).reduce((sum, b) => sum + b.totalCents, 0))}</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{formatRupees(billMetrics.paidOnlineCents)}</p>
               <p className="text-[11px] text-slate-400 mt-1">Paid bills in selected range</p>
             </div>
             <div className="card p-4 border border-slate-200/80">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Known Customers</span>
-              <p className="text-2xl font-bold text-slate-900 mt-1">{customers.size}</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{knownCustomers}</p>
               <p className="text-[11px] text-slate-400 mt-1">Unique phone numbers in range</p>
             </div>
             <div className="card p-4 border border-slate-200/80">
@@ -226,24 +184,7 @@ export default function AnalyticsPage() {
               Sales in Selected Range (₹)
             </h2>
             <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={rangeTrendData}>
-                  <defs>
-                    <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#132A1E" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#132A1E" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} />
-                  <Tooltip
-                    formatter={(val: any) => [`₹${val}`, "Revenue"]}
-                    contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)" }}
-                  />
-                  <Area type="monotone" dataKey="sales" stroke="#132A1E" strokeWidth={2} fillOpacity={1} fill="url(#salesGrad)" />
-                </AreaChart>
-              </ResponsiveContainer>
+              <AnalyticsTrendChart data={rangeTrendData} />
             </div>
           </div>
 
@@ -255,15 +196,7 @@ export default function AnalyticsPage() {
                 Orders by Dining Hour (Kitchen Traffic)
               </h2>
               <div className="h-56">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={peakHoursData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="time" tick={{ fontSize: 9, fill: "#94a3b8" }} axisLine={false} />
-                    <YAxis tick={{ fontSize: 9, fill: "#94a3b8" }} axisLine={false} />
-                    <Tooltip contentStyle={{ borderRadius: "10px" }} />
-                    <Bar dataKey="orders" fill="#132A1E" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <AnalyticsPeakChart data={peakHoursData} />
               </div>
             </div>
 
@@ -276,17 +209,17 @@ export default function AnalyticsPage() {
                 <p className="text-xs text-slate-400 py-10 text-center">No dish sales recorded yet</p>
               ) : (
                 <div className="space-y-2.5">
-                  {topItems.map(([name, data], idx) => (
-                    <div key={name} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-xs">
+                  {topItems.map((item, idx) => (
+                    <div key={item.name} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-xs">
                       <div className="flex items-center gap-2 truncate pr-2">
                         <span className="h-6 w-6 rounded-lg bg-slate-900 text-white font-bold flex items-center justify-center text-[10px]">
                           #{idx + 1}
                         </span>
-                        <span className="font-bold text-slate-800 truncate">{name}</span>
+                        <span className="font-bold text-slate-800 truncate">{item.name}</span>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <span className="font-bold text-slate-900">{formatRupees(data.revenue)}</span>
-                        <span className="text-[10px] text-slate-400 block">{data.count} ordered</span>
+                        <span className="font-bold text-slate-900">{formatRupees(item.revenueCents)}</span>
+                        <span className="text-[10px] text-slate-400 block">{item.quantity} ordered</span>
                       </div>
                     </div>
                   ))}

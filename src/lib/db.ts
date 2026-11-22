@@ -4,11 +4,11 @@ import { PrismaClient } from "@prisma/client";
  * Supabase-optimised Prisma singleton.
  *
  * Why the extra URL params:
- * - connect_timeout=10     → give the pooler 10s to accept a connection
+ * - connect_timeout=15     → give the pooler 15s to accept a connection
  *   before Prisma gives up (default is 5s which is too short for cold starts)
  * - pool_timeout=10        → wait up to 10s for a free connection from the pool
- * - connection_limit=5     → cap connections so we don't exhaust the pooler
- *   (Supabase free tier allows ~20 concurrent connections)
+ * - connection_limit=5     → allow concurrent work within an instance while
+ *   using Supavisor transaction pooling to cap database-side connections
  * - pgbouncer=true         → tells Prisma to skip prepared-statement caching
  *   which is required when PgBouncer is in transaction mode; harmless in
  *   session mode but keeps things working if the URL ever switches mode.
@@ -23,10 +23,12 @@ function buildDatabaseUrl() {
   if (!base) return base;
   const url = new URL(base);
   if (!url.searchParams.has("connect_timeout"))  url.searchParams.set("connect_timeout",  "15");
-  if (!url.searchParams.has("pool_timeout"))     url.searchParams.set("pool_timeout",     "15");
-  // Vercel may run many function instances concurrently; a large pool per
-  // instance can exhaust Supabase's connection cap and reject every request.
-  if (!url.searchParams.has("connection_limit")) url.searchParams.set("connection_limit", process.env.VERCEL ? "1" : "5");
+  if (!url.searchParams.has("pool_timeout"))     url.searchParams.set("pool_timeout",     "10");
+  // Keep this small for serverless scaling. Set PRISMA_CONNECTION_LIMIT only
+  // after checking Supavisor capacity and observed pool wait metrics.
+  const requestedLimit = Number(process.env.PRISMA_CONNECTION_LIMIT ?? (process.env.VERCEL ? "5" : url.searchParams.get("connection_limit") ?? "5"));
+  const connectionLimit = Number.isInteger(requestedLimit) ? Math.min(5, Math.max(1, requestedLimit)) : 5;
+  url.searchParams.set("connection_limit", String(connectionLimit));
   if (!url.searchParams.has("pgbouncer"))        url.searchParams.set("pgbouncer",        "true");
   return url.toString();
 }

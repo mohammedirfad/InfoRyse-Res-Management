@@ -1,10 +1,8 @@
 import { db } from "@/lib/db";
-import { getCurrentTableSession } from "@/lib/tableSessions";
+import { findCurrentTableSessionReadOnly } from "@/lib/tableSessions";
 import { calculateTaxBreakdown, getTaxRates, taxSummary } from "@/lib/taxes";
 
 export const dynamic = "force-dynamic";
-
-const TAX_RATE = 0.05;
 
 /**
  * GET /api/public/table-orders?slug={slug}&qrToken={qrToken}
@@ -54,7 +52,7 @@ export async function GET(req: Request) {
     // The server is authoritative for the current visit. Never load a session
     // just because a browser remembers its ID; that ID may refer to a settled
     // bill from the previous visit.
-    const currentSession = await getCurrentTableSession(db, table.id, restaurant.id);
+    const currentSession = await findCurrentTableSessionReadOnly(db, table.id, restaurant.id);
     let session = currentSession ? await db.tableSession.findUnique({
       where: { id: currentSession.id },
       select: {
@@ -87,7 +85,8 @@ export async function GET(req: Request) {
       },
     }) : null;
 
-    // Resilient fallback: If no open session exists yet, check if there are recent unlinked active orders for this table
+    // Read-only legacy fallback: surface recent active orders that predate
+    // table sessions without creating or repairing database rows in a GET.
     if (!session) {
       const recentOrders = await db.order.findMany({
         where: {
@@ -99,18 +98,16 @@ export async function GET(req: Request) {
         },
         include: { items: true },
         orderBy: { createdAt: "asc" },
+        take: 100,
       });
 
       if (recentOrders.length > 0) {
-        const createdSession = await db.tableSession.create({
-          data: { tableId: table.id, restaurantId: restaurant.id, status: "OPEN" },
-        });
-        await db.order.updateMany({
-          where: { id: { in: recentOrders.map((o) => o.id) } },
-          data:  { tableSessionId: createdSession.id },
-        });
         session = {
-          ...createdSession,
+          id: `legacy-${table.id}`,
+          status: "OPEN",
+          createdAt: recentOrders[0].createdAt,
+          billRequestedAt: null,
+          packingCents: 0,
           orders: recentOrders,
         } as any;
       }

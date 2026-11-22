@@ -37,7 +37,7 @@ export default function ImageUpload({
     try {
       bitmap = await createImageBitmap(file);
       const longestSide = Math.max(bitmap.width, bitmap.height);
-      if (longestSide <= 1600 && file.size <= 500 * 1024) return file;
+      if (longestSide <= 1600 && file.size <= 500 * 1024 && file.type === "image/webp") return file;
 
       const scale = Math.min(1, 1600 / longestSide);
       const canvas = document.createElement("canvas");
@@ -50,7 +50,7 @@ export default function ImageUpload({
       const blob = await new Promise<Blob | null>(resolve =>
         canvas.toBlob(resolve, "image/webp", 0.82)
       );
-      if (!blob || blob.size >= file.size) return file;
+      if (!blob) return file;
 
       const name = file.name.replace(/\.[^.]+$/, "") || "image";
       return new File([blob], `${name}.webp`, { type: "image/webp", lastModified: Date.now() });
@@ -161,7 +161,7 @@ export default function ImageUpload({
       >
         {/* Preview / placeholder */}
         {displaySrc ? (
-          <img src={displaySrc} alt="Upload preview" className="w-full h-full object-cover" />
+          <img src={displaySrc} alt="Upload preview" loading="lazy" decoding="async" className="w-full h-full object-cover" />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-400 p-4">
             <div className="h-10 w-10 rounded-xl bg-gray-200 flex items-center justify-center">

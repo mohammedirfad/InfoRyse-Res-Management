@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { LayoutGrid, List, Plus, Search, X, Pencil, Trash2, Star, Flame, ChefHat, Sparkles } from "lucide-react";
 import { formatRupees } from "@/lib/utils";
 import ImageUpload from "@/components/ImageUpload";
@@ -433,7 +434,7 @@ export default function MenuManagementPage() {
                     {/* Item image */}
                     <div className="relative h-36 bg-gradient-to-br from-gray-100 to-gray-200 rounded-t-2xl overflow-hidden flex items-center justify-center">
                       {item.imageUrl
-                        ? <img src={item.imageUrl} alt={item.name} className="h-full w-full object-cover" />
+                        ? <Image src={item.imageUrl} alt={item.name} fill sizes="(max-width: 768px) 50vw, 25vw" className="object-cover" />
                         : <span className="text-4xl">{catEmoji(item.category.name)}</span>
                       }
                       {/* Badges */}
@@ -481,7 +482,7 @@ export default function MenuManagementPage() {
                         <td>
                           <div className="flex items-center gap-3">
                             {item.imageUrl ? (
-                              <img src={item.imageUrl} alt="" className="h-9 w-9 rounded-xl object-cover flex-shrink-0 border border-black/5" />
+                              <span className="relative h-9 w-9 rounded-xl overflow-hidden flex-shrink-0 border border-black/5"><Image src={item.imageUrl} alt="" fill sizes="36px" className="object-cover" /></span>
                             ) : (
                               <div className="h-9 w-9 rounded-xl bg-gray-100 flex items-center justify-center text-sm flex-shrink-0">
                                 {catEmoji(item.category.name)}

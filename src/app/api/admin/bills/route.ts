@@ -14,13 +14,15 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request) {
   try {
-    const { restaurantId } = await requireFastRestaurantUser();
+    const { restaurantId, role } = await requireFastRestaurantUser();
     const url = new URL(req.url);
     const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10));
     const limit = Math.max(1, parseInt(url.searchParams.get("limit") ?? "10", 10));
     const search = (url.searchParams.get("search") ?? "").trim();
     const paymentMethod = url.searchParams.get("paymentMethod") ?? "all";
     const exportAll = url.searchParams.get("export") === "true";
+    const analyticsView = url.searchParams.get("analytics") === "true";
+    if (analyticsView && role !== "OWNER") return Response.json({ error: "Forbidden" }, { status: 403 });
 
     const whereClause: any = { restaurantId };
 
@@ -37,12 +39,12 @@ export async function GET(req: Request) {
     if (paymentMethod && paymentMethod !== "all") {
       whereClause.paymentMethod = paymentMethod.toUpperCase();
     }
-    if (exportAll) {
+    if (exportAll || analyticsView) {
       const from = url.searchParams.get("from");
       const to = url.searchParams.get("to");
       if (from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
-        const rangeStart = new Date(`${from}T00:00:00.000Z`);
-        const rangeEnd = new Date(`${to}T23:59:59.999Z`);
+        const rangeStart = new Date(`${from}T00:00:00.000+05:30`);
+        const rangeEnd = new Date(`${to}T23:59:59.999+05:30`);
         const rangeDays = (rangeEnd.getTime() - rangeStart.getTime()) / 86400000;
         if (!Number.isFinite(rangeDays) || rangeDays < 0 || rangeDays > 366) return Response.json({ error: "Choose a date range of one year or less." }, { status: 400 });
         whereClause.OR = [
@@ -51,6 +53,21 @@ export async function GET(req: Request) {
         ];
       }
       whereClause.paymentStatus = "PAID";
+    }
+
+    if (analyticsView) {
+      const rows = await db.bill.groupBy({
+        by: ["paymentMethod"],
+        where: whereClause,
+        _sum: { totalCents: true, taxCents: true },
+      });
+      const paidTaxCents = rows.reduce((sum, row) => sum + (row._sum.taxCents ?? 0), 0);
+      const paidOnlineCents = rows
+        .filter((row) => !["CASH", "PAY_AT_RESTAURANT"].includes(row.paymentMethod))
+        .reduce((sum, row) => sum + (row._sum.totalCents ?? 0), 0);
+      return Response.json({ analytics: { paidTaxCents, paidOnlineCents } }, {
+        headers: { "Cache-Control": "private, no-store" },
+      });
     }
 
     const totalBills = await db.bill.count({ where: whereClause });

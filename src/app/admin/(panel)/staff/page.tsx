@@ -33,7 +33,10 @@ export default function StaffPage() {
     setLoading(true);
     try {
       if (bust) invalidateCache("admin:/api/admin/staff");
-      const data = await cachedJson<{ staff?: StaffMember[] }>("admin:/api/admin/staff", "/api/admin/staff", { ttlMs: 30_000 });
+      const data = await cachedJson<{ staff?: StaffMember[] }>("admin:/api/admin/staff", "/api/admin/staff", {
+        ttlMs: 30_000,
+        onUpdate: (updated) => setStaff((updated as { staff?: StaffMember[] }).staff ?? []),
+      });
       setStaff(data.data.staff ?? []);
     } catch {
       setAccessDenied(true);

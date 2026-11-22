@@ -60,7 +60,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       ),
       updated_order AS (
         UPDATE "Order" AS target
-        SET "status" = ${nextStatus}::"OrderStatus"
+        SET "status" = ${nextStatus}::"OrderStatus", "updatedAt" = NOW()
         FROM current_order
         WHERE target."id" = current_order."id"
           AND target."status" = current_order."status"

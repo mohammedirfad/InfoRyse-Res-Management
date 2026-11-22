@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Image from "next/image";
 import { db } from "@/lib/db";
 import QRCode from "qrcode";
 import BillPrintButton from "./print-button";
@@ -70,7 +71,7 @@ export default async function DigitalBillPage({ params }: { params: { token: str
     <main className="min-h-screen bg-stone-100 px-3 py-6 sm:px-6 print:min-h-0 print:bg-white print:px-0 print:py-0">
       <article className="mx-auto max-w-xl overflow-hidden rounded-3xl bg-white shadow-xl print:w-full print:max-w-none print:rounded-none print:shadow-none">
         <header className="bg-[#132A1E] px-6 py-7 text-center text-white print:bg-white print:text-black">
-          {bill.restaurant.logoUrl && <img src={bill.restaurant.logoUrl} alt="" className="mx-auto mb-3 h-14 w-14 rounded-xl object-cover" />}
+          {bill.restaurant.logoUrl && <Image src={bill.restaurant.logoUrl} alt="" width={56} height={56} sizes="56px" className="mx-auto mb-3 h-14 w-14 rounded-xl object-cover" />}
           <h1 className="text-2xl font-black">{capitalizeInitials(bill.restaurant.name)}</h1>
           {bill.restaurant.contactPhone && <p className="mt-1 text-sm opacity-75">{bill.restaurant.contactPhone}</p>}
           <p className="mt-4 text-xs font-bold uppercase tracking-[0.2em] opacity-70">Digital bill · #{bill.billNumber}</p>

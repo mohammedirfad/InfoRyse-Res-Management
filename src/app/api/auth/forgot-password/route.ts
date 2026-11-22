@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { issueOtp } from "@/lib/auth";
-import { checkRateLimit } from "@/lib/rateLimit";
+import { checkSharedRateLimit } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     const email = rawEmail.trim().toLowerCase();
 
     // Rate-limit password reset requests per email
-    const limit = checkRateLimit(`forgot:${email}`, 8, 15 * 60 * 1000);
+    const limit = await checkSharedRateLimit(`forgot:${email}`, 8, 15 * 60 * 1000);
     if (!limit.allowed) {
       return Response.json(
         { error: "Too many reset attempts for this email. Please wait 15 minutes before trying again." },

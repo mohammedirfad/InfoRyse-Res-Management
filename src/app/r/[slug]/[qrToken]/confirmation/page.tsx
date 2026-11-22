@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { UtensilsCrossed, RefreshCw, X, AlertTriangle, ReceiptText, Gamepad2 } from "lucide-react";
 import { getStoredOrders, saveStoredOrders } from "@/components/CartContext";
 import { requestTableBill } from "@/lib/guestBill";
+import { subscribeBrowserRealtime } from "@/lib/browserRealtime";
 
 const GameCenter = dynamic(() => import("./game-center"), { ssr: false });
 
@@ -84,6 +85,9 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
     if (!orderNumber) return;
     let stopped = false;
     let source: EventSource | null = null;
+    let directStop: (() => void) | null = null;
+    let directStarting = false;
+    let browserRealtimeUnavailable = false;
     let fallbackTimer: ReturnType<typeof setInterval> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectAttempt = 0;
@@ -95,16 +99,53 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       if (nextStatus === "COMPLETED") setHasBillableItems(true);
       setLastUpdated(new Date());
       if (nextStatus === "CANCELLED") setCancelled(true);
-      // Completion means the food was served; the cashier may settle the bill
-      // later, so keep listening for the bill_updated event.
-      if (nextStatus === "CANCELLED") {
+      if (nextStatus === "COMPLETED" || nextStatus === "CANCELLED") {
         source?.close();
-        if (fallbackTimer) clearInterval(fallbackTimer);
-        fallbackTimer = null;
+        source = null;
+        directStop?.();
+        directStop = null;
+        streamConnected = false;
+        if (nextStatus === "COMPLETED") {
+          startPolling();
+        } else {
+          if (fallbackTimer) clearInterval(fallbackTimer);
+          fallbackTimer = null;
+        }
       }
     };
-    const openStream = () => {
-      if (stopped) return;
+    const refreshOrderStatus = (force = false) => {
+      if (stopped || (!force && streamConnected) || document.visibilityState === "hidden" || statusRef.current === "CANCELLED") return;
+      void fetch(`/api/public/order-status?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}&orderNumber=${encodeURIComponent(orderNumber)}`, { cache: "no-store" })
+        .then((response) => response.ok ? response.json() : null)
+        .then((data) => {
+          if (data?.status) applyStatus(data.status);
+          if (data?.tableSessionId) setTableSessionId(data.tableSessionId);
+          setBillShareToken(data?.billShareToken ?? null);
+          setHasBillableItems(Boolean(data?.hasBillableItems));
+          setTableSessionOpen(Boolean(data?.tableSessionOpen));
+        }).catch(() => {});
+    };
+    const startPolling = () => {
+      if (fallbackTimer) return;
+      void refreshOrderStatus(true);
+      fallbackTimer = setInterval(() => { void refreshOrderStatus(true); }, 20000);
+    };
+    const onRealtimeEvent = (event: any) => {
+      if (event.type === "bill_updated") {
+        const data = event.data ?? {};
+        const eventSessionId = data.sessionId ?? data.tableSessionId;
+        if (data.shareToken && eventSessionId && eventSessionId === tableSessionIdRef.current) {
+          setBillShareToken(data.shareToken);
+          directStop?.();
+          directStop = null;
+        }
+      } else if (event.type === "order_updated") {
+        const data = event.data ?? {};
+        if (String(data.orderNumber) === String(orderNumber)) applyStatus(data.status);
+      }
+    };
+    const openLegacyStream = () => {
+      if (stopped || process.env.NODE_ENV === "production") { startPolling(); return; }
       source?.close();
       streamConnected = false;
       source = new EventSource(`/api/public/order-events?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}&orderNumber=${encodeURIComponent(orderNumber)}`);
@@ -171,9 +212,42 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       } catch { /* Ignore malformed realtime events. */ }
       });
     };
+    const openStream = () => {
+      if (stopped || directStop || directStarting || browserRealtimeUnavailable || statusRef.current === "COMPLETED" || statusRef.current === "CANCELLED") {
+        if (browserRealtimeUnavailable && !source && statusRef.current !== "COMPLETED" && statusRef.current !== "CANCELLED") openLegacyStream();
+        return;
+      }
+      directStarting = true;
+      void subscribeBrowserRealtime({ scope: "table", slug: params.slug, qrToken: params.qrToken }, onRealtimeEvent, (connected) => {
+        streamConnected = connected;
+        if (connected) {
+          reconnectAttempt = 0;
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+          if (fallbackTimer) clearInterval(fallbackTimer);
+          fallbackTimer = null;
+          void refreshOrderStatus(true);
+        } else if (!stopped) {
+          if (!fallbackTimer) fallbackTimer = setInterval(() => { void refreshOrderStatus(); }, 20000);
+          void refreshOrderStatus();
+        }
+      }, () => {
+        browserRealtimeUnavailable = true;
+        openLegacyStream();
+      }).then((stopBrowser) => {
+        directStarting = false;
+        if (stopped) { stopBrowser?.(); return; }
+        if (stopBrowser) directStop = stopBrowser;
+        else { browserRealtimeUnavailable = true; openLegacyStream(); }
+      }).catch(() => {
+        directStarting = false;
+        browserRealtimeUnavailable = true;
+        openLegacyStream();
+      });
+    };
     openStream();
     const onVisible = () => {
-      if (document.visibilityState === "visible" && statusRef.current !== "CANCELLED") {
+      if (document.visibilityState === "visible" && statusRef.current !== "CANCELLED" && statusRef.current !== "COMPLETED") {
         if (reconnectTimer) clearTimeout(reconnectTimer);
         reconnectTimer = null;
         openStream();
@@ -186,6 +260,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
 
     return () => {
       stopped = true;
+      directStop?.();
       source?.close();
       if (fallbackTimer) clearInterval(fallbackTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);

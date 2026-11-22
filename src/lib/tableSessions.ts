@@ -8,6 +8,32 @@ export const TABLE_SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
+/** Read-only session lookup for public GET handlers. */
+export async function findCurrentTableSessionReadOnly(
+  client: DbClient,
+  tableId: string,
+  restaurantId: string,
+) {
+  const sessions = await client.tableSession.findMany({
+    where: { tableId, restaurantId, status: "OPEN" },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
+      billRequestedAt: true,
+      packingCents: true,
+      orders: { select: { createdAt: true }, orderBy: { createdAt: "desc" }, take: 1 },
+    },
+  });
+  const now = Date.now();
+  return sessions.find((session) => {
+    const lastActivity = session.orders[0]?.createdAt ?? session.createdAt;
+    return session.createdAt.getTime() >= now - TABLE_SESSION_MAX_AGE_MS
+      && lastActivity.getTime() >= now - TABLE_SESSION_IDLE_MS;
+  }) ?? null;
+}
+
 export async function getCurrentTableSession(
   client: DbClient,
   tableId: string,

@@ -77,17 +77,19 @@ export default function CustomersPage() {
       });
 
       const url = `/api/admin/customers?${query.toString()}`;
-      const { data } = await cachedJson<any>(`admin:${url}`, url, { ttlMs: 30_000 });
-
-      let list: Customer[] = data.customers ?? [];
-      if (statusFilter !== "all") {
-        list = list.filter((c) => c.status === statusFilter);
-      }
-
-      setCustomers(list);
-      setTotalPages(data.pagination?.totalPages ?? 1);
-      setTotalCount(data.pagination?.total ?? list.length);
-      if (data.stats) setStats(data.stats);
+      const applyCustomers = (data: any) => {
+        let list: Customer[] = data.customers ?? [];
+        if (statusFilter !== "all") list = list.filter((customer) => customer.status === statusFilter);
+        setCustomers(list);
+        setTotalPages(data.pagination?.totalPages ?? 1);
+        setTotalCount(data.pagination?.total ?? list.length);
+        if (data.stats) setStats(data.stats);
+      };
+      const { data } = await cachedJson<any>(`admin:${url}`, url, {
+        ttlMs: 30_000,
+        onUpdate: (updated) => applyCustomers(updated),
+      });
+      applyCustomers(data);
     } catch (err) {
       console.error("Failed to fetch customers:", err);
     } finally {
