@@ -13,15 +13,24 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const { status } = Body.parse(await req.json());
     const current = await db.serviceRequest.findFirst({ where: { id: params.id, restaurantId } });
     if (!current) return Response.json({ error: "Service request not found." }, { status: 404 });
+    // Mark-done actions can be submitted twice (e.g. two staff tabs or a
+    // delayed mobile response). Treat the requested final state as idempotent.
+    if (current.status === status) return Response.json({ request: current, unchanged: true });
     if (current.status === "COMPLETED" || current.status === "CANCELLED") {
-      return Response.json({ error: "This request is already closed." }, { status: 409 });
+      return Response.json({ error: "This request is already closed.", request: current }, { status: 409 });
     }
 
     const updated = await db.serviceRequest.updateMany({
       where: { id: current.id, restaurantId, status: { in: ["PENDING", "IN_PROGRESS"] } },
       data: { status, handledBy: userId },
     });
-    if (!updated.count) return Response.json({ error: "This request was already updated." }, { status: 409 });
+    if (!updated.count) {
+      const latest = await db.serviceRequest.findFirst({ where: { id: current.id, restaurantId } });
+      if (latest?.status === status || latest?.status === "COMPLETED" || latest?.status === "CANCELLED") {
+        return Response.json({ request: latest, unchanged: true });
+      }
+      return Response.json({ error: "This request was already updated.", request: latest }, { status: 409 });
+    }
     if (status === "COMPLETED" || status === "CANCELLED") {
       if (current.tableSessionId && current.requests.includes("pay_bill")) {
         await db.tableSession.updateMany({ where: { id: current.tableSessionId, restaurantId }, data: { billRequestedAt: null } });

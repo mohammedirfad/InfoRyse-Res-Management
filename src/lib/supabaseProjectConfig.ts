@@ -1,6 +1,6 @@
 const apiUrl = (process.env.SUPABASE_URL ?? "").trim();
 const databaseUrl = (process.env.DATABASE_URL ?? "").trim();
-const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
+const serviceKey = (process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
 
 function apiProjectRef() {
   try {

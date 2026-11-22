@@ -276,10 +276,13 @@ export default function BillPage() {
       if (payload?.type === "service_request_created") {
         const request = payload.data?.request;
         if (!request?.requests?.includes("pay_bill")) return;
-        const requestedTable = tablesRef.current.find((item) => item.id === request.tableId);
-        if (!requestedTable) return;
         setActiveTab("live");
-        void loadBill(requestedTable, selectedTableRef.current?.id === requestedTable.id);
+        const openRequestedTable = () => {
+          const requestedTable = tablesRef.current.find((item) => item.id === request.tableId);
+          if (requestedTable) void loadBill(requestedTable, selectedTableRef.current?.id === requestedTable.id);
+        };
+        if (tablesRef.current.some((item) => item.id === request.tableId)) openRequestedTable();
+        else void fetchTablesAndRestaurant(false).then(openRequestedTable);
         return;
       }
       if (payload?.type === "resync" || payload?.type === "bill_updated" || payload?.type === "order_updated") {

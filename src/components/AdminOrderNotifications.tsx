@@ -67,7 +67,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioContextClass) return;
-      audio.current ??= new AudioContextClass();
+      if (!audio.current || audio.current.state === "closed") audio.current = new AudioContextClass();
       if (audio.current.state === "suspended") await audio.current.resume();
       const ctx = audio.current;
       [880, 1174].forEach((frequency, index) => {
@@ -93,7 +93,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       try {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         if (!AudioContextClass) return;
-        audio.current ??= new AudioContextClass();
+        if (!audio.current || audio.current.state === "closed") audio.current = new AudioContextClass();
         if (audio.current.state === "suspended") void audio.current.resume().catch(() => {});
       } catch { /* Keep visual notifications available if audio is unsupported. */ }
     };
@@ -390,7 +390,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
         if (!response.ok) return;
         const data = await response.json();
         if (lastOrderVersion !== undefined && data.version !== lastOrderVersion) {
-          window.dispatchEvent(new CustomEvent("inforyse:restaurant-event", { detail: { type: "resync" } }));
+          await loadSnapshot(true);
         }
         lastOrderVersion = data.version ?? null;
       } catch { /* Realtime and the notification snapshot remain available. */ }
@@ -464,8 +464,14 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
-      if (!response.ok) throw new Error("Could not update request");
-      setServiceRequests((current) => status === "COMPLETED" ? current.filter((item) => item.id !== requestId) : current.map((item) => item.id === requestId ? { ...item, status } : item));
+      const payload = await response.json().catch(() => null);
+      const latestStatus = payload?.request?.status as ServiceRequest["status"] | undefined;
+      if (!response.ok && !(response.status === 409 && (latestStatus === "COMPLETED" || latestStatus === "CANCELLED"))) {
+        throw new Error(payload?.error || "Could not update request");
+      }
+      setServiceRequests((current) => status === "COMPLETED" || latestStatus === "COMPLETED" || latestStatus === "CANCELLED"
+        ? current.filter((item) => item.id !== requestId)
+        : current.map((item) => item.id === requestId ? { ...item, status: latestStatus ?? status } : item));
     } catch (error) {
       console.error("Could not update service request", error);
     }
@@ -480,7 +486,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
             try {
               const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
               if (AudioContextClass) {
-                audio.current ??= new AudioContextClass();
+                if (!audio.current || audio.current.state === "closed") audio.current = new AudioContextClass();
                 if (audio.current.state === "suspended") void audio.current.resume().catch(() => {});
               }
             } catch { /* Keep visual notifications available if audio is unsupported. */ }

@@ -3,7 +3,7 @@ import { isSupabaseProjectConfigConsistent } from "@/lib/supabaseProjectConfig";
 import WebSocket from "ws";
 
 const SUPABASE_URL = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 function realtimeBaseUrl() {
   if (!/^https:\/\//i.test(SUPABASE_URL) || !SUPABASE_KEY || !isSupabaseProjectConfigConsistent()) return null;
@@ -90,7 +90,6 @@ export async function broadcastOrderEvent(payload: {
       method: "POST",
       headers: {
         apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(message.payload),

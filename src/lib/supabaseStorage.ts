@@ -3,7 +3,7 @@ import "server-only";
 import { isSupabaseProjectConfigConsistent } from "@/lib/supabaseProjectConfig";
 
 const SUPABASE_URL = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+const SERVICE_KEY = process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 export const IMAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET ?? "restaurant-images";
 
 export class StorageConfigurationError extends Error {
@@ -42,7 +42,11 @@ export async function createSignedImageUpload(
       method: "POST",
       headers: {
         apikey: SERVICE_KEY,
-        Authorization: `Bearer ${SERVICE_KEY}`,
+        // New Supabase secret API keys are not JWTs and must not be sent as
+        // Bearer tokens. Legacy service_role JWTs still work through apikey.
+        ...(!SERVICE_KEY.startsWith("sb_secret_")
+          ? { Authorization: `Bearer ${SERVICE_KEY}` }
+          : {}),
         "Content-Type": "application/json",
       },
       body: "{}",

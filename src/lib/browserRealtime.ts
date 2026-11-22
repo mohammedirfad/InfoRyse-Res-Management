@@ -4,7 +4,7 @@ type RealtimeScope = { scope: "restaurant" } | { scope: "table"; slug: string; q
 type RealtimeEvent = { type: string; data?: Record<string, any>; restaurantId?: string };
 type TokenResponse = { url: string; anonKey: string; token: string; topic: string };
 
-/** Connect straight from the browser to Supabase Realtime using a five-minute,
+/** Connect straight from the browser to Supabase Realtime using a short-lived,
  * server-minted JWT scoped by RLS to one restaurant or QR table. */
 export async function subscribeBrowserRealtime(
   scope: RealtimeScope,
@@ -16,6 +16,7 @@ export async function subscribeBrowserRealtime(
   let socket: WebSocket | null = null;
   let reconnectTimer: number | null = null;
   let rotateTimer: number | null = null;
+  let heartbeatTimer: number | null = null;
   let attempt = 0;
   let ref = 0;
   let joinRef = "";
@@ -63,6 +64,19 @@ export async function subscribeBrowserRealtime(
           config: { broadcast: { ack: false, self: false }, presence: { enabled: false }, postgres_changes: [], private: true },
           access_token: config.token,
         }]));
+        // Phoenix closes idle Realtime sockets unless the client sends a
+        // heartbeat. Keep the direct browser connection alive and detect
+        // mobile/network drops promptly instead of waiting for a refresh.
+        heartbeatTimer = window.setInterval(() => {
+          const activeSocket = socket;
+          if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
+          const heartbeatRef = String(++ref);
+          try {
+            activeSocket.send(JSON.stringify([null, heartbeatRef, "phoenix", "heartbeat", {}]));
+          } catch {
+            activeSocket.close();
+          }
+        }, 20_000);
       };
       socket.onmessage = (message) => {
         try {
@@ -74,7 +88,14 @@ export async function subscribeBrowserRealtime(
               isConnected = true;
               onConnection?.(true);
               rotateTimer = window.setTimeout(() => socket?.close(4001, "refresh scoped realtime token"), 14 * 60_000);
-            } else socket?.close(4403, "realtime access denied");
+            } else {
+              console.warn("[realtime] private channel join rejected", frame[4]?.response ?? frame[4]?.status ?? "unknown");
+              socket?.close(4403, "realtime access denied");
+            }
+            return;
+          }
+          if (frame[3] === "phx_error" || frame[3] === "phx_close") {
+            socket?.close(4000, "realtime channel closed");
             return;
           }
           if (isConnected && frame[3] === "broadcast") {
@@ -85,6 +106,8 @@ export async function subscribeBrowserRealtime(
       };
       socket.onclose = (event) => {
         socket = null;
+        if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
         if (rotateTimer !== null) window.clearTimeout(rotateTimer);
         rotateTimer = null;
         if (isConnected) onConnection?.(false);
@@ -111,9 +134,12 @@ export async function subscribeBrowserRealtime(
     }, base + Math.floor(Math.random() * 250));
   };
   const onVisibility = () => {
-    if (document.visibilityState !== "visible" || stopped || socket) return;
+    if (document.visibilityState !== "visible" || stopped) return;
     if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
     reconnectTimer = null;
+    if (socket && socket.readyState === WebSocket.OPEN && isConnected) return;
+    socket?.close(4000, "reconnect after tab became visible");
+    if (socket) return; // onclose schedules a fresh connection
     void connect();
   };
   document.addEventListener("visibilitychange", onVisibility);
@@ -122,6 +148,7 @@ export async function subscribeBrowserRealtime(
     stopped = true;
     document.removeEventListener("visibilitychange", onVisibility);
     if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+    if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer);
     if (rotateTimer !== null) window.clearTimeout(rotateTimer);
     socket?.close(1000, "subscription closed");
     socket = null;
