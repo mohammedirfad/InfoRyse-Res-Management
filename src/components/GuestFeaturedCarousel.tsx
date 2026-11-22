@@ -59,7 +59,7 @@ export default function GuestFeaturedCarousel({ items, restaurantName, categoryN
               className="cursor-pointer rounded-2xl text-left">
               <span className={`relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br ${gradients[index % gradients.length]} shadow-xl`}>
                 <span className="absolute inset-0 flex items-center justify-center text-5xl" aria-hidden="true">🍽️</span>
-                {item.imageUrl && <Image src={item.imageUrl} alt={item.name} fill sizes="200px" priority={index === activeIndex} className="relative z-10 object-cover" />}
+                {item.imageUrl && <Image src={item.imageUrl} alt={item.name} fill unoptimized sizes="200px" priority={index === activeIndex} className="relative z-10 object-cover" onError={(event) => { event.currentTarget.style.display = "none"; }} />}
                 {badge(item) && <span className={`absolute left-2 top-2 z-20 rounded-full px-2.5 py-1 text-[9px] font-black shadow ${badge(item)!.style}`}>{badge(item)!.label}</span>}
               </span>
             </button>

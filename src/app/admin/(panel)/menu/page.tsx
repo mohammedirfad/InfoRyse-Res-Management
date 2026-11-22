@@ -433,10 +433,8 @@ export default function MenuManagementPage() {
                   <div key={item.id} className={`card hover:shadow-md transition-all cursor-pointer ${!item.isAvailable ? "opacity-60" : ""}`} onClick={() => openEdit(item)}>
                     {/* Item image */}
                     <div className="relative h-36 bg-gradient-to-br from-gray-100 to-gray-200 rounded-t-2xl overflow-hidden flex items-center justify-center">
-                      {item.imageUrl
-                        ? <Image src={item.imageUrl} alt={item.name} fill sizes="(max-width: 768px) 50vw, 25vw" className="object-cover" />
-                        : <span className="text-4xl">{catEmoji(item.category.name)}</span>
-                      }
+                      <span className="text-4xl">{catEmoji(item.category.name)}</span>
+                      {item.imageUrl && <Image src={item.imageUrl} alt={item.name} fill unoptimized sizes="(max-width: 768px) 50vw, 25vw" className="object-cover" onError={(event) => { event.currentTarget.style.display = "none"; }} />}
                       {/* Badges */}
                       <div className="absolute top-2 left-2 flex gap-1">
                         {item.isBestseller && <span className="badge bg-amber-500 text-white text-[10px]"><Star className="h-2.5 w-2.5" />Bestseller</span>}
@@ -481,13 +479,10 @@ export default function MenuManagementPage() {
                       <tr key={item.id} className="cursor-pointer" onClick={() => openEdit(item)}>
                         <td>
                           <div className="flex items-center gap-3">
-                            {item.imageUrl ? (
-                              <span className="relative h-9 w-9 rounded-xl overflow-hidden flex-shrink-0 border border-black/5"><Image src={item.imageUrl} alt="" fill sizes="36px" className="object-cover" /></span>
-                            ) : (
-                              <div className="h-9 w-9 rounded-xl bg-gray-100 flex items-center justify-center text-sm flex-shrink-0">
-                                {catEmoji(item.category.name)}
-                              </div>
-                            )}
+                            <span className="relative h-9 w-9 rounded-xl overflow-hidden flex-shrink-0 border border-black/5 bg-gray-100 flex items-center justify-center text-sm">
+                              <span>{catEmoji(item.category.name)}</span>
+                              {item.imageUrl && <Image src={item.imageUrl} alt="" fill unoptimized sizes="36px" className="object-cover" onError={(event) => { event.currentTarget.style.display = "none"; }} />}
+                            </span>
                             <div className={`h-3.5 w-3.5 rounded-sm border-2 flex-shrink-0 ${item.isVeg ? "border-green-600" : "border-red-600"}`} />
                             <div>
                               <p className="font-medium text-gray-900">{item.name}</p>
