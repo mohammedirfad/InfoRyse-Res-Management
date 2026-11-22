@@ -29,10 +29,10 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   const name        = sp.get("name") ?? "";
   const total       = Number(sp.get("total") ?? "0");
   const restaurantName = sp.get("restaurantName") ?? "";
-  const placedAt    = useRef(new Date());
+  const [placedAt, setPlacedAt] = useState<Date | null>(null);
 
   const [status, setStatus]           = useState("NEW");
-  const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [showNudge, setShowNudge]     = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelling, setCancelling]   = useState(false);
@@ -64,6 +64,15 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
     setStatus(nextStatus);
     return true;
   }
+
+  // Keep the server and first browser render identical. Formatting `new Date()`
+  // during SSR differs by both clock and timezone and causes React hydration
+  // errors on the confirmation page.
+  useEffect(() => {
+    const now = new Date();
+    setPlacedAt(now);
+    setLastUpdated(now);
+  }, []);
 
   useEffect(() => {
     if (!orderNumber) return;
@@ -129,7 +138,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
         .then((data) => {
           if (data?.status) applyStatus(data.status);
           if (data?.tableSessionId) setTableSessionId(data.tableSessionId);
-          setBillShareToken(data?.billShareToken ?? null);
+          if (data?.billShareToken) setBillShareToken(data.billShareToken);
           setHasBillableItems(Boolean(data?.hasBillableItems));
           setTableSessionOpen(Boolean(data?.tableSessionOpen));
         }).catch(() => {});
@@ -179,7 +188,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
             .then((data) => {
               if (data?.status) applyStatus(data.status);
               if (data?.tableSessionId) setTableSessionId(data.tableSessionId);
-              setBillShareToken(data?.billShareToken ?? null);
+              if (data?.billShareToken) setBillShareToken(data.billShareToken);
               setHasBillableItems(Boolean(data?.hasBillableItems));
               setTableSessionOpen(Boolean(data?.tableSessionOpen));
             })
@@ -203,7 +212,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
           const snapshot = JSON.parse((rawEvent as MessageEvent).data);
           applyStatus(snapshot.status);
           if (snapshot.tableSessionId) setTableSessionId(snapshot.tableSessionId);
-          setBillShareToken(snapshot.billShareToken ?? null);
+          if (snapshot.billShareToken) setBillShareToken(snapshot.billShareToken);
           setHasBillableItems(Boolean(snapshot.hasBillableItems));
           setTableSessionOpen(Boolean(snapshot.tableSessionOpen));
         } catch { /* Ignore malformed snapshot. */ }
@@ -241,7 +250,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
           reconnectTimer = null;
           if (fallbackTimer) clearInterval(fallbackTimer);
           fallbackTimer = null;
-          if (!safetyPollTimer) safetyPollTimer = setInterval(() => { void refreshOrderStatus(true); }, 15000);
+          if (!safetyPollTimer) safetyPollTimer = setInterval(() => { void refreshOrderStatus(true); }, 10000);
           void refreshOrderStatus(true);
         } else if (!stopped) {
           if (safetyPollTimer) clearInterval(safetyPollTimer);
@@ -342,6 +351,32 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       : "Request sent — the staff have been notified and your bill appears here automatically.");
   }
 
+  // A small bill-only safety poll makes delivery reliable even if the browser
+  // misses the realtime event while the guest is waiting on this screen.
+  useEffect(() => {
+    if (!orderNumber || billRequestState !== "sent" || billShareToken) return;
+    let stopped = false;
+    const refreshBillLink = async () => {
+      try {
+        const response = await fetch(`/api/public/order-status?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}&orderNumber=${encodeURIComponent(orderNumber)}`, { cache: "no-store" });
+        if (!response.ok || stopped) return;
+        const snapshot = await response.json();
+        if (stopped) return;
+        if (snapshot.tableSessionId) {
+          tableSessionIdRef.current = snapshot.tableSessionId;
+          setTableSessionId(snapshot.tableSessionId);
+        }
+        if (snapshot.billShareToken) setBillShareToken(snapshot.billShareToken);
+      } catch { /* Realtime and the next safety poll can still deliver the link. */ }
+    };
+    void refreshBillLink();
+    const timer = setInterval(() => void refreshBillLink(), 5000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [orderNumber, params.slug, params.qrToken, billRequestState, billShareToken]);
+
   // Resolve bills by this order's ID. A QR-wide cached bill can belong to an
   // earlier visit at the same table and must never appear on a new order.
   useEffect(() => {
@@ -356,7 +391,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
           if (snapshot.status === "CANCELLED") setCancelled(true);
         }
         if (snapshot.tableSessionId) setTableSessionId(snapshot.tableSessionId);
-        setBillShareToken(snapshot.billShareToken ?? null);
+        if (snapshot.billShareToken) setBillShareToken(snapshot.billShareToken);
         setHasBillableItems(Boolean(snapshot.hasBillableItems));
         setTableSessionOpen(Boolean(snapshot.tableSessionOpen));
       } catch { /* Keep the live event stream as the primary status source. */ }
@@ -368,8 +403,8 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderNumber, params.slug, params.qrToken]);
 
-  function fmt(d: Date) {
-    return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  function fmt(d: Date | null) {
+    return d?.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) ?? "—";
   }
 
   return (
@@ -414,11 +449,11 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
             <div className="px-5 py-4 grid grid-cols-2 gap-4 text-sm">
               <div>
                 <p className="text-xs text-gray-400">Date</p>
-                <p className="font-semibold text-gray-800 mt-0.5">{placedAt.current.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}</p>
+                <p className="font-semibold text-gray-800 mt-0.5">{placedAt?.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}) ?? "—"}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-400">Time</p>
-                <p className="font-semibold text-gray-800 mt-0.5">{fmt(placedAt.current)}</p>
+                <p className="font-semibold text-gray-800 mt-0.5">{fmt(placedAt)}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-400">Type</p>
@@ -474,7 +509,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
                         <p className={`text-sm font-bold leading-snug ${done||active?"text-gray-900":"text-gray-400"}`}>{step.label}</p>
                         <p className={`text-xs mt-0.5 ${active?"text-[#132A1E] font-semibold":done?"text-green-600":"text-gray-300"}`}>
                           {active
-                            ? step.key==="NEW" ? `${fmt(placedAt.current)} · Just now` : `Updated ${fmt(lastUpdated)}`
+                            ? step.key==="NEW" ? `${fmt(placedAt)} · Just now` : `Updated ${fmt(lastUpdated)}`
                             : done ? "✓ " + step.subLabel
                             : step.subLabel}
                         </p>
