@@ -196,6 +196,7 @@ export function LandingPage({
                   src={restaurantLogo}
                   alt={restaurantName}
                   fill
+                  unoptimized
                   sizes="80px"
                   className="rounded-xl bg-black object-cover"
                 />
@@ -473,6 +474,7 @@ export function LandingPage({
                     src={getDishImageUrl(item.name, item.categoryName, item.imageUrl)}
                     alt={item.name}
                     fill
+                    unoptimized
                     sizes="(max-width: 640px) 50vw, 33vw"
                     className="object-cover group-hover:scale-115 transition-transform duration-700 ease-out"
                   />

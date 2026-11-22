@@ -8,6 +8,7 @@ import { UtensilsCrossed, RefreshCw, X, AlertTriangle, ReceiptText, Gamepad2 } f
 import { getStoredOrders, saveStoredOrders } from "@/components/CartContext";
 import { requestTableBill } from "@/lib/guestBill";
 import { subscribeBrowserRealtime } from "@/lib/browserRealtime";
+import { canApplyOrderStatus } from "@/lib/orderStatusProgress";
 
 const GameCenter = dynamic(() => import("./game-center"), { ssr: false });
 
@@ -57,6 +58,13 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   const currentIdx  = STATUS_ORDER.indexOf(status);
   const gamePromptKey = `inforyse_game_prompt_${params.qrToken}_${orderNumber}`;
 
+  function applyOrderStatus(nextStatus: string | null | undefined) {
+    if (!nextStatus || !canApplyOrderStatus(statusRef.current, nextStatus)) return false;
+    statusRef.current = nextStatus;
+    setStatus(nextStatus);
+    return true;
+  }
+
   useEffect(() => {
     if (!orderNumber) return;
     try {
@@ -94,9 +102,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
     let reconnectAttempt = 0;
     let streamConnected = false;
     const applyStatus = (nextStatus: string | null) => {
-      if (!nextStatus || stopped) return;
-      statusRef.current = nextStatus;
-      setStatus(nextStatus);
+      if (stopped || !applyOrderStatus(nextStatus)) return;
       if (nextStatus === "COMPLETED") setHasBillableItems(true);
       setLastUpdated(new Date());
       if (nextStatus === "CANCELLED") setCancelled(true);
@@ -311,7 +317,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
         );
         saveStoredOrders(params.qrToken, updated);
       } catch { /* ignore */ }
-      setStatus("CANCELLED");
+      applyOrderStatus("CANCELLED");
       setCancelled(true);
       setShowCancelConfirm(false);
     } catch {
@@ -346,9 +352,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
         const response = await fetch(`/api/public/order-status?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}&orderNumber=${encodeURIComponent(orderNumber)}`, { cache: "no-store" });
         if (!response.ok || stopped) return;
         const snapshot = await response.json();
-        if (snapshot.status) {
-          statusRef.current = snapshot.status;
-          setStatus(snapshot.status);
+        if (snapshot.status && applyOrderStatus(snapshot.status)) {
           if (snapshot.status === "CANCELLED") setCancelled(true);
         }
         if (snapshot.tableSessionId) setTableSessionId(snapshot.tableSessionId);
