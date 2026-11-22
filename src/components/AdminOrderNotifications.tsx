@@ -158,6 +158,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       if (disposed || snapshotBusy || document.visibilityState === "hidden") return;
       snapshotBusy = true;
       const since = cursor.current;
+      const requestStartedAt = Date.now();
       try {
         const response = await fetch(`/api/admin/notifications?since=${encodeURIComponent(since)}`, { cache: "no-store" });
         if (response.status === 401) {
@@ -193,7 +194,10 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
         }
         snapshotInitialized = true;
         setServiceRequests(activeRequests);
-        cursor.current = new Date(Date.now() - 2000).toISOString();
+        // Keep a small overlap anchored to the request start. Advancing the
+        // cursor after the response could skip orders created during a slow
+        // snapshot request when the realtime event was also missed.
+        cursor.current = new Date(requestStartedAt - 2000).toISOString();
         // Reconcile after reconnect so events missed during a disconnect are
         // shown once, without polling while the stream is unavailable.
         if (discoveredOrder) window.dispatchEvent(new CustomEvent("inforyse:restaurant-event", { detail: { type: "resync" } }));
@@ -209,7 +213,7 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       // Push is the normal path. If the Realtime connection is unavailable,
       // reconcile occasionally so notifications still recover without making
       // every open admin device query the database every few seconds.
-      snapshotFallbackTimer = window.setInterval(() => void loadSnapshot(), 30000);
+      snapshotFallbackTimer = window.setInterval(() => void loadSnapshot(), 10000);
     };
     const stopSnapshotFallback = () => {
       if (snapshotFallbackTimer === null) return;
@@ -376,7 +380,6 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       });
     };
     connectStream();
-    void loadSnapshot();
     const checkForMissedOrderChanges = async () => {
       if (disposed || changeCheckBusy || document.visibilityState === "hidden") return;
       changeCheckBusy = true;
@@ -396,8 +399,11 @@ export default function AdminOrderNotifications({ realtimeTransport = "sse" }: {
       } catch { /* Realtime and the notification snapshot remain available. */ }
       finally { changeCheckBusy = false; }
     };
-    void checkForMissedOrderChanges();
-    changeCheckTimer = window.setInterval(() => void checkForMissedOrderChanges(), 30_000);
+    // Establish the change-token baseline before the initial snapshot so an
+    // event created during startup is either in that snapshot or detected by
+    // the next token check.
+    void checkForMissedOrderChanges().finally(() => { void loadSnapshot(); });
+    changeCheckTimer = window.setInterval(() => void checkForMissedOrderChanges(), 10_000);
     const onVisible = () => {
       const visible = document.visibilityState === "visible";
       if (visible && !wasVisible) {

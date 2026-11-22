@@ -20,6 +20,8 @@ export async function subscribeBrowserRealtime(
   let attempt = 0;
   let ref = 0;
   let joinRef = "";
+  let pendingHeartbeatRef: string | null = null;
+  let lastHeartbeatAckAt = 0;
   let isConnected = false;
   let initialConfig: TokenResponse | null = null;
 
@@ -59,6 +61,7 @@ export async function subscribeBrowserRealtime(
       socket = new WebSocket(endpoint);
       socket.onopen = () => {
         if (!socket || stopped) return;
+        lastHeartbeatAckAt = Date.now();
         joinRef = String(++ref);
         socket.send(JSON.stringify([joinRef, joinRef, `realtime:${config.topic}`, "phx_join", {
           config: { broadcast: { ack: false, self: false }, presence: { enabled: false }, postgres_changes: [], private: true },
@@ -70,7 +73,12 @@ export async function subscribeBrowserRealtime(
         heartbeatTimer = window.setInterval(() => {
           const activeSocket = socket;
           if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
+          if (pendingHeartbeatRef && Date.now() - lastHeartbeatAckAt > 45_000) {
+            activeSocket.close(4000, "realtime heartbeat timed out");
+            return;
+          }
           const heartbeatRef = String(++ref);
+          pendingHeartbeatRef = heartbeatRef;
           try {
             activeSocket.send(JSON.stringify([null, heartbeatRef, "phoenix", "heartbeat", {}]));
           } catch {
@@ -94,6 +102,13 @@ export async function subscribeBrowserRealtime(
             }
             return;
           }
+          if (frame[3] === "phx_reply" && frame[1] === pendingHeartbeatRef) {
+            if (frame[4]?.status === "ok") {
+              pendingHeartbeatRef = null;
+              lastHeartbeatAckAt = Date.now();
+            }
+            return;
+          }
           if (frame[3] === "phx_error" || frame[3] === "phx_close") {
             socket?.close(4000, "realtime channel closed");
             return;
@@ -112,6 +127,7 @@ export async function subscribeBrowserRealtime(
         rotateTimer = null;
         if (isConnected) onConnection?.(false);
         isConnected = false;
+        pendingHeartbeatRef = null;
         if (event.code === 4403) {
           stopped = true;
           onRejected?.();

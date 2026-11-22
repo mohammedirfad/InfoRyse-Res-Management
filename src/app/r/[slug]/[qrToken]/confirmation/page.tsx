@@ -89,6 +89,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
     let directStarting = false;
     let browserRealtimeUnavailable = false;
     let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+    let safetyPollTimer: ReturnType<typeof setInterval> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectAttempt = 0;
     let streamConnected = false;
@@ -100,6 +101,8 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       setLastUpdated(new Date());
       if (nextStatus === "CANCELLED") setCancelled(true);
       if (nextStatus === "COMPLETED" || nextStatus === "CANCELLED") {
+        if (safetyPollTimer) clearInterval(safetyPollTimer);
+        safetyPollTimer = null;
         source?.close();
         source = null;
         directStop?.();
@@ -128,13 +131,15 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
     const startPolling = () => {
       if (fallbackTimer) return;
       void refreshOrderStatus(true);
-      fallbackTimer = setInterval(() => { void refreshOrderStatus(true); }, 20000);
+      fallbackTimer = setInterval(() => { void refreshOrderStatus(true); }, 10000);
     };
     const onRealtimeEvent = (event: any) => {
       if (event.type === "bill_updated") {
         const data = event.data ?? {};
         const eventSessionId = data.sessionId ?? data.tableSessionId;
-        if (data.shareToken && eventSessionId && eventSessionId === tableSessionIdRef.current) {
+        if (data.shareToken && eventSessionId && (!tableSessionIdRef.current || eventSessionId === tableSessionIdRef.current)) {
+          tableSessionIdRef.current = eventSessionId;
+          setTableSessionId(eventSessionId);
           setBillShareToken(data.shareToken);
           directStop?.();
           directStop = null;
@@ -176,7 +181,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
         };
         if (!fallbackTimer) {
           pollStatus();
-          fallbackTimer = setInterval(pollStatus, 20000);
+          fallbackTimer = setInterval(pollStatus, 10000);
         }
         if (reconnectTimer === null) {
           const delay = Math.min(30_000, 2_000 * 2 ** reconnectAttempt++);
@@ -203,7 +208,11 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
         if (event.type === "bill_updated") {
           const data = event.data ?? {};
           const eventSessionId = data.sessionId ?? data.tableSessionId;
-          if (data.shareToken && eventSessionId && eventSessionId === tableSessionIdRef.current) setBillShareToken(data.shareToken);
+          if (data.shareToken && eventSessionId && (!tableSessionIdRef.current || eventSessionId === tableSessionIdRef.current)) {
+            tableSessionIdRef.current = eventSessionId;
+            setTableSessionId(eventSessionId);
+            setBillShareToken(data.shareToken);
+          }
           return;
         }
         if (event.type !== "order_updated") return;
@@ -226,9 +235,12 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
           reconnectTimer = null;
           if (fallbackTimer) clearInterval(fallbackTimer);
           fallbackTimer = null;
+          if (!safetyPollTimer) safetyPollTimer = setInterval(() => { void refreshOrderStatus(true); }, 15000);
           void refreshOrderStatus(true);
         } else if (!stopped) {
-          if (!fallbackTimer) fallbackTimer = setInterval(() => { void refreshOrderStatus(); }, 20000);
+          if (safetyPollTimer) clearInterval(safetyPollTimer);
+          safetyPollTimer = null;
+          if (!fallbackTimer) fallbackTimer = setInterval(() => { void refreshOrderStatus(); }, 10000);
           void refreshOrderStatus();
         }
       }, () => {
@@ -263,6 +275,7 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
       directStop?.();
       source?.close();
       if (fallbackTimer) clearInterval(fallbackTimer);
+      if (safetyPollTimer) clearInterval(safetyPollTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       document.removeEventListener("visibilitychange", onVisible);
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);

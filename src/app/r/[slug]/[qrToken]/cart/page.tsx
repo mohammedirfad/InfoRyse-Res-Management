@@ -118,11 +118,6 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
   const [note, setNote]                   = useState("");
   const refreshInFlight = useRef(false);
   const refreshQueued = useRef(false);
-  const billRequestStateRef = useRef(billRequestState);
-  const billRequestedAtRef = useRef<string | null | undefined>(sessionData?.session?.billRequestedAt);
-  billRequestStateRef.current = billRequestState;
-  billRequestedAtRef.current = sessionData?.session?.billRequestedAt;
-
   const base = `/r/${params.slug}/${params.qrToken}`;
 
   useEffect(() => {
@@ -226,6 +221,16 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
     }
   }, [tab, refreshTableOrders]);
 
+  // A low-frequency snapshot keeps shared table status and bill links current
+  // even if a browser network silently drops Realtime without closing WS.
+  useEffect(() => {
+    if (tab !== "confirmed") return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshTableOrders();
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [tab, refreshTableOrders]);
+
   useEffect(() => {
     if (tab !== "confirmed") return;
     const url = `/api/public/order-events?slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}`;
@@ -236,9 +241,11 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       try {
         const shareToken = event?.data?.shareToken;
         const sessionId = event?.data?.tableSessionId ?? event?.data?.sessionId;
-        const billWasRequested = billRequestStateRef.current === "sending" || billRequestStateRef.current === "waiting" || billRequestStateRef.current === "ready" || Boolean(billRequestedAtRef.current);
-        const billIsAlreadyPaid = event?.data?.paymentStatus === "PAID";
-        if (event?.type === "bill_updated" && shareToken && sessionId && (billWasRequested || billIsAlreadyPaid)) {
+        const knownSessionId = getGuestTableSession(params.qrToken);
+        // The table channel is already scoped to this QR token. Accept the
+        // server-issued share link when the session snapshot is still loading,
+        // while rejecting events for an older session on this device.
+        if (event?.type === "bill_updated" && shareToken && sessionId && (!knownSessionId || sessionId === knownSessionId)) {
           const billLink = { token: shareToken as string, sessionId: sessionId as string };
           rememberBillLink(params.qrToken, billLink);
           saveGuestTableSession(params.qrToken, sessionId as string);
@@ -253,23 +260,11 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       try { onTableEvent(JSON.parse(rawEvent.data)); } catch { /* Ignore malformed event frames. */ }
     };
     let connectedBefore = false;
-    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
     let directStop: (() => void) | null = null;
     let directStarting = false;
     let directRejected = false;
     let hiddenAt: number | null = null;
-    const stopFallback = () => {
-      if (fallbackTimer) clearInterval(fallbackTimer);
-      fallbackTimer = null;
-    };
-    const startFallbackPolling = () => {
-      if (fallbackTimer) return;
-      void refreshTableOrders();
-      fallbackTimer = setInterval(() => {
-        if (document.visibilityState === "visible") void refreshTableOrders();
-      }, 20000);
-    };
     const scheduleReconnect = () => {
       if (stopped || reconnectTimer) return;
       const delay = Math.min(30_000, 2_000 * 2 ** reconnectAttempt++);
@@ -281,12 +276,7 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
     const onStreamError = () => {
       source?.close();
       source = null;
-      if (!fallbackTimer) {
-        void refreshTableOrders();
-        fallbackTimer = setInterval(() => {
-          if (document.visibilityState === "visible") void refreshTableOrders();
-        }, 15000);
-      }
+      void refreshTableOrders();
       scheduleReconnect();
     };
     const connectLegacy = () => {
@@ -296,7 +286,6 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
         reconnectAttempt = 0;
         if (reconnectTimer) clearTimeout(reconnectTimer);
         reconnectTimer = null;
-        stopFallback();
         if (connectedBefore) void refreshTableOrders();
         connectedBefore = true;
       });
@@ -313,14 +302,10 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
           reconnectAttempt = 0;
           if (reconnectTimer) clearTimeout(reconnectTimer);
           reconnectTimer = null;
-          stopFallback();
           if (connectedBefore) void refreshTableOrders();
           connectedBefore = true;
-        } else if (!stopped && !fallbackTimer) {
+        } else if (!stopped) {
           void refreshTableOrders();
-          fallbackTimer = setInterval(() => {
-            if (document.visibilityState === "visible") void refreshTableOrders();
-          }, 20_000);
         }
       }, () => {
         directRejected = true;
@@ -329,11 +314,11 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
         directStarting = false;
         if (stopped) { stopBrowser?.(); return; }
         if (stopBrowser) directStop = stopBrowser;
-        else if (process.env.NODE_ENV === "production") startFallbackPolling();
+        else if (process.env.NODE_ENV === "production") void refreshTableOrders();
         else connectLegacy();
       }).catch(() => {
         directStarting = false;
-        if (process.env.NODE_ENV === "production") startFallbackPolling();
+        if (process.env.NODE_ENV === "production") void refreshTableOrders();
         else connectLegacy();
       });
     };
@@ -355,7 +340,6 @@ function CartPageContent({ params }: { params: { slug: string; qrToken: string }
       stopped = true;
       directStop?.();
       source?.close();
-      stopFallback();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       document.removeEventListener("visibilitychange", onVisible);
       document.removeEventListener("visibilitychange", onHidden);
