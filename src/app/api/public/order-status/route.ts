@@ -9,6 +9,7 @@ export async function GET(req: Request) {
   const qrToken = url.searchParams.get("qrToken");
   const rawOrderNumber = url.searchParams.get("orderNumber") || "";
   const orderNumber = Number.parseInt(rawOrderNumber.replace(/\D/g, ""), 10);
+  const statusOnly = url.searchParams.get("statusOnly") === "1";
 
   if (!slug || !qrToken || !Number.isSafeInteger(orderNumber) || orderNumber < 1) {
     return Response.json({ error: "Invalid parameters" }, { status: 400 });
@@ -21,9 +22,26 @@ export async function GET(req: Request) {
         restaurant: { slug, isActive: true },
         table: { qrToken, deletedAt: null },
       },
-      select: { status: true, createdAt: true, restaurantId: true, tableId: true, tableSessionId: true, tableSession: { select: { status: true, billRequestedAt: true } } },
+      select: { status: true, createdAt: true, updatedAt: true, restaurantId: true, tableId: true, tableSessionId: true, tableSession: { select: { status: true, billRequestedAt: true } } },
     });
     if (!order) return Response.json({ error: "Order not found" }, { status: 404 });
+
+    if (statusOnly) {
+      const billableItem = order.tableSessionId ? await db.orderItem.findFirst({
+        where: {
+          servedQuantity: { gt: 0 },
+          order: { restaurantId: order.restaurantId, tableSessionId: order.tableSessionId, status: { not: "CANCELLED" } },
+        },
+        select: { id: true },
+      }) : null;
+      return Response.json({
+        status: order.status,
+        updatedAt: order.updatedAt,
+        tableSessionId: order.tableSessionId,
+        tableSessionOpen: order.tableSession?.status === "OPEN",
+        hasBillableItems: Boolean(billableItem),
+      }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
+    }
 
     const [bill, billableItem] = order.tableSessionId ? await Promise.all([
       db.bill.findFirst({
@@ -47,7 +65,7 @@ export async function GET(req: Request) {
 
     return Response.json({
       status: order.status,
-      updatedAt: order.createdAt,
+      updatedAt: order.updatedAt,
       tableSessionId: order.tableSessionId,
       tableSessionOpen: order.tableSession?.status === "OPEN",
       billShareToken: order.tableSession?.billRequestedAt || bill?.paymentStatus === "PAID" ? bill?.shareToken ?? null : null,

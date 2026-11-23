@@ -403,6 +403,62 @@ export default function ConfirmationPage({ params }: { params: { slug: string; q
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderNumber, params.slug, params.qrToken]);
 
+  // Keep order progress independent from the realtime socket startup. This
+  // compact uncached snapshot also covers missed events and reconnect windows.
+  useEffect(() => {
+    if (!orderNumber || status === "COMPLETED" || status === "CANCELLED") return;
+    let stopped = false;
+    let inFlight = false;
+    let requestTimer: ReturnType<typeof setTimeout> | null = null;
+    let activeController: AbortController | null = null;
+    const poll = async () => {
+      if (stopped || inFlight || document.visibilityState === "hidden") return;
+      inFlight = true;
+      const controller = new AbortController();
+      activeController = controller;
+      requestTimer = setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch(`/api/public/order-status?statusOnly=1&slug=${encodeURIComponent(params.slug)}&qrToken=${encodeURIComponent(params.qrToken)}&orderNumber=${encodeURIComponent(orderNumber)}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok || stopped) return;
+        const snapshot = await response.json();
+        if (stopped) return;
+        const previousStatus = statusRef.current;
+        if (snapshot.status && applyOrderStatus(snapshot.status)) {
+          if (snapshot.status !== previousStatus) setLastUpdated(new Date());
+          if (snapshot.status === "CANCELLED") setCancelled(true);
+        }
+        if (snapshot.tableSessionId) {
+          tableSessionIdRef.current = snapshot.tableSessionId;
+          setTableSessionId(snapshot.tableSessionId);
+        }
+        setHasBillableItems(Boolean(snapshot.hasBillableItems));
+        setTableSessionOpen(Boolean(snapshot.tableSessionOpen));
+      } catch { /* Realtime remains the instant path; the next poll retries. */ }
+      finally {
+        if (requestTimer) clearTimeout(requestTimer);
+        requestTimer = null;
+        if (activeController === controller) activeController = null;
+        inFlight = false;
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void poll();
+    };
+    void poll();
+    const interval = setInterval(() => void poll(), 5000);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+      if (requestTimer) clearTimeout(requestTimer);
+      activeController?.abort();
+    };
+  }, [orderNumber, params.slug, params.qrToken, status]);
+
   function fmt(d: Date | null) {
     return d?.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) ?? "—";
   }
