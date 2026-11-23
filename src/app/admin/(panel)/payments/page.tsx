@@ -99,7 +99,7 @@ export default function PaymentsPage() {
   );
 
   useEffect(() => {
-    fetchBills(1);
+    fetchBills(page);
   }, [fetchBills]);
 
   useEffect(() => {
@@ -247,7 +247,7 @@ export default function PaymentsPage() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => fetchBills(1, true)}
+              onClick={() => fetchBills(page, true)}
               className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
@@ -304,23 +304,23 @@ export default function PaymentsPage() {
               type="text"
               placeholder="Search by Bill #, table, or guest..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               className="w-full bg-gray-50 text-xs pl-9 pr-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
           </div>
 
           <div className="flex items-center gap-1.5 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-            {["all", "CASH", "UPI", "CARD"].map((m) => (
+            {["all", "CASH", "UPI", "CARD", "OTHER"].map((m) => (
               <button
                 key={m}
-                onClick={() => setMethodFilter(m)}
+                onClick={() => { setMethodFilter(m); setPage(1); }}
                 className={`text-xs px-3.5 py-2 rounded-xl font-bold whitespace-nowrap transition-all ${
                   methodFilter === m
                     ? "bg-[#132A1E] text-white shadow-xs"
                     : "bg-gray-100 hover:bg-gray-200 text-gray-600"
                 }`}
               >
-                {m === "all" ? "All Methods" : m}
+                {m === "all" ? "All Methods" : m === "OTHER" ? "Other" : m}
               </button>
             ))}
           </div>
@@ -451,7 +451,6 @@ export default function PaymentsPage() {
                   onClick={() => {
                     const prev = Math.max(1, page - 1);
                     setPage(prev);
-                    fetchBills(prev);
                   }}
                   className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40 transition-all"
                 >
@@ -462,7 +461,6 @@ export default function PaymentsPage() {
                   onClick={() => {
                     const next = Math.min(totalPages, page + 1);
                     setPage(next);
-                    fetchBills(next);
                   }}
                   className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40 transition-all"
                 >

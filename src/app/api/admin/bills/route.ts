@@ -19,12 +19,16 @@ export async function GET(req: Request) {
     const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10));
     const limit = Math.max(1, parseInt(url.searchParams.get("limit") ?? "10", 10));
     const search = (url.searchParams.get("search") ?? "").trim();
-    const paymentMethod = url.searchParams.get("paymentMethod") ?? "all";
+    const paymentMethod = (url.searchParams.get("paymentMethod") ?? "all").trim().toUpperCase();
     const exportAll = url.searchParams.get("export") === "true";
     const analyticsView = url.searchParams.get("analytics") === "true";
+    const supportedPaymentMethods = new Set(["CASH", "UPI", "CARD", "OTHER"]);
+    if (paymentMethod !== "ALL" && !supportedPaymentMethods.has(paymentMethod)) {
+      return Response.json({ error: "Choose a supported payment method." }, { status: 400 });
+    }
     if (analyticsView && role !== "OWNER") return Response.json({ error: "Forbidden" }, { status: 403 });
 
-    const whereClause: any = { restaurantId };
+    const whereClause: any = { restaurantId, paymentStatus: "PAID" };
 
     if (search) {
       const searchNum = parseInt(search, 10);
@@ -36,8 +40,8 @@ export async function GET(req: Request) {
       ];
     }
 
-    if (paymentMethod && paymentMethod !== "all") {
-      whereClause.paymentMethod = paymentMethod.toUpperCase();
+    if (paymentMethod !== "ALL") {
+      whereClause.paymentMethod = paymentMethod;
     }
     if (exportAll || analyticsView) {
       const from = url.searchParams.get("from");
@@ -60,19 +64,25 @@ export async function GET(req: Request) {
         by: ["paymentMethod"],
         where: whereClause,
         _sum: { totalCents: true, taxCents: true },
+        _count: { _all: true },
       });
       const paidTaxCents = rows.reduce((sum, row) => sum + (row._sum.taxCents ?? 0), 0);
+      const paidRevenueCents = rows.reduce((sum, row) => sum + (row._sum.totalCents ?? 0), 0);
+      const paidBillCount = rows.reduce((sum, row) => sum + row._count._all, 0);
       const paidOnlineCents = rows
         .filter((row) => !["CASH", "PAY_AT_RESTAURANT"].includes(row.paymentMethod))
         .reduce((sum, row) => sum + (row._sum.totalCents ?? 0), 0);
-      return Response.json({ analytics: { paidTaxCents, paidOnlineCents } }, {
+      return Response.json({ analytics: { paidTaxCents, paidOnlineCents, paidRevenueCents, paidBillCount } }, {
         headers: { "Cache-Control": "private, no-store" },
       });
     }
 
     const totalBills = await db.bill.count({ where: whereClause });
+    const revenueWhere = exportAll
+      ? whereClause
+      : { restaurantId, paymentStatus: "PAID", ...(whereClause.paymentMethod ? { paymentMethod: whereClause.paymentMethod } : {}) };
     const totalRevenueAgg = await db.bill.aggregate({
-      where: exportAll ? { ...whereClause, paymentStatus: "PAID" } : { restaurantId, paymentStatus: "PAID" },
+      where: revenueWhere,
       _sum: { totalCents: true },
     });
     const totalRevenueCents = totalRevenueAgg._sum.totalCents ?? 0;

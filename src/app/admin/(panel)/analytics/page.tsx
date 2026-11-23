@@ -30,15 +30,17 @@ export default function AnalyticsPage() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
-  const [billMetrics, setBillMetrics] = useState({ paidTaxCents: 0, paidOnlineCents: 0 });
+  const [billMetrics, setBillMetrics] = useState({ paidTaxCents: 0, paidRevenueCents: 0, paidBillCount: 0 });
+  const [paymentMethod, setPaymentMethod] = useState("all");
   const [from, setFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 29); return dateInputValue(d); });
   const [to, setTo] = useState(() => dateInputValue(new Date()));
 
   useEffect(() => {
+    setLoading(true);
     Promise.all([
       cachedJson<{ role?: string }>("admin:/api/admin/me", "/api/admin/me"),
       cachedJson<{ analytics?: AnalyticsData }>(`admin:analytics-summary-v2:${from}:${to}`, `/api/admin/orders?view=analytics&from=${from}&to=${to}`),
-      cachedJson<{ analytics?: typeof billMetrics }>(`admin:analytics-bill-summary-v2:${from}:${to}`, `/api/admin/bills?analytics=true&from=${from}&to=${to}`),
+      cachedJson<{ analytics?: typeof billMetrics }>(`admin:analytics-bill-summary-v3:${from}:${to}:${paymentMethod}`, `/api/admin/bills?analytics=true&from=${from}&to=${to}&paymentMethod=${encodeURIComponent(paymentMethod)}`, { ttlMs: 30_000 }),
     ])
       .then(([me, orderData, billData]) => {
         if (me.data.role === "STAFF") {
@@ -46,11 +48,11 @@ export default function AnalyticsPage() {
           return;
         }
         setAnalytics(orderData.data.analytics ?? null);
-        setBillMetrics(billData.data.analytics ?? { paidTaxCents: 0, paidOnlineCents: 0 });
+        setBillMetrics(billData.data.analytics ?? { paidTaxCents: 0, paidRevenueCents: 0, paidBillCount: 0 });
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [from, to]);
+  }, [from, to, paymentMethod]);
 
   const topItems = analytics?.topItems ?? [];
 
@@ -131,16 +133,17 @@ export default function AnalyticsPage() {
         </div>
       ) : (
         <>
-          <section className="card grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
+          <section className="card grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="text-xs font-semibold text-slate-600">From date<input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="input mt-1 w-full" /></label>
             <label className="text-xs font-semibold text-slate-600">To date<input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="input mt-1 w-full" /></label>
+            <label className="text-xs font-semibold text-slate-600">Payment method · settled bills<select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="input mt-1 w-full"><option value="all">All methods</option><option value="CASH">Cash</option><option value="UPI">UPI / QR</option><option value="CARD">Card</option><option value="OTHER">Other</option></select></label>
           </section>
           {/* Key Metrics */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="card p-4 border border-slate-200/80">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Total Revenue</span>
               <p className="text-2xl font-bold text-slate-900 mt-1">{formatRupees(totalRevenue)}</p>
-              <p className="text-[11px] text-emerald-600 font-semibold mt-1">Live settled & active</p>
+              <p className="text-[11px] text-emerald-600 font-semibold mt-1">Across orders in the selected dates</p>
             </div>
             <div className="card p-4 border border-slate-200/80">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Total Orders</span>
@@ -162,9 +165,14 @@ export default function AnalyticsPage() {
               </p>
             </div>
             <div className="card p-4 border border-slate-200/80">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Paid Online</span>
-              <p className="text-2xl font-bold text-slate-900 mt-1">{formatRupees(billMetrics.paidOnlineCents)}</p>
-              <p className="text-[11px] text-slate-400 mt-1">Paid bills in selected range</p>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Settled Bill Revenue</span>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{formatRupees(billMetrics.paidRevenueCents)}</p>
+              <p className="text-[11px] text-slate-400 mt-1">Paid bills · {paymentMethod === "all" ? "all methods" : paymentMethod}</p>
+            </div>
+            <div className="card p-4 border border-slate-200/80">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Settled Bills</span>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{billMetrics.paidBillCount}</p>
+              <p className="text-[11px] text-slate-400 mt-1">Matching selected method and dates</p>
             </div>
             <div className="card p-4 border border-slate-200/80">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Known Customers</span>
