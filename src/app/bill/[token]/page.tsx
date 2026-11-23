@@ -14,7 +14,7 @@ const money = (value: number) => `₹${(value / 100).toLocaleString("en-IN", { m
 export default async function DigitalBillPage({ params }: { params: { token: string } }) {
   const bill = await db.bill.findUnique({
     where: { shareToken: params.token },
-    include: { restaurant: { select: { name: true, contactPhone: true, location: true, logoUrl: true, upiPaymentId: true } } },
+    include: { restaurant: { select: { name: true, contactPhone: true, location: true, gstin: true, logoUrl: true, upiPaymentId: true } } },
   });
   if (!bill) notFound();
 
@@ -63,6 +63,7 @@ export default async function DigitalBillPage({ params }: { params: { token: str
       name: bill.restaurant.name,
       contactPhone: bill.restaurant.contactPhone,
       location: bill.restaurant.location,
+      gstin: bill.restaurant.gstin,
       upiPaymentId: bill.restaurant.upiPaymentId,
     },
   };
@@ -85,13 +86,18 @@ export default async function DigitalBillPage({ params }: { params: { token: str
             <div className={bill.customerName ? "text-right" : "col-span-2"}><p className="text-xs text-stone-500">Payment</p><p className="font-semibold">{bill.paymentMethod} · {bill.paymentStatus}</p></div>
           </div>
 
+          {(bill.restaurant.location || bill.restaurant.gstin) && <div className="-mt-2 rounded-xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm">
+            {bill.restaurant.location && <p className="text-stone-700"><span className="font-semibold text-stone-900">Location: </span>{bill.restaurant.location}</p>}
+            {bill.restaurant.gstin && <p className="mt-1 text-stone-700"><span className="font-semibold text-stone-900">GSTIN: </span>{bill.restaurant.gstin}</p>}
+          </div>}
+
           <div className="overflow-hidden rounded-xl border border-stone-200">
             <div className="grid grid-cols-[1fr_auto_auto] gap-3 bg-stone-50 px-3 py-2 text-[11px] font-bold uppercase text-stone-500">
               <span>Item</span><span>Qty</span><span className="text-right">Amount</span>
             </div>
             {items.map((item, index) => (
               <div key={`${item.name}-${index}`} className="grid grid-cols-[1fr_auto_auto] gap-3 border-t border-stone-100 px-3 py-3 text-sm">
-                <div className="min-w-0"><p className="font-semibold text-stone-900">{item.name}</p><p className="text-xs text-stone-500">{money(item.unitPrice)} each</p></div>
+                <div className="min-w-0"><p className="font-semibold text-stone-900">{capitalizeInitials(item.name)}</p><p className="text-xs text-stone-500">{money(item.unitPrice)} each</p></div>
                 <span>{item.quantity}</span><span className="text-right font-medium">{money(item.subtotal)}</span>
               </div>
             ))}

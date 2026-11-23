@@ -21,6 +21,7 @@ export default function RestaurantProfilePage() {
   const [cuisine, setCuisine] = useState("Multi Cuisine");
   const [about, setAbout] = useState("");
   const [location, setLocation] = useState("");
+  const [gstin, setGstin] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
@@ -47,6 +48,7 @@ export default function RestaurantProfilePage() {
           setName(r.name || "");
           setOwnerName(r.ownerName || "");
           setLocation(r.location || "");
+          setGstin(r.gstin || "");
           setPhone(r.contactPhone || "");
           setEmail(r.contactEmail || "");
           setLogoUrl(r.logoUrl || "");
@@ -78,6 +80,7 @@ export default function RestaurantProfilePage() {
           contactEmail: email.trim() || null,
           contactPhone: phone.trim() || null,
           location: location.trim() || null,
+          gstin: gstin.trim().toUpperCase() || null,
           logoUrl: logoUrl || null,
           openNow,
         }),
@@ -317,6 +320,11 @@ export default function RestaurantProfilePage() {
                       placeholder="e.g. MG Road, Indiranagar, Bengaluru"
                       onChange={(e) => setLocation(e.target.value)}
                     />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-bold text-slate-700 mb-1 block">GSTIN (optional)</label>
+                    <input className="input uppercase" value={gstin} maxLength={20} placeholder="e.g. 29ABCDE1234F1Z5" onChange={(e) => setGstin(e.target.value.toUpperCase())} />
+                    <p className="mt-1 text-[11px] text-slate-500">Shown on bills when provided.</p>
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-700 mb-1 block">

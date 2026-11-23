@@ -72,6 +72,7 @@ model Restaurant {
   contactPhone     String?
   upiPaymentId String?
   location         String?
+  gstin            String?
   plan             String?  @default("Pro")
   nextOrderNumber  Int      @default(1)
   createdAt        DateTime @default(now())

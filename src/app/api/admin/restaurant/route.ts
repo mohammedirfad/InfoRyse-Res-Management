@@ -14,6 +14,7 @@ const PatchSchema = z.object({
   contactEmail:    z.string().trim().email().optional().nullable(),
   contactPhone:    z.string().trim().max(25).optional().nullable(),
   location:        z.string().trim().max(200).optional().nullable(),
+  gstin:           z.string().trim().max(20).optional().nullable(),
   logoUrl:         z.string().optional().nullable(),
   openNow:         z.boolean().optional(),
   taxName:         z.string().max(30).optional(),

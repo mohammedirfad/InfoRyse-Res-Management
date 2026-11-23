@@ -1,3 +1,5 @@
+import { capitalizeInitials } from "@/lib/nameFormat";
+
 export type BillPdfData = {
   billNumber: number;
   tableLabel: string;
@@ -17,7 +19,7 @@ export type BillPdfData = {
   createdAt: string;
   paidAt: string | null;
   itemsJson: string;
-  restaurant: { name: string; contactPhone: string | null; location: string | null; upiPaymentId: string | null };
+  restaurant: { name: string; contactPhone: string | null; location: string | null; gstin: string | null; upiPaymentId: string | null };
 };
 
 export type BillQrMatrix = { size: number; data: number[] };
@@ -103,18 +105,14 @@ export function createBillPdfBytes(bill: BillPdfData, billQr: BillQrMatrix, upiQ
     pages.push(commands);
     y = 790;
     if (!continued) {
-      addText(printable(bill.restaurant.name), 70, y, 22, true, "0.07 0.16 0.11");
+      commands.push("0.07 0.16 0.11 rg 0 742 595 100 re f");
+      addText(printable(capitalizeInitials(bill.restaurant.name)), 46, y, 22, true, "1 1 1");
       y -= 19;
       if (bill.restaurant.contactPhone) {
-        addText(printable(bill.restaurant.contactPhone), 46, y, 9, false, "0.38 0.42 0.40");
+        addText(printable(bill.restaurant.contactPhone), 46, y, 9, false, "0.85 0.90 0.86");
         y -= 13;
       }
-      if (bill.restaurant.location) {
-        addText(printable(bill.restaurant.location), 46, y, 9, false, "0.38 0.42 0.40");
-        y -= 12;
-      }
-      line(y, "0.07 0.16 0.11");
-      y -= 24;
+      y = 718;
       addText(`BILL #${bill.billNumber}`, left, y, 13, true);
       addText(`TABLE ${printable(bill.tableLabel)}`, 390, y, 11, true);
       y -= 18;
@@ -122,6 +120,15 @@ export function createBillPdfBytes(bill: BillPdfData, billQr: BillQrMatrix, upiQ
       addText(`Date: ${dateText}`, left, y, 9, false, "0.28 0.34 0.30");
       addText(`${printable(bill.paymentStatus)} | ${printable(bill.paymentMethod)}`, 350, y, 9, false, "0.28 0.34 0.30");
       y -= 18;
+      const addressLines = bill.restaurant.location ? wrap(`Location: ${printable(bill.restaurant.location)}`, 90) : [];
+      for (const addressLine of addressLines) {
+        addText(addressLine, left, y, 9, false, "0.28 0.34 0.30");
+        y -= 12;
+      }
+      if (bill.restaurant.gstin) {
+        addText(`GSTIN: ${printable(bill.restaurant.gstin)}`, left, y, 9, false, "0.28 0.34 0.30");
+        y -= 14;
+      }
       if (bill.customerName) {
         addText(`Customer: ${printable(bill.customerName)}`, left, y, 9, false, "0.28 0.34 0.30");
         y -= 14;
@@ -143,7 +150,7 @@ export function createBillPdfBytes(bill: BillPdfData, billQr: BillQrMatrix, upiQ
   } catch { /* Keep an empty item list if a legacy bill has invalid JSON. */ }
 
   for (const item of items) {
-    const nameLines = wrap(printable(item.name) || "Item", 43);
+    const nameLines = wrap(printable(capitalizeInitials(String(item.name ?? ""))) || "Item", 43);
     const rowHeight = nameLines.length * 13 + 22;
     if (y - rowHeight < 110) startPage(true);
     nameLines.forEach((part, index) => addText(part, left, y - index * 12, 10));
